@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/card_models.dart';
 import '../game/faction_colors.dart';
+import 'cost_stars.dart';
 
 /// Half / bottom sheet Detail — does not full-screen block the board.
 Future<void> showCardDetailSheet(BuildContext context, CardFace card) {
@@ -68,10 +69,16 @@ Future<void> showCardDetailSheet(BuildContext context, CardFace card) {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            Text(
-                              'COST ${card.cost} · ${card.troopLabel}',
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
+                            Row(
+                              children: [
+                                CostStars(cost: card.cost, size: 14),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '${card.cost} · ${card.troopLabel}',
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14),
+                                ),
+                              ],
                             ),
                             Text(
                               '武 ${card.force}　知 ${card.intel}',
