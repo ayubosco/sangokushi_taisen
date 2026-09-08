@@ -2,6 +2,7 @@
 class FxWindows {
   static const double chargeAuraVisibleC = 1.0;
   static const double interceptTurnAfterAuraC = 1.0;
+  static const double interceptHitFlashC = 0.3;
   static const double bowStopBeforeShotC = 1.0;
   static const double strategyFxMaxC = 1.0;
 

@@ -52,12 +52,22 @@ class _MatchShellState extends State<MatchShell> {
     super.initState();
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
       _game.spawnCard(zhao);
       _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.id == 'caocao'));
+      // A-window field demos: spear + bow telegraphs
+      try {
+        _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.troop == TroopType.spear));
+      } catch (_) {}
+      try {
+        _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.troop == TroopType.bow));
+      } catch (_) {}
       _game.selectedIndex = 0;
       setState(() {});
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      await showCardDetailSheet(context, zhao);
     });
   }
 

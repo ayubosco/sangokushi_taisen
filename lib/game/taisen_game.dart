@@ -9,6 +9,8 @@ import 'c_clock.dart';
 import 'faction_colors.dart';
 import 'fx_windows.dart';
 
+enum AWindowKind { charge, intercept, bow, stratagem }
+
 /// Offline 1v1 CPU stub: top 1/3 watch (read-only), bottom 2/3 flat field.
 class TaisenGame extends FlameGame {
   final CClock clock = CClock();
@@ -18,8 +20,18 @@ class TaisenGame extends FlameGame {
   final List<CardFace> field = [];
   int? selectedIndex;
 
-  String _fxLabel = '';
-  double _fxLeft = 0;
+  /// Enemy-watch telegraph demo cycle (no combat numbers).
+  AWindowKind watchKind = AWindowKind.charge;
+  double _watchPhaseLeft = FxWindows.toSeconds(FxWindows.chargeAuraVisibleC);
+  double _pulse = 0;
+
+  /// Stratagem burst on field (≤1C, non-blocking).
+  double _stratLeft = 0;
+  Offset? _stratAt;
+
+  /// Optional intercept hit flash on a field token.
+  int? _interceptFlashIndex;
+  double _interceptFlashLeft = 0;
 
   void Function(CardFace card)? onRequestDetail;
 
@@ -37,11 +49,36 @@ class TaisenGame extends FlameGame {
   void update(double dt) {
     super.update(dt);
     clock.update(dt);
-    if (_fxLeft > 0) {
-      _fxLeft -= dt;
-      if (_fxLeft <= 0) {
-        _fxLeft = 0;
-        _fxLabel = '';
+    _pulse += dt;
+
+    _watchPhaseLeft -= dt;
+    if (_watchPhaseLeft <= 0) {
+      watchKind = switch (watchKind) {
+        AWindowKind.charge => AWindowKind.intercept,
+        AWindowKind.intercept => AWindowKind.bow,
+        AWindowKind.bow => AWindowKind.charge,
+        AWindowKind.stratagem => AWindowKind.charge,
+      };
+      _watchPhaseLeft = FxWindows.toSeconds(switch (watchKind) {
+        AWindowKind.charge => FxWindows.chargeAuraVisibleC,
+        AWindowKind.intercept => FxWindows.interceptTurnAfterAuraC,
+        AWindowKind.bow => FxWindows.bowStopBeforeShotC,
+        AWindowKind.stratagem => FxWindows.strategyFxMaxC,
+      });
+    }
+
+    if (_stratLeft > 0) {
+      _stratLeft -= dt;
+      if (_stratLeft <= 0) {
+        _stratLeft = 0;
+        _stratAt = null;
+      }
+    }
+    if (_interceptFlashLeft > 0) {
+      _interceptFlashLeft -= dt;
+      if (_interceptFlashLeft <= 0) {
+        _interceptFlashLeft = 0;
+        _interceptFlashIndex = null;
       }
     }
   }
@@ -56,6 +93,7 @@ class TaisenGame extends FlameGame {
 
     canvas.drawRect(Rect.fromLTWH(0, 0, w, watchH), Paint()..color = const Color(0xFF1A1A1A));
     _drawText(canvas, '敵軍監視（只讀）', Offset(16, 24), FactionColors.gold, 16);
+    _drawWatchTelegraph(canvas, Rect.fromLTWH(0, 0, w, watchH));
 
     canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - watchH), Paint()..color = const Color(0xFF121212));
     canvas.drawLine(
@@ -80,10 +118,13 @@ class TaisenGame extends FlameGame {
       final cx = 48.0 + i * (tokenR * 2 + 20);
       final cy = fieldTop + 110;
       final selected = selectedIndex == i;
+      final center = Offset(cx, cy);
 
-      canvas.drawCircle(Offset(cx, cy), tokenR, Paint()..color = card.factionColor);
+      _drawFieldTelegraph(canvas, center, card, i);
+
+      canvas.drawCircle(center, tokenR, Paint()..color = card.factionColor);
       canvas.drawCircle(
-        Offset(cx, cy),
+        center,
         tokenR,
         Paint()
           ..color = selected ? FactionColors.gold : Colors.white24
@@ -96,14 +137,161 @@ class TaisenGame extends FlameGame {
       _drawText(canvas, card.nameZh, Offset(cx - 18, cy + tokenR + 16), FactionColors.gold, 11);
     }
 
-    if (_fxLabel.isNotEmpty) {
-      final banner = Rect.fromLTWH(w * 0.15, h - 120, w * 0.7, 36);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(banner, const Radius.circular(8)),
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.85),
-      );
-      _drawText(canvas, _fxLabel, Offset(banner.left + 12, banner.top + 8), FactionColors.lacquer, 14);
+    if (_stratLeft > 0 && _stratAt != null) {
+      _drawStratagemBurst(canvas, _stratAt!, _stratLeft / FxWindows.toSeconds(FxWindows.strategyFxMaxC));
     }
+  }
+
+  void _drawWatchTelegraph(Canvas canvas, Rect band) {
+    final c = Offset(band.center.dx, band.top + band.height * 0.58);
+    final label = switch (watchKind) {
+      AWindowKind.charge => '突撃オーラ ≥1C',
+      AWindowKind.intercept => '迎擊 槍尖常駐',
+      AWindowKind.bow => '弓停射 ~1C',
+      AWindowKind.stratagem => '計略',
+    };
+    _drawText(canvas, label, Offset(16, band.top + 48), const Color(0xFF80DEEA), 13);
+
+    switch (watchKind) {
+      case AWindowKind.charge:
+        _drawChargeRings(canvas, c, 42, const Color(0xFF00E5FF));
+        break;
+      case AWindowKind.intercept:
+        _drawInterceptStance(canvas, c, 50, const Color(0xFF26C6DA));
+        break;
+      case AWindowKind.bow:
+        _drawBowWindup(canvas, c, band.right - 40, const Color(0xFFFFD54F));
+        break;
+      case AWindowKind.stratagem:
+        break;
+    }
+
+    // Soft enemy token silhouette under FX
+    canvas.drawCircle(c, 22, Paint()..color = FactionColors.wei.withValues(alpha: 0.55));
+  }
+
+  void _drawFieldTelegraph(Canvas canvas, Offset c, CardFace card, int index) {
+    // Flat, quieter versions of watch FX by troop
+    switch (card.troop) {
+      case TroopType.cavalry:
+        _drawChargeRings(canvas, c, 36, const Color(0xFF00E5FF).withValues(alpha: 0.55));
+        break;
+      case TroopType.spear:
+        _drawInterceptStance(canvas, c, 40, const Color(0xFF26C6DA).withValues(alpha: 0.5));
+        if (_interceptFlashIndex == index && _interceptFlashLeft > 0) {
+          _drawText(canvas, '迎擊', Offset(c.dx - 16, c.dy - 48), const Color(0xFF80DEEA), 12);
+        }
+        break;
+      case TroopType.bow:
+        _drawBowWindup(canvas, c, c.dx + 70, FactionColors.gold.withValues(alpha: 0.7));
+        break;
+      default:
+        break;
+    }
+  }
+
+  void _drawChargeRings(Canvas canvas, Offset c, double baseR, Color color) {
+    final t = (_pulse % 1.2) / 1.2;
+    for (var i = 0; i < 3; i++) {
+      final r = baseR + i * 10 + t * 14;
+      canvas.drawCircle(
+        c,
+        r,
+        Paint()
+          ..color = color.withValues(alpha: 0.55 - i * 0.12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2,
+      );
+    }
+    for (var i = 0; i < 8; i++) {
+      final a = i * math.pi / 4 + _pulse;
+      canvas.drawLine(
+        Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
+        Offset(c.dx + math.cos(a) * (baseR + 18), c.dy + math.sin(a) * (baseR + 18)),
+        Paint()
+          ..color = color.withValues(alpha: 0.35)
+          ..strokeWidth = 1.4,
+      );
+    }
+  }
+
+  void _drawInterceptStance(Canvas canvas, Offset c, double rx, Color color) {
+    final oval = Rect.fromCenter(center: c, width: rx * 2.2, height: rx * 1.1);
+    canvas.drawOval(
+      oval,
+      Paint()
+        ..color = color.withValues(alpha: 0.35)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    final wedge = Path()
+      ..moveTo(c.dx, c.dy - 4)
+      ..lineTo(c.dx - 18, c.dy + 22)
+      ..lineTo(c.dx + 18, c.dy + 22)
+      ..close();
+    canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.45));
+    // spear tip flash
+    canvas.drawCircle(Offset(c.dx, c.dy - 26), 5, Paint()..color = Colors.white.withValues(alpha: 0.9));
+    canvas.drawLine(
+      Offset(c.dx, c.dy + 16),
+      Offset(c.dx, c.dy - 28),
+      Paint()
+        ..color = color
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawBowWindup(Canvas canvas, Offset c, double aimX, Color color) {
+    canvas.drawCircle(c, 26, Paint()..color = color.withValues(alpha: 0.18));
+    canvas.drawCircle(
+      c,
+      26,
+      Paint()
+        ..color = color.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+    // light column
+    canvas.drawRect(
+      Rect.fromCenter(center: Offset(c.dx, c.dy - 30), width: 10, height: 50),
+      Paint()..color = color.withValues(alpha: 0.22),
+    );
+    final y = c.dy;
+    final dash = Paint()
+      ..color = color
+      ..strokeWidth = 1.6;
+    for (var x = c.dx + 20; x < aimX; x += 10) {
+      canvas.drawLine(Offset(x, y), Offset(x + 5, y), dash);
+    }
+    canvas.drawCircle(Offset(aimX, y), 8, Paint()..color = color.withValues(alpha: 0.35));
+    canvas.drawCircle(
+      Offset(aimX, y),
+      8,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {
+    final alpha = (life01.clamp(0.0, 1.0)) * 0.55;
+    final cone = Path()
+      ..moveTo(at.dx, at.dy)
+      ..lineTo(at.dx + 90, at.dy - 40)
+      ..lineTo(at.dx + 90, at.dy + 40)
+      ..close();
+    canvas.drawPath(cone, Paint()..color = FactionColors.gold.withValues(alpha: alpha));
+    canvas.drawCircle(
+      at,
+      28 + (1 - life01) * 20,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: alpha * 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    _drawText(canvas, '計略 ≤1C', Offset(at.dx - 10, at.dy - 52), FactionColors.gold.withValues(alpha: 0.9), 12);
   }
 
   bool spawnCard(CardFace card) {
@@ -114,6 +302,9 @@ class TaisenGame extends FlameGame {
 
   void selectOrDetailAt(Offset local) {
     final watchH = size.y / 3;
+    // Watch band is read-only — ignore taps in top 1/3 for selection
+    if (local.dy < watchH) return;
+
     const tokenR = 28.0;
     for (var i = 0; i < field.length; i++) {
       final cx = 48.0 + i * (tokenR * 2 + 20);
@@ -132,16 +323,29 @@ class TaisenGame extends FlameGame {
     selectedIndex = null;
   }
 
+  /// Stratagem FX ≤1C on field; does not cover bottom bar (drawn inside game only).
   void triggerStrategyFx() {
-    _fxLabel = '計略';
-    _fxLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
+    final watchH = size.y / 3;
+    if (selectedIndex != null && selectedIndex! < field.length) {
+      final i = selectedIndex!;
+      const tokenR = 28.0;
+      _stratAt = Offset(48.0 + i * (tokenR * 2 + 20), watchH + 110);
+      // Spearmen get a short intercept hit flash when strategy demos on them
+      if (field[i].troop == TroopType.spear) {
+        _interceptFlashIndex = i;
+        _interceptFlashLeft = FxWindows.toSeconds(FxWindows.interceptHitFlashC);
+      }
+    } else {
+      _stratAt = Offset(size.x * 0.45, watchH + 130);
+    }
+    _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
   }
 
   void _drawCostStars(Canvas canvas, Offset origin, double cost) {
     var rem = cost.clamp(0, 3);
     for (var i = 0; i < 3; i++) {
       final fill = rem >= 1 ? 1.0 : (rem >= 0.5 ? 0.5 : 0.0);
-      rem = rem >= 1 ? rem - 1 : 0;
+      rem = rem >= 1 ? rem - 1 : (rem >= 0.5 ? rem - 0.5 : 0);
       _drawStar(canvas, Offset(origin.dx + i * 12.0, origin.dy), 5.5, fill);
     }
   }
@@ -166,17 +370,17 @@ class TaisenGame extends FlameGame {
     if (fill >= 1) {
       canvas.drawPath(path, Paint()..color = FactionColors.gold);
     } else if (fill >= 0.5) {
-      canvas.save();
-      canvas.clipRect(Rect.fromLTWH(c.dx - r, c.dy - r, r, r * 2));
-      canvas.drawPath(path, Paint()..color = FactionColors.gold);
-      canvas.restore();
       canvas.drawPath(
         path,
         Paint()
           ..color = Colors.white70
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1,
+          ..strokeWidth = 1.2,
       );
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(c.dx - r - 0.5, c.dy - r - 0.5, c.dx, c.dy + r + 0.5));
+      canvas.drawPath(path, Paint()..color = FactionColors.gold);
+      canvas.restore();
     } else {
       canvas.drawPath(
         path,
