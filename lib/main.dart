@@ -2,7 +2,6 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'game/c_clock.dart';
 import 'game/faction_colors.dart';
 import 'game/taisen_game.dart';
 import 'data/card_models.dart';
@@ -53,6 +52,12 @@ class _MatchShellState extends State<MatchShell> {
     super.initState();
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun'));
+      _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.id == 'caocao'));
+      _game.selectedIndex = 0;
+      setState(() {});
+    });
   }
 
   @override
@@ -62,18 +67,6 @@ class _MatchShellState extends State<MatchShell> {
         child: Column(
           children: [
             _Hud(game: _game),
-            SizedBox(
-              height: 44,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Image.asset(
-                  'assets/icons/cost6-weapon-icons.png',
-                  fit: BoxFit.contain,
-                  alignment: Alignment.centerLeft,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ),
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -85,25 +78,24 @@ class _MatchShellState extends State<MatchShell> {
               ),
             ),
             _BottomBar(
+              onReturnCity: () {
+                // stub: clear selection / future 歸城
+                _game.selectedIndex = null;
+                setState(() {});
+              },
               onSpawn: () {
                 final card = Cost6Roster.all[_spawnCursor % Cost6Roster.all.length];
                 _spawnCursor++;
                 if (_game.spawnCard(card)) setState(() {});
               },
+              onDetail: () {
+                final idx = _game.selectedIndex;
+                if (idx == null || idx >= _game.field.length) return;
+                showCardDetailSheet(context, _game.field[idx]);
+              },
               onStrategy: () {
                 _game.triggerStrategyFx();
                 setState(() {});
-              },
-              onCharge: () {
-                _game.triggerChargeAuraDemo();
-                setState(() {});
-              },
-              onDetail: () {
-                final idx = _game.selectedIndex;
-                final card = (idx != null && idx < _game.field.length)
-                    ? _game.field[idx]
-                    : Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
-                showCardDetailSheet(context, card);
               },
             ),
           ],
@@ -151,11 +143,6 @@ class _Hud extends StatelessWidget {
                   fontSize: 20,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '1C=${CClock.secondsPerC}s',
-                style: const TextStyle(color: Colors.white54, fontSize: 11),
-              ),
             ],
           ),
         );
@@ -166,20 +153,20 @@ class _Hud extends StatelessWidget {
 
 class _BottomBar extends StatelessWidget {
   const _BottomBar({
+    required this.onReturnCity,
     required this.onSpawn,
-    required this.onStrategy,
-    required this.onCharge,
     required this.onDetail,
+    required this.onStrategy,
   });
 
+  final VoidCallback onReturnCity;
   final VoidCallback onSpawn;
-  final VoidCallback onStrategy;
-  final VoidCallback onCharge;
   final VoidCallback onDetail;
+  final VoidCallback onStrategy;
 
   @override
   Widget build(BuildContext context) {
-    // ≥12mm ≈ 48 logical px minimum for 計略 / 歸城
+    // 計略／歸城 ≥12mm ≈ 48 logical px
     const minTap = 48.0;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
@@ -187,44 +174,41 @@ class _BottomBar extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: minTap * 1.6,
+            width: minTap * 1.8,
+            height: minTap,
+            child: OutlinedButton(
+              onPressed: onReturnCity,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: FactionColors.gold,
+                side: const BorderSide(color: FactionColors.gold),
+              ),
+              child: const Text('歸城'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: minTap * 1.5,
             height: minTap,
             child: OutlinedButton(
               onPressed: onSpawn,
               style: OutlinedButton.styleFrom(
                 foregroundColor: FactionColors.gold,
-                side: BorderSide(color: FactionColors.gold),
+                side: const BorderSide(color: FactionColors.gold),
               ),
               child: const Text('出陣'),
             ),
           ),
           const SizedBox(width: 8),
           SizedBox(
-            width: minTap * 1.6,
+            width: minTap,
             height: minTap,
-            child: OutlinedButton(
-              onPressed: onCharge,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: FactionColors.wei,
-                side: BorderSide(color: FactionColors.wei),
-              ),
-              child: const Text('オーラ'),
+            child: IconButton(
+              onPressed: onDetail,
+              icon: const Icon(Icons.info_outline, color: FactionColors.gold),
+              tooltip: '詳',
             ),
           ),
           const Spacer(),
-          SizedBox(
-            width: minTap * 1.4,
-            height: minTap,
-            child: OutlinedButton(
-              onPressed: onDetail,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: FactionColors.gold,
-                side: const BorderSide(color: FactionColors.gold),
-              ),
-              child: const Text('詳'),
-            ),
-          ),
-          const SizedBox(width: 8),
           SizedBox(
             width: minTap * 1.8,
             height: minTap,

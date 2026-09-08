@@ -29,6 +29,7 @@ class TaisenGame extends FlameGame {
   Future<void> onLoad() async {
     await super.onLoad();
     camera.viewfinder.anchor = Anchor.topLeft;
+    clock.reset();
   }
 
   @override
@@ -55,13 +56,6 @@ class TaisenGame extends FlameGame {
     // Top 1/3 — enemy watch (read-only placeholder)
     canvas.drawRect(Rect.fromLTWH(0, 0, w, watchH), Paint()..color = const Color(0xFF1A1A1A));
     _drawText(canvas, '敵軍監視（只讀）', Offset(16, 24), FactionColors.gold, 16);
-    _drawText(
-      canvas,
-      'オーラ≥${FxWindows.chargeAuraVisibleC}C · 迎擊常駐 · 弓停~${FxWindows.bowStopBeforeShotC}C',
-      Offset(16, 52),
-      const Color(0xFFCCCCCC),
-      12,
-    );
 
     // Bottom 2/3 — flat field
     canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - watchH), Paint()..color = const Color(0xFF121212));
