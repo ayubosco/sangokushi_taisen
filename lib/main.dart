@@ -58,6 +58,18 @@ class _MatchShellState extends State<MatchShell> {
         child: Column(
           children: [
             _Hud(game: _game),
+            SizedBox(
+              height: 44,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Image.asset(
+                  'assets/icons/cost6-weapon-icons.png',
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
             Expanded(
               child: GameWidget(game: _game),
             ),
@@ -98,12 +110,17 @@ class _Hud extends StatelessWidget {
           color: FactionColors.lacquer,
           child: Row(
             children: [
-              Text(
-                '三國指大戰',
-                style: TextStyle(
-                  color: FactionColors.gold,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+              Image.asset(
+                'assets/brand/sangokushi-yubi-title-v2.png',
+                height: 28,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Text(
+                  '三國大戰',
+                  style: TextStyle(
+                    color: FactionColors.gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
               ),
               const Spacer(),
