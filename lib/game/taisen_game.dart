@@ -1,7 +1,8 @@
 import 'package:flame/components.dart';
 import 'package:flame/game.dart';
-import 'package:flutter/painting.dart';
+import 'package:flutter/material.dart';
 
+import '../data/card_models.dart';
 import 'c_clock.dart';
 import 'faction_colors.dart';
 import 'fx_windows.dart';
@@ -9,12 +10,17 @@ import 'fx_windows.dart';
 /// Offline 1v1 CPU stub: top 1/3 watch (read-only), bottom 2/3 flat field.
 class TaisenGame extends FlameGame {
   final CClock clock = CClock();
-  int fieldCount = 0;
   static const int fieldMax = 5;
   static const double costCap = 6;
 
+  final List<CardFace> field = [];
+  int? selectedIndex;
+
   String _fxLabel = '';
   double _fxLeft = 0;
+
+  /// Opened from Flutter overlay when a token is tapped twice / detail requested.
+  void Function(CardFace card)? onRequestDetail;
 
   @override
   Color backgroundColor() => FactionColors.lacquer;
@@ -47,8 +53,7 @@ class TaisenGame extends FlameGame {
     final fieldTop = watchH;
 
     // Top 1/3 — enemy watch (read-only placeholder)
-    final watchPaint = Paint()..color = const Color(0xFF1A1A1A);
-    canvas.drawRect(Rect.fromLTWH(0, 0, w, watchH), watchPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, watchH), Paint()..color = const Color(0xFF1A1A1A));
     _drawText(canvas, '敵軍監視（只讀）', Offset(16, 24), FactionColors.gold, 16);
     _drawText(
       canvas,
@@ -59,33 +64,66 @@ class TaisenGame extends FlameGame {
     );
 
     // Bottom 2/3 — flat field
-    final fieldPaint = Paint()..color = const Color(0xFF121212);
-    canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - watchH), fieldPaint);
-    final goldLine = Paint()
-      ..color = FactionColors.gold
-      ..strokeWidth = 2;
-    canvas.drawLine(Offset(0, fieldTop), Offset(w, fieldTop), goldLine);
+    canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - watchH), Paint()..color = const Color(0xFF121212));
+    canvas.drawLine(
+      Offset(0, fieldTop),
+      Offset(w, fieldTop),
+      Paint()
+        ..color = FactionColors.gold
+        ..strokeWidth = 2,
+    );
 
-    _drawText(canvas, '場即係盤 · Cost $costCap · 場上 $fieldCount/$fieldMax', Offset(16, fieldTop + 16), FactionColors.gold, 14);
-    _drawText(canvas, '1v1 CPU stub · 計略 FX ≤${FxWindows.strategyFxMaxC}C 唔擋盤', Offset(16, fieldTop + 40), const Color(0xFFAAAAAA), 12);
+    _drawText(
+      canvas,
+      '場即係盤 · Cost $costCap · 場上 ${field.length}/$fieldMax',
+      Offset(16, fieldTop + 12),
+      FactionColors.gold,
+      14,
+    );
 
-    // Token placeholders
-    for (var i = 0; i < fieldCount; i++) {
-      final cx = 40.0 + i * 56;
-      final cy = fieldTop + 100;
-      canvas.drawCircle(Offset(cx, cy), 22, Paint()..color = FactionColors.shu);
+    // Tokens: COST stars + troop + name (≥48dp hit via large disk)
+    const tokenR = 28.0; // ~56dp diameter
+    for (var i = 0; i < field.length; i++) {
+      final card = field[i];
+      final cx = 48.0 + i * (tokenR * 2 + 16);
+      final cy = fieldTop + 110;
+      final selected = selectedIndex == i;
+
+      canvas.drawCircle(Offset(cx, cy), tokenR, Paint()..color = card.factionColor);
       canvas.drawCircle(
         Offset(cx, cy),
-        22,
+        tokenR,
         Paint()
-          ..color = FactionColors.gold
+          ..color = selected ? FactionColors.gold : Colors.white24
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2,
+          ..strokeWidth = selected ? 4 : 2,
+      );
+
+      _drawText(
+        canvas,
+        card.troopLabel,
+        Offset(cx - 8, cy - 10),
+        Colors.white,
+        14,
+      );
+      _drawText(
+        canvas,
+        card.nameZh,
+        Offset(cx - 20, cy + tokenR + 4),
+        FactionColors.gold,
+        11,
+      );
+      // Cost as compact text under name (stars drawn in Flutter overlay for clarity)
+      _drawText(
+        canvas,
+        '★${card.cost}',
+        Offset(cx - 14, cy + tokenR + 18),
+        Colors.white70,
+        10,
       );
     }
 
     if (_fxLabel.isNotEmpty) {
-      // Short FX banner in bottom zone only — never covers full screen
       final banner = Rect.fromLTWH(w * 0.15, h - 120, w * 0.7, 36);
       canvas.drawRRect(
         RRect.fromRectAndRadius(banner, const Radius.circular(8)),
@@ -95,8 +133,30 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void spawnPlaceholderUnit() {
-    if (fieldCount < fieldMax) fieldCount++;
+  bool spawnCard(CardFace card) {
+    if (field.length >= fieldMax) return false;
+    field.add(card);
+    return true;
+  }
+
+  void selectOrDetailAt(Offset local) {
+    final watchH = size.y / 3;
+    const tokenR = 28.0;
+    for (var i = 0; i < field.length; i++) {
+      final cx = 48.0 + i * (tokenR * 2 + 16);
+      final cy = watchH + 110;
+      final dx = local.dx - cx;
+      final dy = local.dy - cy;
+      if (dx * dx + dy * dy <= (tokenR + 8) * (tokenR + 8)) {
+        if (selectedIndex == i) {
+          onRequestDetail?.call(field[i]);
+        } else {
+          selectedIndex = i;
+        }
+        return;
+      }
+    }
+    selectedIndex = null;
   }
 
   void triggerStrategyFx() {

@@ -46,11 +46,13 @@ class MatchShell extends StatefulWidget {
 
 class _MatchShellState extends State<MatchShell> {
   late final TaisenGame _game;
+  int _spawnCursor = 0;
 
   @override
   void initState() {
     super.initState();
     _game = TaisenGame();
+    _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
   }
 
   @override
@@ -73,12 +75,20 @@ class _MatchShellState extends State<MatchShell> {
               ),
             ),
             Expanded(
-              child: GameWidget(game: _game),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (d) {
+                  _game.selectOrDetailAt(d.localPosition);
+                  setState(() {});
+                },
+                child: GameWidget(game: _game),
+              ),
             ),
             _BottomBar(
               onSpawn: () {
-                _game.spawnPlaceholderUnit();
-                setState(() {});
+                final card = Cost6Roster.all[_spawnCursor % Cost6Roster.all.length];
+                _spawnCursor++;
+                if (_game.spawnCard(card)) setState(() {});
               },
               onStrategy: () {
                 _game.triggerStrategyFx();
@@ -89,8 +99,11 @@ class _MatchShellState extends State<MatchShell> {
                 setState(() {});
               },
               onDetail: () {
-                final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
-                showCardDetailSheet(context, zhao);
+                final idx = _game.selectedIndex;
+                final card = (idx != null && idx < _game.field.length)
+                    ? _game.field[idx]
+                    : Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
+                showCardDetailSheet(context, card);
               },
             ),
           ],
