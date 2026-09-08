@@ -67,7 +67,7 @@ class _MatchShellState extends State<MatchShell> {
       setState(() {});
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
-      await showCardDetailSheet(context, zhao);
+      // A-window verification: do not auto-open detail (blocks field FX)
     });
   }
 
