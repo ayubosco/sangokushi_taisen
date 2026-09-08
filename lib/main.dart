@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'game/c_clock.dart';
 import 'game/faction_colors.dart';
 import 'game/taisen_game.dart';
+import 'data/card_models.dart';
+import 'ui/card_detail_sheet.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,6 +88,10 @@ class _MatchShellState extends State<MatchShell> {
                 _game.triggerChargeAuraDemo();
                 setState(() {});
               },
+              onDetail: () {
+                final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
+                showCardDetailSheet(context, zhao);
+              },
             ),
           ],
         ),
@@ -150,11 +156,13 @@ class _BottomBar extends StatelessWidget {
     required this.onSpawn,
     required this.onStrategy,
     required this.onCharge,
+    required this.onDetail,
   });
 
   final VoidCallback onSpawn;
   final VoidCallback onStrategy;
   final VoidCallback onCharge;
+  final VoidCallback onDetail;
 
   @override
   Widget build(BuildContext context) {
@@ -191,6 +199,19 @@ class _BottomBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          SizedBox(
+            width: minTap * 1.4,
+            height: minTap,
+            child: OutlinedButton(
+              onPressed: onDetail,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: FactionColors.gold,
+                side: const BorderSide(color: FactionColors.gold),
+              ),
+              child: const Text('詳'),
+            ),
+          ),
+          const SizedBox(width: 8),
           SizedBox(
             width: minTap * 1.8,
             height: minTap,
