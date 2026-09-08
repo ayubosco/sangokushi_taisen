@@ -89,7 +89,7 @@ class TaisenGame extends FlameGame {
       final banner = Rect.fromLTWH(w * 0.15, h - 120, w * 0.7, 36);
       canvas.drawRRect(
         RRect.fromRectAndRadius(banner, const Radius.circular(8)),
-        Paint()..color = FactionColors.gold.withOpacity(0.85),
+        Paint()..color = FactionColors.gold.withValues(alpha: 0.85),
       );
       _drawText(canvas, _fxLabel, Offset(banner.left + 12, banner.top + 8), FactionColors.lacquer, 14);
     }
