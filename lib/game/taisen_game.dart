@@ -274,7 +274,8 @@ class TaisenGame extends FlameGame {
 
       _drawFieldTelegraph(canvas, center, card, i, isOwn: isOwn, isEnemy: isEnemy);
 
-      final fill = dim ? card.factionColor.withValues(alpha: 0.28) : card.factionColor;
+      final base = _tokenFill(card);
+      final fill = dim ? base.withValues(alpha: 0.28) : base;
       canvas.drawCircle(center, tokenR, Paint()..color = fill);
 
       // Gold ring on own tutorial target
@@ -736,9 +737,25 @@ class TaisenGame extends FlameGame {
     selectedIndex = null;
   }
 
-  /// Cost stars: rem walks 1.0 then 0.5. Cao Cao 2.5 → full, full, half (left fill).
+  /// Brighter field fill so Shu green reads on lacquer (lock RGB kept for chrome).
+  Color _tokenFill(CardFace card) {
+    switch (card.faction) {
+      case Faction.wei:
+        return const Color(0xFF1E88E5);
+      case Faction.shu:
+        return const Color(0xFF43A047); // readable Shu green, not Wei-blue-looking
+      case Faction.wu:
+        return const Color(0xFFE53935);
+      case Faction.other:
+        return const Color(0xFFFFCA28);
+    }
+  }
+
+  /// Cost: exactly 3 star slots (full/half/empty), >=8dp — same 三星 as Detail.
   void _drawCostStars(Canvas canvas, Offset origin, double cost) {
     var rem = cost.clamp(0.0, 3.0);
+    const r = 4.5; // diameter 9 >= 8dp
+    const gap = 11.0;
     for (var i = 0; i < 3; i++) {
       double fill;
       if (rem >= 1.0) {
@@ -750,7 +767,7 @@ class TaisenGame extends FlameGame {
       } else {
         fill = 0;
       }
-      _drawStar(canvas, Offset(origin.dx + i * 12.0, origin.dy), 5.5, fill);
+      _drawStar(canvas, Offset(origin.dx + i * gap + r, origin.dy + r), r, fill);
     }
   }
 
@@ -774,7 +791,6 @@ class TaisenGame extends FlameGame {
     if (fill >= 1) {
       canvas.drawPath(path, Paint()..color = FactionColors.gold);
     } else if (fill >= 0.5) {
-      // Outline + left-half gold fill
       canvas.drawPath(
         path,
         Paint()
@@ -790,9 +806,9 @@ class TaisenGame extends FlameGame {
       canvas.drawPath(
         path,
         Paint()
-          ..color = Colors.white70
+          ..color = Colors.white54
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2,
+          ..strokeWidth = 1.3,
       );
     }
   }

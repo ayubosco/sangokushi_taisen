@@ -23,4 +23,8 @@ class CClock {
     _elapsedSeconds = 0;
     running = true;
   }
+
+  void pause() => running = false;
+
+  void resume() => running = true;
 }

@@ -126,6 +126,9 @@ class _TutorialShellState extends State<TutorialShell> {
         _tutorial.resetToSession1();
         _game.setupSession1Field();
       }
+      // Tutorial HUD: 99C vocabulary — pause so never red 0 C during teach/shots.
+      _game.clock.reset();
+      _game.clock.pause();
       setState(() => _fieldReady = true);
     });
   }
@@ -430,7 +433,7 @@ class _Hud extends StatelessWidget {
               Text(
                 '$c C',
                 style: TextStyle(
-                  color: c <= 10 ? Colors.redAccent : FactionColors.gold,
+                  color: (game.clock.running && c <= 10) ? Colors.redAccent : FactionColors.gold,
                   fontWeight: FontWeight.w700,
                   fontSize: 20,
                 ),
