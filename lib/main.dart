@@ -112,8 +112,17 @@ class _TutorialShellState extends State<TutorialShell> {
       if (kTutorialShot == 's1pass') {
         _game.setupSession1Field();
         _tutorial.forceSession1Pass();
-        // Place own unit on drop for pass visual
-        if (_game.tutorialOwnIndex != null) {
+        // Clear dim Wei/Wu tokens so 趙雲蜀綠 isn't covered by 曹操藍.
+        if (_game.field.length > 1) {
+          final own = _game.field.first;
+          _game.field
+            ..clear()
+            ..add(own);
+          _game.fieldPos
+            ..clear()
+            ..add(_game.dropGuidePoint);
+          _game.tutorialOwnIndex = 0;
+        } else if (_game.tutorialOwnIndex != null) {
           _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
         }
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
