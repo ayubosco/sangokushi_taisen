@@ -4,8 +4,12 @@ import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
 import 'game/taisen_game.dart';
+import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
 import 'ui/card_detail_sheet.dart';
+
+/// dart-define: TUTORIAL_SHOT=s1pass|s2pass for Simulator clear-pass captures.
+const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValue: '');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,18 +30,302 @@ class SangokushiApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: FactionColors.lacquer,
-        colorScheme: ColorScheme.dark(
+        colorScheme: const ColorScheme.dark(
           primary: FactionColors.gold,
           secondary: FactionColors.shu,
         ),
       ),
-      home: const MatchShell(),
+      home: const AppRoot(),
+    );
+  }
+}
+
+enum _AppStage { tutorial, factionPick, match }
+
+class AppRoot extends StatefulWidget {
+  const AppRoot({super.key});
+
+  @override
+  State<AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<AppRoot> {
+  _AppStage _stage = _AppStage.tutorial;
+  Faction? _pickedFaction;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (_stage) {
+      case _AppStage.tutorial:
+        return TutorialShell(
+          onComplete: () => setState(() => _stage = _AppStage.factionPick),
+        );
+      case _AppStage.factionPick:
+        return FactionPickStub(
+          onPicked: (f) {
+            _pickedFaction = f;
+            setState(() => _stage = _AppStage.match);
+          },
+        );
+      case _AppStage.match:
+        return MatchShell(faction: _pickedFaction ?? Faction.shu);
+    }
+  }
+}
+
+class TutorialShell extends StatefulWidget {
+  const TutorialShell({super.key, required this.onComplete});
+  final VoidCallback onComplete;
+
+  @override
+  State<TutorialShell> createState() => _TutorialShellState();
+}
+
+class _TutorialShellState extends State<TutorialShell> {
+  late final TutorialController _tutorial;
+  late final TaisenGame _game;
+  bool _fieldReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tutorial = TutorialController();
+    _game = TaisenGame(tutorial: _tutorial);
+    _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
+    _game.onTutorialChanged = () {
+      if (!mounted) return;
+      setState(() {});
+      if (_tutorial.session == TutorialSession.complete && !kTutorialShot.startsWith('s')) {
+        widget.onComplete();
+      }
+    };
+    _tutorial.addListener(() {
+      if (!mounted) return;
+      setState(() {});
+      if (_tutorial.session == TutorialSession.complete && kTutorialShot.isEmpty) {
+        widget.onComplete();
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (kTutorialShot == 's1pass') {
+        _game.setupSession1Field();
+        _tutorial.forceSession1Pass();
+        // Place own unit on drop for pass visual
+        if (_game.tutorialOwnIndex != null) {
+          _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
+        }
+        _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
+      } else if (kTutorialShot == 's2pass') {
+        _game.setupSession2Field();
+        _tutorial.forceSession2Pass();
+        _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
+        _game.triggerStrategyFx();
+      } else {
+        _tutorial.resetToSession1();
+        _game.setupSession1Field();
+      }
+      setState(() => _fieldReady = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tutorial.dispose();
+    super.dispose();
+  }
+
+  void _onSkipTip() {
+    final wasS2Tip = _tutorial.session == TutorialSession.session2 && _tutorial.s2 == S2Phase.tipDone;
+    final wasS1Tip = _tutorial.session == TutorialSession.session1 && _tutorial.s1 == S1Phase.tipNext;
+    _tutorial.skipTip();
+    if (wasS1Tip) {
+      _game.setupSession2Field();
+      setState(() {});
+    }
+    if (wasS2Tip || _tutorial.session == TutorialSession.complete) {
+      widget.onComplete();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            _Hud(game: _game, subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2'),
+            Expanded(
+              child: Stack(
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (d) {
+                      _game.selectOrDetailAt(d.localPosition);
+                      setState(() {});
+                    },
+                    onPanStart: (d) {
+                      _game.panStart(d.localPosition);
+                      setState(() {});
+                    },
+                    onPanUpdate: (d) {
+                      _game.panUpdate(d.localPosition);
+                      setState(() {});
+                    },
+                    onPanEnd: (d) {
+                      _game.panEnd(d.localPosition);
+                      setState(() {});
+                    },
+                    child: GameWidget(game: _game),
+                  ),
+                  if (_tutorial.tipText != null)
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      // Sit above bottom of field stack — bottom bar is sibling below,
+                      // so tips never cover 歸城/出陣/詳/計略.
+                      bottom: 8,
+                      child: _TipBanner(
+                        text: _tutorial.tipText!,
+                        failed: _tutorial.failed,
+                        onSkip: _tutorial.tipSkippable ? _onSkipTip : null,
+                      ),
+                    ),
+                  if (!_fieldReady)
+                    const Positioned.fill(
+                      child: ColoredBox(color: Colors.black54),
+                    ),
+                ],
+              ),
+            ),
+            _BottomBar(
+              onReturnCity: () {
+                _game.triggerReturnCityFx();
+                setState(() {});
+              },
+              onSpawn: () {
+                // Tutorial: spawn disabled / no-op (keep button visible)
+              },
+              onDetail: () {
+                final idx = _game.selectedIndex;
+                if (idx == null || idx >= _game.field.length) return;
+                showCardDetailSheet(context, _game.field[idx]);
+              },
+              onStrategy: () {
+                _game.triggerStrategyFx();
+                setState(() {});
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TipBanner extends StatelessWidget {
+  const _TipBanner({required this.text, required this.failed, this.onSkip});
+  final String text;
+  final bool failed;
+  final VoidCallback? onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: failed ? const Color(0xFF4A1515) : const Color(0xE6121212),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: failed ? Colors.redAccent : FactionColors.gold, width: 1.2),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: failed ? Colors.redAccent.shade100 : FactionColors.gold,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (onSkip != null)
+              TextButton(
+                onPressed: onSkip,
+                child: const Text('跳過', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Stub faction color pick → then Cost6 match shell.
+class FactionPickStub extends StatelessWidget {
+  const FactionPickStub({super.key, required this.onPicked});
+  final ValueChanged<Faction> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = <(Faction, String, Color)>[
+      (Faction.wei, '魏', FactionColors.wei),
+      (Faction.shu, '蜀', FactionColors.shu),
+      (Faction.wu, '吳', FactionColors.wu),
+      (Faction.other, '他', FactionColors.other),
+    ];
+    return Scaffold(
+      backgroundColor: FactionColors.lacquer,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                '選擇勢力（暫）',
+                style: TextStyle(color: FactionColors.gold, fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '之後進入 Cost6 對局殼',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 28),
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  for (final e in entries)
+                    SizedBox(
+                      width: 140,
+                      height: 64,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: e.$3,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () => onPicked(e.$1),
+                        child: Text(e.$2, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
 class MatchShell extends StatefulWidget {
-  const MatchShell({super.key});
+  const MatchShell({super.key, this.faction = Faction.shu});
+  final Faction faction;
 
   @override
   State<MatchShell> createState() => _MatchShellState();
@@ -52,22 +340,9 @@ class _MatchShellState extends State<MatchShell> {
     super.initState();
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
-      _game.spawnCard(zhao);
-      _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.id == 'caocao'));
-      // A-window field demos: spear + bow telegraphs
-      try {
-        _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.troop == TroopType.spear));
-      } catch (_) {}
-      try {
-        _game.spawnCard(Cost6Roster.all.firstWhere((c) => c.troop == TroopType.bow));
-      } catch (_) {}
-      _game.selectedIndex = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _game.setupMatchDemoField();
       setState(() {});
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-      // A-window verification: do not auto-open detail (blocks field FX)
     });
   }
 
@@ -77,7 +352,7 @@ class _MatchShellState extends State<MatchShell> {
       body: SafeArea(
         child: Column(
           children: [
-            _Hud(game: _game),
+            _Hud(game: _game, subtitle: 'Cost6'),
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -90,12 +365,13 @@ class _MatchShellState extends State<MatchShell> {
             ),
             _BottomBar(
               onReturnCity: () {
-                // stub: clear selection / future 歸城
-                _game.selectedIndex = null;
+                _game.triggerReturnCityFx();
                 setState(() {});
               },
               onSpawn: () {
-                final card = Cost6Roster.all[_spawnCursor % Cost6Roster.all.length];
+                final pool = Cost6Roster.byFaction(widget.faction);
+                final list = pool.isEmpty ? Cost6Roster.all : pool;
+                final card = list[_spawnCursor % list.length];
                 _spawnCursor++;
                 if (_game.spawnCard(card)) setState(() {});
               },
@@ -117,8 +393,9 @@ class _MatchShellState extends State<MatchShell> {
 }
 
 class _Hud extends StatelessWidget {
-  const _Hud({required this.game});
+  const _Hud({required this.game, this.subtitle});
   final TaisenGame game;
+  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -136,7 +413,7 @@ class _Hud extends StatelessWidget {
                 'assets/brand/sangokushi-yubi-title-v2.png',
                 height: 28,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Text(
+                errorBuilder: (_, __, ___) => const Text(
                   '三國大戰',
                   style: TextStyle(
                     color: FactionColors.gold,
@@ -145,6 +422,10 @@ class _Hud extends StatelessWidget {
                   ),
                 ),
               ),
+              if (subtitle != null) ...[
+                const SizedBox(width: 10),
+                Text(subtitle!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+              ],
               const Spacer(),
               Text(
                 '$c C',
@@ -177,7 +458,6 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 計略／歸城 ≥12mm ≈ 48 logical px
     const minTap = 48.0;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
