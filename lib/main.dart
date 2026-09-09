@@ -8,7 +8,7 @@ import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
 import 'ui/card_detail_sheet.dart';
 
-/// dart-define: TUTORIAL_SHOT=s1pass|s2pass for Simulator clear-pass captures.
+/// dart-define: TUTORIAL_SHOT=s1pass|s2pass|s1aura|s2coach for Simulator captures.
 const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValue: '');
 
 void main() {
@@ -91,6 +91,8 @@ class _TutorialShellState extends State<TutorialShell> {
     super.initState();
     _tutorial = TutorialController();
     _game = TaisenGame(tutorial: _tutorial);
+    // Pause before first Flame tick so tutorial/shots never show drained C.
+    _game.clock.pause();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     _game.onTutorialChanged = () {
       if (!mounted) return;
@@ -126,11 +128,27 @@ class _TutorialShellState extends State<TutorialShell> {
           _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
         }
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
+      } else if (kTutorialShot == 's1aura') {
+        // 場1: cyan/white charge aura ≥1C gate — fat gold ring, dim others, rings on watch+field.
+        _game.setupSession1Field();
+        _tutorial.forceSession1AuraGate();
+        if (_game.tutorialOwnIndex != null) {
+          _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
+          _game.selectedIndex = _game.tutorialOwnIndex;
+        }
+        _game.watchKind = AWindowKind.charge;
       } else if (kTutorialShot == 's2pass') {
         _game.setupSession2Field();
         _tutorial.forceSession2Pass();
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
         _game.triggerStrategyFx();
+      } else if (kTutorialShot == 's2coach') {
+        // 場2: persistent spear tip + stratagem FX in lower 2/3; tip strategyOrReturn.
+        _game.setupSession2Field();
+        _tutorial.forceSession2Coach();
+        _game.selectedIndex = _game.tutorialOwnIndex;
+        _game.watchKind = AWindowKind.intercept;
+        _game.triggerStrategyFx(notifyTutorial: false);
       } else {
         _tutorial.resetToSession1();
         _game.setupSession1Field();

@@ -287,4 +287,35 @@ class TutorialController extends ChangeNotifier {
     failed = false;
     notifyListeners();
   }
+
+  /// Simulator: 場1 オーラ ≥1C gate — frozen waitAura with charge rings ready.
+  void forceSession1AuraGate() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.waitAura;
+    phaseC = 1.0;
+    auraReady = true;
+    tipText = '突撃氣場 ≥1C 可見 — 先見オーラ再准教撞';
+    tipSkippable = true;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
+  /// Simulator: 場2 槍尖常駐＋計略 FX — tip strategyOrReturn, board stays tappable.
+  void forceSession2Coach() {
+    shotPassMode = true;
+    session = TutorialSession.session2;
+    s2 = S2Phase.strategyOrReturn;
+    phaseC = 1.0;
+    tipText = '按「計略」或「歸城」完成教學';
+    tipSkippable = true;
+    interceptDone = true;
+    strategyOrReturnDone = false;
+    facingCorrect = true;
+    enemyAuraVisible = true;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
 }

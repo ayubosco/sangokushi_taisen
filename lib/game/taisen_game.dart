@@ -151,7 +151,10 @@ class TaisenGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
-    clock.update(dt);
+    // Tutorial shell keeps C frozen at 99 (paused); match demo still ticks.
+    if (tutorial == null) {
+      clock.update(dt);
+    }
     _pulse += dt;
     tutorial?.tick(dt);
 
@@ -171,21 +174,37 @@ class TaisenGame extends FlameGame {
       });
     }
 
-    if (_stratLeft > 0) {
+    // Tutorial coaching: keep watch telegraph aligned with current gate (aura / spear).
+    final coach = tutorial;
+    if (coach != null) {
+      if (coach.session == TutorialSession.session1 &&
+          (coach.s1 == S1Phase.waitAura ||
+              coach.s1 == S1Phase.hitCharge ||
+              coach.s1 == S1Phase.tipNext ||
+              (coach.shotPassMode && coach.s1 == S1Phase.waitAura))) {
+        watchKind = AWindowKind.charge;
+      } else if (coach.session == TutorialSession.session2) {
+        watchKind = AWindowKind.intercept;
+      }
+    }
+
+    // Shot modes freeze FX so Simulator captures stay readable.
+    final holdFx = tutorial?.shotPassMode ?? false;
+    if (_stratLeft > 0 && !holdFx) {
       _stratLeft -= dt;
       if (_stratLeft <= 0) {
         _stratLeft = 0;
         _stratAt = null;
       }
     }
-    if (_hitFlashLeft > 0) {
+    if (_hitFlashLeft > 0 && !holdFx) {
       _hitFlashLeft -= dt;
       if (_hitFlashLeft <= 0) {
         _hitFlashLeft = 0;
         _hitFlashIndex = null;
       }
     }
-    if (_returnFlashLeft > 0) {
+    if (_returnFlashLeft > 0 && !holdFx) {
       _returnFlashLeft -= dt;
       if (_returnFlashLeft <= 0) _returnFlashLeft = 0;
     }
@@ -283,7 +302,7 @@ class TaisenGame extends FlameGame {
         canvas.drawCircle(center, tokenR - 10, Paint()..color = const Color(0xFF43A047));
       }
 
-      // Gold ring on own tutorial target
+      // Fat gold select ring on own tutorial target (≥2dp outer); dim others stay ~40%.
       final ringGold = (isOwn && t != null) || selected;
       canvas.drawCircle(
         center,
@@ -291,16 +310,24 @@ class TaisenGame extends FlameGame {
         Paint()
           ..color = ringGold ? FactionColors.gold : Colors.white24
           ..style = PaintingStyle.stroke
-          ..strokeWidth = ringGold ? 4 : 2,
+          ..strokeWidth = ringGold ? 5 : 2,
       );
       if (isOwn && t != null && t.session == TutorialSession.session1) {
-        // Extra outer gold ring highlight
+        // Extra outer gold ring highlight (fat coaching ring)
         final pulse = 0.5 + 0.5 * math.sin(_pulse * 3);
         canvas.drawCircle(
           center,
-          tokenR + 6 + pulse * 3,
+          tokenR + 7 + pulse * 3,
           Paint()
-            ..color = FactionColors.gold.withValues(alpha: 0.45)
+            ..color = FactionColors.gold.withValues(alpha: 0.85)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3.5,
+        );
+        canvas.drawCircle(
+          center,
+          tokenR + 12 + pulse * 2,
+          Paint()
+            ..color = FactionColors.gold.withValues(alpha: 0.35)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2,
         );
@@ -354,7 +381,11 @@ class TaisenGame extends FlameGame {
     }
 
     if (_stratLeft > 0 && _stratAt != null) {
+      // FX only in game canvas lower 2/3 — never an opaque overlay over bottom bar.
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(0, fieldTop, w, h - fieldTop));
       _drawStratagemBurst(canvas, _stratAt!, _stratLeft / FxWindows.toSeconds(FxWindows.strategyFxMaxC));
+      canvas.restore();
     }
 
     if (_returnFlashLeft > 0) {
@@ -446,22 +477,36 @@ class TaisenGame extends FlameGame {
   }) {
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session1 && isOwn) {
-      // Charge aura while waiting / ready / pass
+      // Charge cyan/white aura — must read clearly during waitAura (≥1C gate).
       if (t.s1 == S1Phase.waitAura ||
           t.s1 == S1Phase.hitCharge ||
           t.s1 == S1Phase.tipNext ||
           t.shotPassMode) {
-        _drawChargeRings(canvas, c, 44, const Color(0xFF00E5FF).withValues(alpha: 0.35));
+        final readyBoost = (t.auraReady || t.shotPassMode) ? 1.0 : 0.72;
+        _drawChargeRings(
+          canvas,
+          c,
+          48,
+          const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
+          whiteCore: true,
+        );
       }
       return;
     }
     if (t != null && t.session == TutorialSession.session2) {
       if (isOwn && card.troop == TroopType.spear) {
-        _drawInterceptStance(canvas, c, 40, const Color(0xFF26C6DA).withValues(alpha: 0.65), facing: ownFacing);
+        // Persistent spear-tip glow (not a countdown bar) for all S2 coaching phases.
+        _drawInterceptStance(canvas, c, 44, const Color(0xFF26C6DA).withValues(alpha: 0.85), facing: ownFacing);
         return;
       }
       if (isEnemy && (t.enemyAuraVisible || t.shotPassMode)) {
-        _drawChargeRings(canvas, c, 36, const Color(0xFF00E5FF).withValues(alpha: 0.65));
+        _drawChargeRings(
+          canvas,
+          c,
+          40,
+          const Color(0xFF00E5FF).withValues(alpha: 0.8),
+          whiteCore: true,
+        );
         return;
       }
     }
@@ -482,27 +527,38 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _drawChargeRings(Canvas canvas, Offset c, double baseR, Color color) {
+  void _drawChargeRings(Canvas canvas, Offset c, double baseR, Color color, {bool whiteCore = false}) {
     final t = (_pulse % 1.2) / 1.2;
+    final baseA = color.a.clamp(0.25, 1.0);
     for (var i = 0; i < 3; i++) {
-      final r = baseR + i * 10 + t * 14;
+      final r = baseR + i * 12 + t * 16;
       canvas.drawCircle(
         c,
         r,
         Paint()
-          ..color = color.withValues(alpha: 0.55 - i * 0.12)
+          ..color = color.withValues(alpha: (baseA - i * 0.12).clamp(0.12, 1.0))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.2,
+          ..strokeWidth = 3.0 - i * 0.35,
+      );
+    }
+    if (whiteCore) {
+      canvas.drawCircle(
+        c,
+        baseR - 4 + t * 6,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.28 + 0.12 * math.sin(_pulse * 5))
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4,
       );
     }
     for (var i = 0; i < 8; i++) {
       final a = i * math.pi / 4 + _pulse;
       canvas.drawLine(
         Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
-        Offset(c.dx + math.cos(a) * (baseR + 18), c.dy + math.sin(a) * (baseR + 18)),
+        Offset(c.dx + math.cos(a) * (baseR + 22), c.dy + math.sin(a) * (baseR + 22)),
         Paint()
-          ..color = color.withValues(alpha: 0.35)
-          ..strokeWidth = 1.4,
+          ..color = color.withValues(alpha: (baseA * 0.55).clamp(0.15, 0.7))
+          ..strokeWidth = 1.8,
       );
     }
   }
@@ -527,20 +583,25 @@ class TaisenGame extends FlameGame {
       ..lineTo(c.dx + 18, c.dy + 22)
       ..close();
     canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.45));
-    // Persistent spear tip glow
-    final glow = 0.6 + 0.4 * math.sin(_pulse * 4);
+    // Persistent spear tip / 槍衾 glow (not a countdown bar)
+    final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
     canvas.drawCircle(
-      Offset(c.dx, c.dy - 26),
-      7,
-      Paint()..color = Colors.white.withValues(alpha: 0.35 * glow),
-    );
-    canvas.drawCircle(Offset(c.dx, c.dy - 26), 5, Paint()..color = Colors.white.withValues(alpha: 0.9));
-    canvas.drawLine(
-      Offset(c.dx, c.dy + 16),
       Offset(c.dx, c.dy - 28),
+      12,
+      Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.35 * glow),
+    );
+    canvas.drawCircle(
+      Offset(c.dx, c.dy - 28),
+      8,
+      Paint()..color = Colors.white.withValues(alpha: 0.45 * glow),
+    );
+    canvas.drawCircle(Offset(c.dx, c.dy - 28), 5, Paint()..color = Colors.white.withValues(alpha: 0.95));
+    canvas.drawLine(
+      Offset(c.dx, c.dy + 18),
+      Offset(c.dx, c.dy - 30),
       Paint()
         ..color = color
-        ..strokeWidth = 2.5
+        ..strokeWidth = 3.0
         ..strokeCap = StrokeCap.round,
     );
     canvas.restore();
@@ -579,24 +640,47 @@ class TaisenGame extends FlameGame {
   }
 
   void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {
-    final alpha = (life01.clamp(0.0, 1.0)) * 0.55;
+    // Translucent gold burst ≤1C — canvas paint only (lower 2/3 clip); never blocks 歸城/計略.
+    final a = (life01.clamp(0.0, 1.0));
+    final alpha = a * 0.55;
+    // Fan / cone preview distinct from spear intercept wedge (opens right-up).
     final cone = Path()
-      ..moveTo(at.dx, at.dy)
-      ..lineTo(at.dx + 90, at.dy - 40)
-      ..lineTo(at.dx + 90, at.dy + 40)
+      ..moveTo(at.dx + 8, at.dy)
+      ..lineTo(at.dx + 110, at.dy - 56)
+      ..lineTo(at.dx + 110, at.dy + 56)
       ..close();
-    canvas.drawPath(cone, Paint()..color = FactionColors.gold.withValues(alpha: alpha));
+    canvas.drawPath(cone, Paint()..color = FactionColors.gold.withValues(alpha: alpha * 0.55));
+    canvas.drawPath(
+      cone,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: alpha)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+    for (var i = 0; i < 3; i++) {
+      final r = 22.0 + i * 14 + (1 - a) * 18;
+      canvas.drawCircle(
+        at,
+        r,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: alpha * (0.9 - i * 0.22))
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6 - i * 0.4,
+      );
+    }
     canvas.drawCircle(
       at,
-      28 + (1 - life01) * 20,
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: alpha * 0.7)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
+      16,
+      Paint()..color = Colors.white.withValues(alpha: alpha * 0.45),
     );
-    if (showAWindowDebugLabels) {
-      _drawText(canvas, '計略 ≤1C', Offset(at.dx - 10, at.dy - 52), FactionColors.gold.withValues(alpha: 0.9), 12);
-    }
+    // Short 飛字 — readable coaching, not a full-screen cut-in.
+    _drawText(
+      canvas,
+      '計略',
+      Offset(at.dx + 36, at.dy - 64),
+      FactionColors.gold.withValues(alpha: 0.55 + 0.45 * a),
+      16,
+    );
   }
 
   bool spawnCard(CardFace card) {
@@ -715,12 +799,14 @@ class TaisenGame extends FlameGame {
   }
 
   /// Stratagem FX ≤1C on field; non-blocking (board stays tappable).
-  void triggerStrategyFx() {
+  /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
+  void triggerStrategyFx({bool notifyTutorial = true}) {
     final t = tutorial;
     if (selectedIndex != null && selectedIndex! < field.length) {
       final i = selectedIndex!;
       _stratAt = tokenCenter(i);
-      if (field[i].troop == TroopType.spear) {
+      // Don't flash 迎擊 during pure stratagem coaching shot — tip is strategyOrReturn.
+      if (notifyTutorial && field[i].troop == TroopType.spear) {
         flashHit(i, '迎擊');
       }
     } else if (tutorialOwnIndex != null) {
@@ -729,8 +815,10 @@ class TaisenGame extends FlameGame {
       _stratAt = Offset(size.x * 0.45, watchH + 130);
     }
     _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
-    t?.onStrategy();
-    onTutorialChanged?.call();
+    if (notifyTutorial) {
+      t?.onStrategy();
+      onTutorialChanged?.call();
+    }
   }
 
   void triggerReturnCityFx() {
