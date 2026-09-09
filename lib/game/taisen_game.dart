@@ -307,14 +307,15 @@ class TaisenGame extends FlameGame {
       }
 
       _drawWeapon(canvas, Offset(center.dx, center.dy - 2), card.troop, dim ? Colors.white38 : Colors.white);
-      _drawCostStars(canvas, Offset(center.dx - 18, center.dy + tokenR + 6), card.cost);
+      // Name above Cost so ●●○ is not covered by glyphs.
       _drawText(
         canvas,
         card.nameZh,
-        Offset(center.dx - 18, center.dy + tokenR + 16),
+        Offset(center.dx - 18, center.dy + tokenR + 2),
         dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
         11,
       );
+      _drawCostStars(canvas, Offset(center.dx - 18, center.dy + tokenR + 18), card.cost);
     }
 
     // Floating 突撃 button (session1)
