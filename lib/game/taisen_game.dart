@@ -757,11 +757,11 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Cost: exactly 3 slots as ● / ◐ / ○ (>=8dp). Cost2 = ●●○.
+  /// Cost: exactly 3 star glyphs (full/half/empty), >=8dp — match Detail CostStars.
   void _drawCostStars(Canvas canvas, Offset origin, double cost) {
     var rem = cost.clamp(0.0, 3.0);
-    const slot = 10.0;
-    const gap = 4.0;
+    const r = 4.5; // diameter 9 >= 8dp
+    const gap = 11.0;
     for (var i = 0; i < 3; i++) {
       double fill;
       if (rem >= 1.0) {
@@ -773,33 +773,49 @@ class TaisenGame extends FlameGame {
       } else {
         fill = 0;
       }
-      final c = Offset(origin.dx + i * (slot + gap) + slot / 2, origin.dy + slot / 2);
-      final rad = slot / 2;
-      if (fill >= 1) {
-        canvas.drawCircle(c, rad, Paint()..color = FactionColors.gold);
-      } else if (fill >= 0.5) {
-        canvas.drawCircle(
-          c,
-          rad,
-          Paint()
-            ..color = Colors.white70
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5,
-        );
-        canvas.save();
-        canvas.clipRect(Rect.fromLTRB(c.dx - rad - 0.5, c.dy - rad - 0.5, c.dx, c.dy + rad + 0.5));
-        canvas.drawCircle(c, rad, Paint()..color = FactionColors.gold);
-        canvas.restore();
+      _drawStar(canvas, Offset(origin.dx + i * gap + r, origin.dy + r), r, fill);
+    }
+  }
+
+  void _drawStar(Canvas canvas, Offset c, double r, double fill) {
+    final path = Path();
+    for (var i = 0; i < 5; i++) {
+      final a = -math.pi / 2 + i * 2 * math.pi / 5;
+      final b = a + math.pi / 5;
+      final ox = c.dx + r * math.cos(a);
+      final oy = c.dy + r * math.sin(a);
+      final ix = c.dx + r * 0.45 * math.cos(b);
+      final iy = c.dy + r * 0.45 * math.sin(b);
+      if (i == 0) {
+        path.moveTo(ox, oy);
       } else {
-        canvas.drawCircle(
-          c,
-          rad,
-          Paint()
-            ..color = Colors.white70
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.6,
-        );
+        path.lineTo(ox, oy);
       }
+      path.lineTo(ix, iy);
+    }
+    path.close();
+    if (fill >= 1) {
+      canvas.drawPath(path, Paint()..color = FactionColors.gold);
+    } else if (fill >= 0.5) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white70
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2,
+      );
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(c.dx - r - 0.5, c.dy - r - 0.5, c.dx, c.dy + r + 0.5));
+      canvas.drawPath(path, Paint()..color = FactionColors.gold);
+      canvas.restore();
+    } else {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white70
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.3,
+      );
     }
   }
 
