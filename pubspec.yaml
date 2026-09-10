@@ -60,7 +60,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/brand/sangokushi-yubi-title-v2.png
+    - assets/branding/sangokushi-yubi-title-v2.png
     - assets/icons/cost6-weapon-icons.png
     - assets/icons/cost6-weapon-icons-v2.png
     - assets/portraits/

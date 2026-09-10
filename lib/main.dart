@@ -16,7 +16,7 @@ const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
 /// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|stratagem|castle.
 /// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢.
-/// Title lock:「三國指大戰」only — never Sega「三國志大戦」.
+/// Title lock: on-screen art = branding PNG lockup (三國＋手指＋大戰). Oral/CFBundleDisplayName may stay「三國指大戰」; never Sega「三國志大戦」. Never draw「指」glyph in title art.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 
 /// dart-define: LIVE_VERIFY=s2|bow — clock runs (no FEEL freeze); log HUD C for UIUX manual count.
@@ -168,19 +168,38 @@ class TitleSplash extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: FactionColors.gold, width: 2),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    '三國指大戰',
-                    style: TextStyle(
-                      color: FactionColors.gold,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 4,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                  child: Image.asset(
+                    'assets/branding/sangokushi-yubi-title-v2.png',
+                    height: 72,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '三國',
+                          style: TextStyle(
+                            color: FactionColors.gold,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 4,
+                          ),
+                        ),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 6),
+                          child: Icon(Icons.touch_app, color: FactionColors.gold, size: 32),
+                        ),
+                        Text(
+                          '大戰',
+                          style: TextStyle(
+                            color: FactionColors.gold,
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 4,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -836,16 +855,33 @@ class _Hud extends StatelessWidget {
           child: Row(
             children: [
               Image.asset(
-                'assets/brand/sangokushi-yubi-title-v2.png',
+                'assets/branding/sangokushi-yubi-title-v2.png',
                 height: 28,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Text(
-                  '三國指大戰',
-                  style: TextStyle(
-                    color: FactionColors.gold,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+                errorBuilder: (_, __, ___) => const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '三國',
+                      style: TextStyle(
+                        color: FactionColors.gold,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 2),
+                      child: Icon(Icons.touch_app, color: FactionColors.gold, size: 16),
+                    ),
+                    Text(
+                      '大戰',
+                      style: TextStyle(
+                        color: FactionColors.gold,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (subtitle != null) ...[
