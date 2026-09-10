@@ -56,7 +56,7 @@ class TutorialController extends ChangeNotifier {
     s1 = S1Phase.highlightSelect;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '點選己方騎兵（金色光環）';
+    tipText = '而家做：點金色光環嘅己方騎兵（趙雲）— 點中先過關';
     tipSkippable = true;
     failed = false;
     failReason = null;
@@ -72,7 +72,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '槍兵槍尖常駐發光 — 準備迎擊';
+    tipText = '而家做：睇住己方槍兵槍尖發光，等敵騎氣場出現再迎擊';
     tipSkippable = true;
     failed = false;
     failReason = null;
@@ -119,7 +119,7 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 1.0 && !auraReady) {
           auraReady = true;
           s1 = S1Phase.hitCharge;
-          tipText = '突擊氣場已滿 — 點浮字「突撃」';
+          tipText = '青白環已亮！而家點浮字「突撃」過關';
           notifyListeners();
         }
         break;
@@ -130,7 +130,7 @@ class TutorialController extends ChangeNotifier {
           auraReady = false;
           phaseC = 0;
           s1 = S1Phase.dragGuide;
-          tipText = '再拖到落點，等氣場 ≥1C 再突撃';
+          tipText = '重試：拖向落點（金圈），等青白環亮起再點「突撃」';
           notifyListeners();
         }
         break;
@@ -146,7 +146,7 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s2 = S2Phase.enemyApproach;
           enemyAuraVisible = true;
-          tipText = '敵騎突撃氣場出現 — 等 ≥1C 再轉身迎擊';
+          tipText = '敵騎氣場出咗 — 等 ≥1C、面向正確後再點「迎擊」';
           notifyListeners();
         }
         break;
@@ -161,7 +161,7 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 1.0 && !facingCorrect) {
           facingCorrect = true;
           s2 = S2Phase.interceptHit;
-          tipText = '面向正確 — 點「迎擊」';
+          tipText = '面向正確！而家點浮字「迎擊」過關';
           notifyListeners();
         }
         break;
@@ -173,7 +173,7 @@ class TutorialController extends ChangeNotifier {
           enemyAuraVisible = true;
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '等氣場 ≥1C、面向正確後再迎擊';
+          tipText = '重試：等氣場 ≥1C、面向正確後再點「迎擊」';
           notifyListeners();
         }
         break;
@@ -186,7 +186,7 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session1) return;
     if (s1 != S1Phase.highlightSelect && s1 != S1Phase.dragGuide) return;
     s1 = S1Phase.dragGuide;
-    tipText = '拖曳騎兵到落點（勿遮擋底欄）';
+    tipText = '拖向敵騎方向落點（金圈），等青白環亮起再突撃';
     notifyListeners();
   }
 
@@ -195,7 +195,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 0;
     auraReady = false;
     s1 = S1Phase.waitAura;
-    tipText = '蓄力中… 突撃氣場需 ≥1C';
+    tipText = '蓄力中… 等青白環亮起（≥1C）再點「突撃」';
     notifyListeners();
   }
 
@@ -203,7 +203,7 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session1) return;
     if (s1 == S1Phase.hitCharge && auraReady) {
       s1 = S1Phase.tipNext;
-      tipText = '下一場教迎擊';
+      tipText = '場1過關！撳「跳過」進入教學場2：迎擊';
       tipSkippable = true;
       notifyListeners();
       return;
@@ -229,7 +229,7 @@ class TutorialController extends ChangeNotifier {
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.strategyOrReturn;
-      tipText = '按「計略」或「歸城」完成教學';
+      tipText = '而家做：撳右下「計略」或左「歸城」完成教學';
       notifyListeners();
     } else {
       failed = true;
@@ -257,7 +257,7 @@ class TutorialController extends ChangeNotifier {
 
   void _passS2() {
     s2 = S2Phase.tipDone;
-    tipText = '教學完成 — 接下來選勢力';
+    tipText = '教學完成！撳「跳過」去選勢力';
     tipSkippable = true;
     notifyListeners();
   }
@@ -267,7 +267,7 @@ class TutorialController extends ChangeNotifier {
     shotPassMode = true;
     session = TutorialSession.session1;
     s1 = S1Phase.tipNext;
-    tipText = '下一場教迎擊';
+    tipText = '場1過關！撳「跳過」進入教學場2：迎擊';
     tipSkippable = true;
     auraReady = true;
     failed = false;
@@ -278,7 +278,7 @@ class TutorialController extends ChangeNotifier {
     shotPassMode = true;
     session = TutorialSession.session2;
     s2 = S2Phase.tipDone;
-    tipText = '教學完成 — 接下來選勢力';
+    tipText = '教學完成！撳「跳過」去選勢力';
     tipSkippable = true;
     interceptDone = true;
     strategyOrReturnDone = true;
@@ -295,7 +295,7 @@ class TutorialController extends ChangeNotifier {
     s1 = S1Phase.waitAura;
     phaseC = 1.0;
     auraReady = true;
-    tipText = '突撃氣場 ≥1C 可見 — 先見オーラ再准教撞';
+    tipText = '青白環已亮（≥1C）— 而家可點「突撃」過關';
     tipSkippable = true;
     failed = false;
     failReason = null;
@@ -308,7 +308,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.strategyOrReturn;
     phaseC = 1.0;
-    tipText = '按「計略」或「歸城」完成教學';
+    tipText = '而家做：撳右下「計略」或左「歸城」完成教學';
     tipSkippable = true;
     interceptDone = true;
     strategyOrReturnDone = false;

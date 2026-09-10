@@ -227,7 +227,7 @@ class TaisenGame extends FlameGame {
     final fieldTop = wh;
 
     canvas.drawRect(Rect.fromLTWH(0, 0, w, wh), Paint()..color = const Color(0xFF1A1A1A));
-    _drawText(canvas, '敵軍監視（只讀）', const Offset(16, 24), FactionColors.gold, 16);
+    _drawText(canvas, '敵軍（只睇）', const Offset(16, 22), FactionColors.gold, 18);
     _drawWatchTelegraph(canvas, Rect.fromLTWH(0, 0, w, wh));
 
     canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - wh), Paint()..color = const Color(0xFF121212));
@@ -240,12 +240,17 @@ class TaisenGame extends FlameGame {
     );
 
     final t = tutorial;
-    final title = t == null
-        ? '場即係盤 · Cost $costCap · 場上 ${field.length}/$fieldMax'
-        : (t.session == TutorialSession.session1
-            ? '教學場1 · 選→拖→突撃'
-            : (t.session == TutorialSession.session2 ? '教學場2 · 迎擊＋計略/歸城' : '場即係盤'));
-    _drawText(canvas, title, Offset(16, fieldTop + 12), FactionColors.gold, 14);
+    // Clear zone label (always readable). Session title is Flutter overlay.
+    _drawText(canvas, '己方戰場', Offset(16, fieldTop + 12), FactionColors.gold, 18);
+    if (t == null) {
+      _drawText(
+        canvas,
+        'Cost $costCap · 場上 ${field.length}/$fieldMax',
+        Offset(16, fieldTop + 36),
+        Colors.white54,
+        12,
+      );
+    }
 
     // Session1 drop guide
     if (t != null &&

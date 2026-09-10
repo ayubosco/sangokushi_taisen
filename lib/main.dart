@@ -11,6 +11,9 @@ import 'ui/card_detail_sheet.dart';
 /// dart-define: TUTORIAL_SHOT=s1pass|s2pass|s1aura|s2coach for Simulator captures.
 const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValue: '');
 
+/// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
+const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -40,7 +43,21 @@ class SangokushiApp extends StatelessWidget {
   }
 }
 
-enum _AppStage { tutorial, factionPick, match }
+enum _AppStage { splash, bingfaPick, tutorial, factionPick, match }
+
+/// Cosmetic 兵法 stubs — names + blurbs only; no combat formulas.
+class BingfaOption {
+  const BingfaOption({required this.id, required this.name, required this.blurb});
+  final String id;
+  final String name;
+  final String blurb;
+
+  static const all = <BingfaOption>[
+    BingfaOption(id: 'huoji', name: '火計', blurb: '開局佈火勢（暫：純展示，未計傷害）'),
+    BingfaOption(id: 'fubing', name: '伏兵', blurb: '埋伏一隊（暫：純展示，未改數值）'),
+    BingfaOption(id: 'yuanjun', name: '援軍', blurb: '呼喚援軍氣勢（暫：純展示，未出兵）'),
+  ];
+}
 
 class AppRoot extends StatefulWidget {
   const AppRoot({super.key});
@@ -50,14 +67,55 @@ class AppRoot extends StatefulWidget {
 }
 
 class _AppRootState extends State<AppRoot> {
-  _AppStage _stage = _AppStage.tutorial;
+  late _AppStage _stage;
   Faction? _pickedFaction;
+  String? _selectedBingfa; // display name, or null if skipped/unused
+  bool _bingfaConsumed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _stage = _initialStage();
+    if (kDemoShot == 'match') {
+      _selectedBingfa = '火計';
+      _pickedFaction = Faction.shu;
+    } else if (kDemoShot == 's1' || kTutorialShot.isNotEmpty) {
+      _selectedBingfa = '火計';
+    }
+  }
+
+  _AppStage _initialStage() {
+    if (kDemoShot == 'splash') return _AppStage.splash;
+    if (kDemoShot == 'bingfa') return _AppStage.bingfaPick;
+    if (kDemoShot == 's1' || kTutorialShot.isNotEmpty) return _AppStage.tutorial;
+    if (kDemoShot == 'match') return _AppStage.match;
+    // Simulator demo default: splash → 兵法 → tutorial
+    return _AppStage.splash;
+  }
 
   @override
   Widget build(BuildContext context) {
     switch (_stage) {
+      case _AppStage.splash:
+        return TitleSplash(
+          onContinue: () => setState(() => _stage = _AppStage.bingfaPick),
+        );
+      case _AppStage.bingfaPick:
+        return BingfaPickScreen(
+          onPicked: (name) {
+            _selectedBingfa = name;
+            _bingfaConsumed = false;
+            setState(() => _stage = _AppStage.tutorial);
+          },
+          onSkip: () {
+            _selectedBingfa = null;
+            _bingfaConsumed = false;
+            setState(() => _stage = _AppStage.tutorial);
+          },
+        );
       case _AppStage.tutorial:
         return TutorialShell(
+          bingfaLabel: _bingfaStatusLabel(),
           onComplete: () => setState(() => _stage = _AppStage.factionPick),
         );
       case _AppStage.factionPick:
@@ -68,14 +126,177 @@ class _AppRootState extends State<AppRoot> {
           },
         );
       case _AppStage.match:
-        return MatchShell(faction: _pickedFaction ?? Faction.shu);
+        return MatchShell(
+          faction: _pickedFaction ?? Faction.shu,
+          bingfaLabel: _bingfaStatusLabel(),
+        );
     }
+  }
+
+  String? _bingfaStatusLabel() {
+    if (_selectedBingfa == null) return null;
+    if (_bingfaConsumed) return '兵法已用';
+    return '兵法：$_selectedBingfa';
+  }
+}
+
+/// Black lacquer + gold opening title.
+class TitleSplash extends StatelessWidget {
+  const TitleSplash({super.key, required this.onContinue});
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: FactionColors.lacquer,
+      body: SafeArea(
+        child: InkWell(
+          onTap: onContinue,
+          child: SizedBox.expand(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: FactionColors.gold, width: 2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '三國指大戰',
+                    style: TextStyle(
+                      color: FactionColors.gold,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '教學場 · 兵法 · 指尖對陣',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+                const SizedBox(height: 48),
+                const Text(
+                  '輕觸繼續',
+                  style: TextStyle(color: FactionColors.gold, fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Start-of-match 兵法 pick — big gold-framed cards (not a bottom-bar button).
+class BingfaPickScreen extends StatelessWidget {
+  const BingfaPickScreen({super.key, required this.onPicked, required this.onSkip});
+  final ValueChanged<String> onPicked;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: FactionColors.lacquer,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: FactionColors.gold, width: 2.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    '兵法',
+                    style: TextStyle(
+                      color: FactionColors.gold,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                '每場只揀一次（開局）· 暫為展示，未計傷害',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: BingfaOption.all.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                  itemBuilder: (context, i) {
+                    final o = BingfaOption.all[i];
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => onPicked(o.name),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF141414),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: FactionColors.gold, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: FactionColors.gold.withValues(alpha: 0.18),
+                                blurRadius: 10,
+                                spreadRadius: 0.5,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                o.name,
+                                style: const TextStyle(
+                                  color: FactionColors.gold,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                o.blurb,
+                                style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              TextButton(
+                onPressed: onSkip,
+                child: const Text('今場不用兵法', style: TextStyle(color: Colors.white54, fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
 class TutorialShell extends StatefulWidget {
-  const TutorialShell({super.key, required this.onComplete});
+  const TutorialShell({super.key, required this.onComplete, this.bingfaLabel});
   final VoidCallback onComplete;
+  final String? bingfaLabel;
 
   @override
   State<TutorialShell> createState() => _TutorialShellState();
@@ -85,6 +306,8 @@ class _TutorialShellState extends State<TutorialShell> {
   late final TutorialController _tutorial;
   late final TaisenGame _game;
   bool _fieldReady = false;
+  bool _showSessionBanner = true;
+  TutorialSession? _bannerFor;
 
   @override
   void initState() {
@@ -96,6 +319,7 @@ class _TutorialShellState extends State<TutorialShell> {
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     _game.onTutorialChanged = () {
       if (!mounted) return;
+      _maybeShowSessionBanner();
       setState(() {});
       if (_tutorial.session == TutorialSession.complete && !kTutorialShot.startsWith('s')) {
         widget.onComplete();
@@ -103,6 +327,7 @@ class _TutorialShellState extends State<TutorialShell> {
     };
     _tutorial.addListener(() {
       if (!mounted) return;
+      _maybeShowSessionBanner();
       setState(() {});
       if (_tutorial.session == TutorialSession.complete && kTutorialShot.isEmpty) {
         widget.onComplete();
@@ -128,7 +353,8 @@ class _TutorialShellState extends State<TutorialShell> {
           _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
         }
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
-      } else if (kTutorialShot == 's1aura') {
+        _showSessionBanner = false;
+      } else if (kTutorialShot == 's1aura' || kDemoShot == 's1') {
         // 場1: cyan/white charge aura ≥1C gate — fat gold ring, dim others, rings on watch+field.
         _game.setupSession1Field();
         _tutorial.forceSession1AuraGate();
@@ -137,11 +363,14 @@ class _TutorialShellState extends State<TutorialShell> {
           _game.selectedIndex = _game.tutorialOwnIndex;
         }
         _game.watchKind = AWindowKind.charge;
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = true;
       } else if (kTutorialShot == 's2pass') {
         _game.setupSession2Field();
         _tutorial.forceSession2Pass();
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
         _game.triggerStrategyFx();
+        _showSessionBanner = false;
       } else if (kTutorialShot == 's2coach') {
         // 場2: persistent spear tip + stratagem FX in lower 2/3; tip strategyOrReturn.
         _game.setupSession2Field();
@@ -149,15 +378,38 @@ class _TutorialShellState extends State<TutorialShell> {
         _game.selectedIndex = _game.tutorialOwnIndex;
         _game.watchKind = AWindowKind.intercept;
         _game.triggerStrategyFx(notifyTutorial: false);
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = true;
       } else {
         _tutorial.resetToSession1();
         _game.setupSession1Field();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = true;
       }
       // Tutorial HUD: 99C vocabulary — pause so never red 0 C during teach/shots.
       _game.clock.reset();
       _game.clock.pause();
       setState(() => _fieldReady = true);
+      // Auto-hide session banner after a beat (still readable at start).
+      Future<void>.delayed(const Duration(milliseconds: 2200), () {
+        if (!mounted) return;
+        if (kDemoShot == 's1') return; // keep title visible for shot
+        setState(() => _showSessionBanner = false);
+      });
     });
+  }
+
+  void _maybeShowSessionBanner() {
+    if (_bannerFor != _tutorial.session &&
+        (_tutorial.session == TutorialSession.session1 ||
+            _tutorial.session == TutorialSession.session2)) {
+      _bannerFor = _tutorial.session;
+      _showSessionBanner = true;
+      Future<void>.delayed(const Duration(milliseconds: 2200), () {
+        if (!mounted) return;
+        setState(() => _showSessionBanner = false);
+      });
+    }
   }
 
   @override
@@ -179,13 +431,23 @@ class _TutorialShellState extends State<TutorialShell> {
     }
   }
 
+  String get _sessionTitle {
+    if (_tutorial.session == TutorialSession.session1) return '教學場1：突撃';
+    if (_tutorial.session == TutorialSession.session2) return '教學場2：迎擊';
+    return '教學';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            _Hud(game: _game, subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2'),
+            _Hud(
+              game: _game,
+              subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
+              bingfaLabel: widget.bingfaLabel,
+            ),
             Expanded(
               child: Stack(
                 children: [
@@ -209,6 +471,34 @@ class _TutorialShellState extends State<TutorialShell> {
                     },
                     child: GameWidget(game: _game),
                   ),
+                  if (_showSessionBanner &&
+                      (_tutorial.session == TutorialSession.session1 ||
+                          _tutorial.session == TutorialSession.session2))
+                    Positioned(
+                      top: 10,
+                      left: 16,
+                      right: 16,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xF00A0A0A),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: FactionColors.gold, width: 1.6),
+                          ),
+                          child: Text(
+                            _sessionTitle,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: FactionColors.gold,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (_tutorial.tipText != null)
                     Positioned(
                       left: 12,
@@ -280,6 +570,7 @@ class _TipBanner extends StatelessWidget {
                   color: failed ? Colors.redAccent.shade100 : FactionColors.gold,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
+                  height: 1.35,
                 ),
               ),
             ),
@@ -354,8 +645,13 @@ class FactionPickStub extends StatelessWidget {
 }
 
 class MatchShell extends StatefulWidget {
-  const MatchShell({super.key, this.faction = Faction.shu});
+  const MatchShell({
+    super.key,
+    this.faction = Faction.shu,
+    this.bingfaLabel,
+  });
   final Faction faction;
+  final String? bingfaLabel;
 
   @override
   State<MatchShell> createState() => _MatchShellState();
@@ -382,7 +678,7 @@ class _MatchShellState extends State<MatchShell> {
       body: SafeArea(
         child: Column(
           children: [
-            _Hud(game: _game, subtitle: 'Cost6'),
+            _Hud(game: _game, subtitle: 'Cost6', bingfaLabel: widget.bingfaLabel),
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
@@ -412,6 +708,7 @@ class _MatchShellState extends State<MatchShell> {
               },
               onStrategy: () {
                 _game.triggerStrategyFx();
+                // Cosmetic: using 計略 does not consume 兵法; stub only.
                 setState(() {});
               },
             ),
@@ -423,9 +720,10 @@ class _MatchShellState extends State<MatchShell> {
 }
 
 class _Hud extends StatelessWidget {
-  const _Hud({required this.game, this.subtitle});
+  const _Hud({required this.game, this.subtitle, this.bingfaLabel});
   final TaisenGame game;
   final String? subtitle;
+  final String? bingfaLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -455,6 +753,25 @@ class _Hud extends StatelessWidget {
               if (subtitle != null) ...[
                 const SizedBox(width: 10),
                 Text(subtitle!, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+              ],
+              if (bingfaLabel != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A1A),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: FactionColors.gold.withValues(alpha: 0.85)),
+                  ),
+                  child: Text(
+                    bingfaLabel!,
+                    style: const TextStyle(
+                      color: FactionColors.gold,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               ],
               const Spacer(),
               Text(
@@ -503,7 +820,7 @@ class _BottomBar extends StatelessWidget {
                 foregroundColor: FactionColors.gold,
                 side: const BorderSide(color: FactionColors.gold),
               ),
-              child: const Text('歸城'),
+              child: const Text('歸城', style: TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
           const SizedBox(width: 8),
@@ -516,7 +833,7 @@ class _BottomBar extends StatelessWidget {
                 foregroundColor: FactionColors.gold,
                 side: const BorderSide(color: FactionColors.gold),
               ),
-              child: const Text('出陣'),
+              child: const Text('出陣', style: TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
           const SizedBox(width: 8),
@@ -530,7 +847,7 @@ class _BottomBar extends StatelessWidget {
                 side: const BorderSide(color: FactionColors.gold),
                 padding: EdgeInsets.zero,
               ),
-              child: const Icon(Icons.info_outline, size: 22),
+              child: const Text('詳', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             ),
           ),
           const Spacer(),
@@ -544,7 +861,7 @@ class _BottomBar extends StatelessWidget {
                 foregroundColor: FactionColors.lacquer,
                 minimumSize: const Size(minTap * 1.8, minTap),
               ),
-              child: const Text('計略'),
+              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             ),
           ),
         ],
