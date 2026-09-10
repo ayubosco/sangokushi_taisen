@@ -373,6 +373,36 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Feel shot: mid-drag rubber-band (guide line) before aura — tip cannot skip.
+  void forceFeelDragLive() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.dragGuide;
+    phaseC = 0;
+    auraReady = false;
+    didDragDrop = false;
+    tipText = '拖向落點（導線）— 未見環唔撞；tip 唔跳拖';
+    tipSkippable = false;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
+  /// Feel shot: post-hit 突撃 after drag + aura≥1C.
+  void forceFeelDragHit() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.tipNext;
+    phaseC = 1.0;
+    auraReady = true;
+    didDragDrop = true;
+    tipText = '突撃命中！場1過關（拖＋氣場≥1C）';
+    tipSkippable = true;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
   /// Feel shot: intercept tip glow + facing ready.
   void forceFeelIntercept() {
     shotPassMode = true;

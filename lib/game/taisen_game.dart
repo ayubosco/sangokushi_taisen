@@ -69,6 +69,10 @@ class TaisenGame extends FlameGame {
   /// 歸城 flash
   double _returnFlashLeft = 0;
 
+  /// Free-match cavalry: after drag-drop, wait aura ≥1C before 突撃 hit (visual only).
+  int? _matchChargeIndex;
+  double _matchChargeC = 0;
+
   void Function(CardFace card)? onRequestDetail;
   VoidCallback? onTutorialChanged;
 
@@ -193,6 +197,68 @@ class TaisenGame extends FlameGame {
     dragTo = Offset(w * 0.55, wh + fh * 0.34);
   }
 
+  /// FEEL_SHOT=drag-live: freeze mid-drag rubber-band toward drop (enemy outlined).
+  void setupFeelDragLivePose() {
+    setupSession1Field();
+    if (tutorialOwnIndex != null) {
+      selectedIndex = tutorialOwnIndex;
+      dragFrom = tokenCenter(tutorialOwnIndex!);
+      final drop = dropGuidePoint;
+      // Midway — clearly mid-drag, not yet on 落點.
+      dragTo = Offset(
+        dragFrom!.dx + (drop.dx - dragFrom!.dx) * 0.55,
+        dragFrom!.dy + (drop.dy - dragFrom!.dy) * 0.55,
+      );
+      dragging = true;
+    }
+    watchKind = AWindowKind.charge;
+  }
+
+  /// FEEL_SHOT=drag-hit: own at drop, 突撃 flash held after aura gate.
+  void setupFeelDragHitPose() {
+    setupSession1Field();
+    if (tutorialOwnIndex != null) {
+      fieldPos[tutorialOwnIndex!] = dropGuidePoint;
+      selectedIndex = tutorialOwnIndex;
+    }
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    watchKind = AWindowKind.charge;
+    flashHit(tutorialOwnIndex ?? 0, '突撃');
+  }
+
+  /// FEEL_SHOT=drag-samefaction: Wei cavalry vs Wei cavalry mid-drag (Design outline check).
+  void setupFeelDragSameFactionPose() {
+    field.clear();
+    fieldPos.clear();
+    fieldIsEnemy.clear();
+    final own = Cost6Roster.all.firstWhere((c) => c.id == 'caoren'); // 魏騎
+    final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao'); // 魏騎
+    field.addAll([own, enemy]);
+    fieldIsEnemy.addAll([false, true]);
+    final wh = size.y > 0 ? watchH : 200.0;
+    final w = size.x > 0 ? size.x : 390.0;
+    final fh = size.y > 0 ? (size.y - wh) : 280.0;
+    fieldPos.addAll([
+      Offset(w * 0.28, wh + fh * 0.58),
+      Offset(w * 0.62, wh + fh * 0.30),
+    ]);
+    tutorialOwnIndex = 0;
+    tutorialEnemyIndex = 1;
+    selectedIndex = 0;
+    ownFacing = -0.25;
+    enemyFacing = math.pi + 0.25;
+    watchKind = AWindowKind.charge;
+    dragFrom = fieldPos[0];
+    final drop = Offset(w * 0.55, wh + fh * 0.42);
+    dragTo = Offset(
+      dragFrom!.dx + (drop.dx - dragFrom!.dx) * 0.55,
+      dragFrom!.dy + (drop.dy - dragFrom!.dy) * 0.55,
+    );
+    dragging = true;
+  }
+
   Offset get dropGuidePoint {
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
@@ -265,6 +331,17 @@ class TaisenGame extends FlameGame {
       if (_shakeLeft < 0) _shakeLeft = 0;
     }
 
+    // Free-match: cavalry drop → wait aura ≥1C → 突撃 flash (no combat numbers).
+    if (tutorial == null && _matchChargeIndex != null) {
+      _matchChargeC += dt / CClock.secondsPerC;
+      if (_matchChargeC >= 1.0) {
+        final i = _matchChargeIndex!;
+        flashHit(i, '突撃');
+        _matchChargeIndex = null;
+        _matchChargeC = 0;
+      }
+    }
+
     // Session2: when facing becomes correct, rotate spear tip toward enemy.
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session2 && t.facingCorrect) {
@@ -316,14 +393,16 @@ class TaisenGame extends FlameGame {
       );
     }
 
-    // Session1 / feel: drop guide + dashed path
+    // Session1 / feel: drop guide + dashed path (not after tipNext / hit)
     if (t != null &&
         t.session == TutorialSession.session1 &&
         (t.s1 == S1Phase.dragGuide ||
             t.s1 == S1Phase.waitAura ||
             t.s1 == S1Phase.hitCharge ||
-            t.s1 == S1Phase.tipNext ||
-            t.shotPassMode)) {
+            (t.shotPassMode &&
+                (t.s1 == S1Phase.dragGuide ||
+                    t.s1 == S1Phase.waitAura ||
+                    t.s1 == S1Phase.hitCharge)))) {
       final drop = dropGuidePoint;
       canvas.drawCircle(
         drop,
@@ -386,7 +465,7 @@ class TaisenGame extends FlameGame {
 
       // Enemy facing arrow (lower field)
       if (isEnemy) {
-        _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFB0BEC5));
+        _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
       } else if (t != null && t.session == TutorialSession.session2 && tutorialOwnIndex == i) {
         _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
       }
@@ -401,23 +480,24 @@ class TaisenGame extends FlameGame {
       _drawCostStars(canvas, Offset(center.dx - 18, center.dy + tokenR + 20), card.cost);
     }
 
-    // Floating 突撃 (session1) — not a tip-skip; requires auraReady after drag
+    // Floating 突撃 (session1) — not a tip-skip; requires auraReady after drag.
+    // Suppress when fat-float hit label is 突撃 (one label only).
+    final suppressFloatCharge = _hitFlashLeft > 0 && _hitFlashLabel == '突撃';
     if (t != null &&
         t.session == TutorialSession.session1 &&
-        (t.s1 == S1Phase.hitCharge || t.s1 == S1Phase.waitAura || (t.shotPassMode && t.s1 == S1Phase.tipNext))) {
+        !suppressFloatCharge &&
+        (t.s1 == S1Phase.hitCharge || t.s1 == S1Phase.waitAura)) {
       final at = tutorialOwnIndex != null ? tokenCenter(tutorialOwnIndex!) : dropGuidePoint;
       final ready = t.auraReady || t.shotPassMode;
       _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '突撃', ready);
     }
 
-    // Floating 迎擊 (session2)
+    // Floating 迎擊 — only while awaiting tap; NEVER stack with fat-float「迎擊」(no 迎擊迎擊).
+    final suppressFloatIntercept = _hitFlashLeft > 0 && _hitFlashLabel == '迎擊';
     if (t != null &&
         t.session == TutorialSession.session2 &&
-        (t.s2 == S2Phase.interceptHit ||
-            t.s2 == S2Phase.waitTurn ||
-            t.s2 == S2Phase.strategyOrReturn ||
-            t.s2 == S2Phase.tipDone ||
-            t.shotPassMode)) {
+        !suppressFloatIntercept &&
+        (t.s2 == S2Phase.interceptHit || (t.s2 == S2Phase.waitTurn && t.facingCorrect))) {
       final at = tutorialOwnIndex != null ? tokenCenter(tutorialOwnIndex!) : Offset(w * 0.35, wh + 160);
       final ready = t.facingCorrect || t.shotPassMode;
       _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '迎擊', ready);
@@ -568,11 +648,16 @@ class TaisenGame extends FlameGame {
 
   /// Top watch: both sides in frame, same telegraph kind/timing as lower field.
   void _drawWatchFullField(Canvas canvas, Rect band) {
-    final ownC = Offset(band.width * 0.32, band.top + band.height * 0.62);
-    final enemyC = Offset(band.width * 0.68, band.top + band.height * 0.42);
     final t = tutorial;
+    // Fake-3D lane (perspective) — both sides in frame; not flat color blocks.
+    _drawWatchPerspectiveLane(canvas, band);
 
-    // Sync telegraph with field coaching / match troop demo.
+    // Near = own (larger), far = enemy (smaller) along the lane.
+    final ownC = Offset(band.width * 0.34, band.top + band.height * 0.72);
+    final enemyC = Offset(band.width * 0.62, band.top + band.height * 0.38);
+    const ownScale = 1.0;
+    const enemyScale = 0.72;
+
     var kind = watchKind;
     if (t != null) {
       if (t.session == TutorialSession.session1) {
@@ -584,29 +669,47 @@ class TaisenGame extends FlameGame {
 
     switch (kind) {
       case AWindowKind.charge:
-        _drawChargeRings(canvas, ownC, 34, const Color(0xFF00E5FF), whiteCore: true);
-        if (t == null || t.enemyAuraVisible || t.session == TutorialSession.session1 || t.shotPassMode) {
-          _drawChargeRings(canvas, enemyC, 30, const Color(0xFF00E5FF).withValues(alpha: 0.75), whiteCore: true);
+        final showCharge = t == null ||
+            t.session != TutorialSession.session1 ||
+            t.s1 == S1Phase.waitAura ||
+            t.s1 == S1Phase.hitCharge ||
+            t.s1 == S1Phase.tipNext;
+        if (showCharge) {
+          _drawChargeRings(canvas, ownC, 34 * ownScale, const Color(0xFF00E5FF), whiteCore: true);
+        }
+        if (showCharge && (t == null || t.enemyAuraVisible || t.session == TutorialSession.session1 || t.shotPassMode)) {
+          _drawChargeRings(canvas, enemyC, 28 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.75), whiteCore: true);
         }
         break;
       case AWindowKind.intercept:
-        _drawInterceptStance(canvas, ownC, 38, const Color(0xFF26C6DA), facing: ownFacing);
+        _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
         if (t == null || t.enemyAuraVisible || t.shotPassMode) {
-          _drawChargeRings(canvas, enemyC, 28, const Color(0xFF00E5FF).withValues(alpha: 0.8), whiteCore: true);
+          _drawChargeRings(canvas, enemyC, 26 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.8), whiteCore: true);
         }
         break;
       case AWindowKind.bow:
         _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFD54F));
-        _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFB0BEC5));
         break;
       case AWindowKind.stratagem:
         break;
     }
 
-    // Miniature card tokens (read-only silhouettes)
-    _drawMiniToken(canvas, ownC, FactionColors.shu, enemy: false);
-    _drawMiniToken(canvas, enemyC, FactionColors.wei, enemy: true);
-    _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFCFD8DC));
+    // Watch fills: match field factions when possible (same-faction check uses Wei/Wei).
+    Color ownFill = FactionColors.shu;
+    Color enemyFill = FactionColors.wei;
+    if (field.isNotEmpty && tutorialOwnIndex != null && tutorialOwnIndex! < field.length) {
+      ownFill = _tokenFill(field[tutorialOwnIndex!]);
+    }
+    if (field.isNotEmpty && tutorialEnemyIndex != null && tutorialEnemyIndex! < field.length) {
+      enemyFill = _tokenFill(field[tutorialEnemyIndex!]);
+    } else if (field.length >= 2 && fieldIsEnemy.contains(true)) {
+      enemyFill = _tokenFill(field[fieldIsEnemy.indexOf(true)]);
+    }
+
+    _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale);
+    _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale);
+    // ALWAYS white/yellow facing arrow on enemy — never faction-fill alone.
+    _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
     if (showAWindowDebugLabels) {
       final label = switch (kind) {
         AWindowKind.charge => '突撃オーラ ≥1C',
@@ -618,16 +721,88 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _drawMiniToken(Canvas canvas, Offset c, Color fill, {required bool enemy}) {
-    final rect = RRect.fromRectAndRadius(Rect.fromCenter(center: c, width: 36, height: 44), const Radius.circular(6));
-    canvas.drawRRect(rect, Paint()..color = fill.withValues(alpha: 0.85));
+  /// Simple perspective battlefield lane for top watch (both sides readable).
+  void _drawWatchPerspectiveLane(Canvas canvas, Rect band) {
+    final horizonY = band.top + band.height * 0.22;
+    final vanishing = Offset(band.width * 0.5, horizonY);
+    // Sky wash
+    canvas.drawRect(
+      Rect.fromLTRB(band.left, band.top, band.right, horizonY),
+      Paint()..color = const Color(0xFF1A2228),
+    );
+    // Ground trapezoid (road)
+    final ground = Path()
+      ..moveTo(band.left - 20, band.bottom)
+      ..lineTo(band.right + 20, band.bottom)
+      ..lineTo(vanishing.dx + band.width * 0.08, horizonY)
+      ..lineTo(vanishing.dx - band.width * 0.08, horizonY)
+      ..close();
+    canvas.drawPath(ground, Paint()..color = const Color(0xFF2A2118));
+    // Center lane lines converging
+    final lanePaint = Paint()
+      ..color = FactionColors.gold.withValues(alpha: 0.35)
+      ..strokeWidth = 1.6;
+    canvas.drawLine(Offset(band.width * 0.42, band.bottom - 4), vanishing, lanePaint);
+    canvas.drawLine(Offset(band.width * 0.58, band.bottom - 4), vanishing, lanePaint);
+    // Side rails
+    final rail = Paint()
+      ..color = Colors.white.withValues(alpha: 0.12)
+      ..strokeWidth = 2;
+    canvas.drawLine(Offset(band.width * 0.08, band.bottom), Offset(vanishing.dx - 18, horizonY), rail);
+    canvas.drawLine(Offset(band.width * 0.92, band.bottom), Offset(vanishing.dx + 18, horizonY), rail);
+    // Far hills / depth cue
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(band.width * 0.5, horizonY - 6), width: band.width * 0.7, height: 18),
+      Paint()..color = const Color(0xFF0E1418).withValues(alpha: 0.8),
+    );
+    _drawText(canvas, '遠', Offset(band.width * 0.72, horizonY + 4), Colors.white38, 10);
+    _drawText(canvas, '近', Offset(band.width * 0.12, band.bottom - 18), Colors.white38, 10);
+  }
+
+  void _drawMiniToken(Canvas canvas, Offset c, Color fill, {required bool enemy, double scale = 1}) {
+    final w = 34.0 * scale;
+    final h = 42.0 * scale;
+    final rect = RRect.fromRectAndRadius(Rect.fromCenter(center: c, width: w, height: h), Radius.circular(6 * scale));
+    // Lacquer card + thin faction stripe (not a flat color block body)
+    canvas.drawRRect(rect, Paint()..color = const Color(0xFF161616));
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(c.dx - w / 2, c.dy - h / 2, w, h * 0.22), Radius.circular(5 * scale)),
+      Paint()..color = fill.withValues(alpha: 0.95),
+    );
+    if (enemy) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: c, width: w + 14, height: h + 14), Radius.circular(9 * scale)),
+        Paint()
+          ..color = const Color(0xFFECEFF1)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.2 * scale,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: c, width: w + 8, height: h + 8), Radius.circular(8 * scale)),
+        Paint()
+          ..color = const Color(0xFF000000)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 5.5 * scale,
+      );
+    }
     canvas.drawRRect(
       rect,
       Paint()
-        ..color = enemy ? const Color(0xFF212121) : FactionColors.gold
+        ..color = enemy ? const Color(0xFF000000) : FactionColors.gold
         ..style = PaintingStyle.stroke
-        ..strokeWidth = enemy ? 3.2 : 2.2,
+        ..strokeWidth = enemy ? 3.8 * scale : 2.4 * scale,
     );
+    if (enemy) {
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..color = const Color(0xFFB0BEC5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4 * scale,
+      );
+    }
+    // Weapons-only glyph
+    _drawWeapon(canvas, c.translate(0, 2 * scale), TroopType.cavalry, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
   void _drawCardLikeToken(
@@ -641,47 +816,86 @@ class TaisenGame extends FlameGame {
     required bool pulseOwn,
   }) {
     final base = _tokenFill(card);
-    final fill = dim ? base.withValues(alpha: 0.3) : base;
+    final fill = dim ? base.withValues(alpha: 0.35) : base;
     final rect = RRect.fromRectAndRadius(
       Rect.fromCenter(center: center, width: tokenR * 1.7, height: tokenR * 2.05),
       const Radius.circular(8),
     );
-    // Soft lacquer card face (not bare grey circle)
-    canvas.drawRRect(rect, Paint()..color = const Color(0xFF1A1A1A).withValues(alpha: dim ? 0.35 : 0.92));
-    canvas.drawCircle(center.translate(0, -4), tokenR * 0.72, Paint()..color = fill);
-    if (!dim && card.faction == Faction.shu && !isEnemy) {
-      canvas.drawCircle(center.translate(0, -4), tokenR * 0.62, Paint()..color = const Color(0xFF66BB6A));
-      canvas.drawCircle(center.translate(0, -4), tokenR * 0.38, Paint()..color = const Color(0xFF43A047));
-    }
-    final border = isEnemy ? const Color(0xFF101010) : FactionColors.gold;
-    canvas.drawRRect(
-      rect,
-      Paint()
-        ..color = border
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = isEnemy ? 3.5 : 2.4,
+    // Gold-border card shape: lacquer face + thin faction stripe (NOT portrait blob).
+    canvas.drawRRect(rect, Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.4 : 0.96));
+    final stripe = RRect.fromRectAndRadius(
+      Rect.fromLTWH(center.dx - tokenR * 0.85, center.dy - tokenR * 1.025, tokenR * 1.7, tokenR * 0.42),
+      const Radius.circular(7),
     );
+    canvas.drawRRect(stripe, Paint()..color = fill);
+    // Soft inner panel so weapon icon pops
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: center.translate(0, 4), width: tokenR * 1.25, height: tokenR * 1.15),
+        const Radius.circular(6),
+      ),
+      Paint()..color = const Color(0xFF1E1E1E).withValues(alpha: dim ? 0.35 : 0.9),
+    );
+
     if (isEnemy) {
-      // Dark outline + inner cool rim so enemy reads vs gold own cards
+      // PRIORITY: Wei=Wei — thick dark outline + cool/white halo (NOT gold; own keeps gold ring).
+      // Facing arrow stays yellow/white separately.
+      final halo = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: center, width: tokenR * 1.7 + 24, height: tokenR * 2.05 + 24),
+        const Radius.circular(14),
+      );
+      canvas.drawRRect(
+        halo,
+        Paint()
+          ..color = const Color(0xFFECEFF1) // silver-white halo ≠ gold select
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4.5,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(center: center, width: tokenR * 1.7 + 14, height: tokenR * 2.05 + 14),
+          const Radius.circular(12),
+        ),
+        Paint()
+          ..color = const Color(0xFF000000)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 10.0,
+      );
       canvas.drawRRect(
         rect,
         Paint()
-          ..color = const Color(0xFF90A4AE).withValues(alpha: 0.55)
+          ..color = const Color(0xFF0A0A0A)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2,
+          ..strokeWidth = 5.5,
+      );
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..color = const Color(0xFFB0BEC5)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+    } else {
+      // Own: gold-border card
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..color = FactionColors.gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.8,
       );
     }
     if (selected && !isEnemy) {
-      // Fat gold select ring
+      // Fat gold select ring (own only — never on enemy)
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: tokenR * 1.7 + 10, height: tokenR * 2.05 + 10),
-          const Radius.circular(10),
+          Rect.fromCenter(center: center, width: tokenR * 1.7 + 12, height: tokenR * 2.05 + 12),
+          const Radius.circular(11),
         ),
         Paint()
           ..color = FactionColors.gold
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.5,
+          ..strokeWidth = 5.0,
       );
     }
     if (pulseOwn) {
@@ -697,30 +911,55 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 2.5,
       );
     }
+    // Weapons-only icon (larger) — no face/portrait blob.
     _drawWeapon(
       canvas,
-      Offset(center.dx, center.dy - 4),
+      Offset(center.dx, center.dy + 2),
       card.troop,
       dim ? Colors.white38 : Colors.white,
+      scale: 1.35,
     );
   }
 
-  void _drawFacingArrow(Canvas canvas, Offset c, double facing, Color color) {
+  void _drawFacingArrow(Canvas canvas, Offset c, double facing, Color color, {bool enemyHard = false}) {
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
+    // Enemy: ALWAYS white/yellow tip — never faction fill alone.
+    final tipColor = enemyHard ? const Color(0xFFFFF59D) : color;
+    final tipY = enemyHard ? -54.0 : -38.0;
+    final baseY = enemyHard ? -28.0 : -22.0;
+    final half = enemyHard ? 13.0 : 8.0;
     final path = Path()
-      ..moveTo(0, -38)
-      ..lineTo(-8, -22)
-      ..lineTo(8, -22)
+      ..moveTo(0, tipY)
+      ..lineTo(-half, baseY)
+      ..lineTo(half, baseY)
       ..close();
-    canvas.drawPath(path, Paint()..color = color.withValues(alpha: 0.95));
+    if (enemyHard) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = const Color(0xFF000000)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6.0
+          ..strokeJoin = StrokeJoin.round,
+      );
+      canvas.drawLine(
+        Offset(0, baseY + 2),
+        const Offset(0, -2),
+        Paint()
+          ..color = const Color(0xFF000000)
+          ..strokeWidth = 6.5
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    canvas.drawPath(path, Paint()..color = tipColor.withValues(alpha: 0.98));
     canvas.drawLine(
-      const Offset(0, -20),
-      const Offset(0, -6),
+      Offset(0, baseY + 2),
+      Offset(0, enemyHard ? -2 : -6),
       Paint()
-        ..color = color
-        ..strokeWidth = 2.5
+        ..color = tipColor
+        ..strokeWidth = enemyHard ? 4.0 : 2.5
         ..strokeCap = StrokeCap.round,
     );
     canvas.restore();
@@ -757,12 +996,11 @@ class TaisenGame extends FlameGame {
   }) {
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session1 && isOwn) {
-      // Charge cyan/white aura — must read clearly during waitAura (≥1C gate).
+      // Charge cyan/white aura — only after drop (waitAura+). Mid-drag FEEL shots stay ring-free.
       if (t.s1 == S1Phase.waitAura ||
           t.s1 == S1Phase.hitCharge ||
-          t.s1 == S1Phase.tipNext ||
-          t.shotPassMode) {
-        final readyBoost = (t.auraReady || t.shotPassMode) ? 1.0 : 0.72;
+          t.s1 == S1Phase.tipNext) {
+        final readyBoost = (t.auraReady || (t.shotPassMode && t.auraReady)) ? 1.0 : 0.72;
         _drawChargeRings(
           canvas,
           c,
@@ -794,7 +1032,17 @@ class TaisenGame extends FlameGame {
     // Match / demo telegraph by troop
     switch (card.troop) {
       case TroopType.cavalry:
-        _drawChargeRings(canvas, c, 36, const Color(0xFF00E5FF).withValues(alpha: 0.55));
+        // 「見環先撞」: bright aura only after drag-drop while waiting ≥1C.
+        if (_matchChargeIndex == index) {
+          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.55 + 0.35 * (_matchChargeC.clamp(0, 1)));
+          _drawChargeRings(
+            canvas,
+            c,
+            44,
+            const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
+            whiteCore: true,
+          );
+        }
         break;
       case TroopType.spear:
         _drawInterceptStance(canvas, c, 40, const Color(0xFF26C6DA).withValues(alpha: 0.5));
@@ -849,39 +1097,40 @@ class TaisenGame extends FlameGame {
     canvas.rotate(facing);
     canvas.translate(-c.dx, -c.dy);
 
-    final oval = Rect.fromCenter(center: c, width: rx * 2.2, height: rx * 1.1);
+    final oval = Rect.fromCenter(center: c, width: rx * 2.6, height: rx * 1.35);
     canvas.drawOval(
       oval,
       Paint()
-        ..color = color.withValues(alpha: 0.35)
+        ..color = color.withValues(alpha: 0.4)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
+        ..strokeWidth = 2.6,
     );
+    // Bigger spear-tip triangle (was too small)
     final wedge = Path()
-      ..moveTo(c.dx, c.dy - 4)
-      ..lineTo(c.dx - 18, c.dy + 22)
-      ..lineTo(c.dx + 18, c.dy + 22)
+      ..moveTo(c.dx, c.dy - 52)
+      ..lineTo(c.dx - 28, c.dy + 10)
+      ..lineTo(c.dx + 28, c.dy + 10)
       ..close();
-    canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.45));
-    // Persistent spear tip / 槍衾 glow (not a countdown bar)
+    canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.5));
+    canvas.drawPath(
+      wedge,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+    // Persistent spear tip / 槍衾 glow (not a countdown bar) — larger
     final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
-    canvas.drawCircle(
-      Offset(c.dx, c.dy - 28),
-      12,
-      Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.35 * glow),
-    );
-    canvas.drawCircle(
-      Offset(c.dx, c.dy - 28),
-      8,
-      Paint()..color = Colors.white.withValues(alpha: 0.45 * glow),
-    );
-    canvas.drawCircle(Offset(c.dx, c.dy - 28), 5, Paint()..color = Colors.white.withValues(alpha: 0.95));
+    final tip = Offset(c.dx, c.dy - 48);
+    canvas.drawCircle(tip, 22, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.4 * glow));
+    canvas.drawCircle(tip, 14, Paint()..color = Colors.white.withValues(alpha: 0.5 * glow));
+    canvas.drawCircle(tip, 8, Paint()..color = Colors.white.withValues(alpha: 0.95));
     canvas.drawLine(
-      Offset(c.dx, c.dy + 18),
-      Offset(c.dx, c.dy - 30),
+      Offset(c.dx, c.dy + 26),
+      Offset(c.dx, c.dy - 50),
       Paint()
         ..color = color
-        ..strokeWidth = 3.0
+        ..strokeWidth = 4.2
         ..strokeCap = StrokeCap.round,
     );
     canvas.restore();
@@ -1091,10 +1340,11 @@ class TaisenGame extends FlameGame {
       final y = at.dy.clamp(watchH + 40, size.y - 40);
       final x = at.dx.clamp(36.0, size.x - 36);
       fieldPos[selectedIndex!] = Offset(x, y);
-      // Cavalry drag far enough → show charge aura telegraph (visual only).
+      // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
       if (field[selectedIndex!].troop == TroopType.cavalry && dragFrom != null) {
         if ((Offset(x, y) - dragFrom!).distance > 70) {
-          flashHit(selectedIndex!, '突撃');
+          _matchChargeIndex = selectedIndex;
+          _matchChargeC = 0;
         }
       }
     }
@@ -1218,40 +1468,46 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _drawWeapon(Canvas canvas, Offset c, TroopType troop, Color color) {
+  void _drawWeapon(Canvas canvas, Offset c, TroopType troop, Color color, {double scale = 1}) {
+    final s = scale;
     final p = Paint()
       ..color = color
-      ..strokeWidth = 2.5
+      ..strokeWidth = 2.5 * s
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
     switch (troop) {
       case TroopType.cavalry:
-        canvas.drawLine(Offset(c.dx - 10, c.dy + 8), Offset(c.dx + 10, c.dy - 10), p);
-        canvas.drawCircle(Offset(c.dx + 10, c.dy - 10), 3.5, Paint()..color = color);
-        canvas.drawCircle(c, 7, p);
+        // Blade / saber — weapons-only
+        canvas.drawLine(Offset(c.dx - 12 * s, c.dy + 10 * s), Offset(c.dx + 12 * s, c.dy - 12 * s), p);
+        canvas.drawCircle(Offset(c.dx + 12 * s, c.dy - 12 * s), 4.2 * s, Paint()..color = color);
+        canvas.drawLine(Offset(c.dx - 4 * s, c.dy + 4 * s), Offset(c.dx - 14 * s, c.dy + 2 * s), p);
         break;
       case TroopType.spear:
-        canvas.drawLine(Offset(c.dx, c.dy + 12), Offset(c.dx, c.dy - 12), p);
-        canvas.drawLine(Offset(c.dx - 5, c.dy - 8), Offset(c.dx, c.dy - 12), p);
-        canvas.drawLine(Offset(c.dx + 5, c.dy - 8), Offset(c.dx, c.dy - 12), p);
+        canvas.drawLine(Offset(c.dx, c.dy + 16 * s), Offset(c.dx, c.dy - 16 * s), p);
+        final tip = Path()
+          ..moveTo(c.dx, c.dy - 18 * s)
+          ..lineTo(c.dx - 7 * s, c.dy - 8 * s)
+          ..lineTo(c.dx + 7 * s, c.dy - 8 * s)
+          ..close();
+        canvas.drawPath(tip, Paint()..color = color);
         break;
       case TroopType.bow:
         final arc = Path()
-          ..moveTo(c.dx - 8, c.dy - 10)
-          ..quadraticBezierTo(c.dx + 10, c.dy, c.dx - 8, c.dy + 10);
+          ..moveTo(c.dx - 10 * s, c.dy - 14 * s)
+          ..quadraticBezierTo(c.dx + 14 * s, c.dy, c.dx - 10 * s, c.dy + 14 * s);
         canvas.drawPath(arc, p);
-        canvas.drawLine(Offset(c.dx - 8, c.dy - 10), Offset(c.dx - 8, c.dy + 10), p);
-        canvas.drawLine(Offset(c.dx - 6, c.dy), Offset(c.dx + 8, c.dy), p);
+        canvas.drawLine(Offset(c.dx - 10 * s, c.dy - 14 * s), Offset(c.dx - 10 * s, c.dy + 14 * s), p);
+        canvas.drawLine(Offset(c.dx - 8 * s, c.dy), Offset(c.dx + 12 * s, c.dy), p);
         break;
       case TroopType.siege:
-        canvas.drawRect(Rect.fromCenter(center: c, width: 14, height: 10), p);
-        canvas.drawLine(Offset(c.dx - 10, c.dy + 8), Offset(c.dx + 10, c.dy + 8), p);
+        canvas.drawRect(Rect.fromCenter(center: c, width: 16 * s, height: 12 * s), p);
+        canvas.drawLine(Offset(c.dx - 12 * s, c.dy + 10 * s), Offset(c.dx + 12 * s, c.dy + 10 * s), p);
         break;
       case TroopType.infantry:
-        canvas.drawLine(Offset(c.dx, c.dy - 10), Offset(c.dx, c.dy + 6), p);
-        canvas.drawLine(Offset(c.dx - 7, c.dy - 2), Offset(c.dx + 7, c.dy - 2), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 6), Offset(c.dx - 6, c.dy + 12), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 6), Offset(c.dx + 6, c.dy + 12), p);
+        canvas.drawLine(Offset(c.dx, c.dy - 12 * s), Offset(c.dx, c.dy + 8 * s), p);
+        canvas.drawLine(Offset(c.dx - 9 * s, c.dy - 2 * s), Offset(c.dx + 9 * s, c.dy - 2 * s), p);
+        canvas.drawLine(Offset(c.dx, c.dy + 8 * s), Offset(c.dx - 7 * s, c.dy + 14 * s), p);
+        canvas.drawLine(Offset(c.dx, c.dy + 8 * s), Offset(c.dx + 7 * s, c.dy + 14 * s), p);
         break;
     }
   }

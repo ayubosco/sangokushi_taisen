@@ -31,9 +31,11 @@
 
 ## 閘 1 — 拖得郁
 
-- [ ] 選→拖有導線／落點；唔係淨自動過關
-- [ ] 命中有飛字「突撃／迎擊」＋短震（≤0.3C）
-- [ ] 一拇指：≥48dp／計略≥12mm
+- [x] 選→拖有導線／落點；唔係淨自動過關（tip 唔跳拖；match 亦等オーラ≥1C）
+- [x] 命中有飛字「突撃／迎擊」＋短震（≤0.3C）；浮字唔叠成「迎擊迎擊」
+- [x] 一拇指：≥48dp／計略≥12mm
+- 截圖：`feel-drag-live.png` · `feel-drag-hit.png` · `feel-drag-samefaction.png`（Wei=Wei 敵硬描邊）
+- FEEL_SHOT=`drag-live`|`drag-hit`|`drag-samefaction`|…；Title=`三國指大戰` only
 
 ## 閘 2 — 嚟得切
 

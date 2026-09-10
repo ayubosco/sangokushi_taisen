@@ -14,7 +14,9 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-aura|intercept|stratagem|castle —「打得似」captures.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|stratagem|castle.
+/// drag-live/mid-drag；drag-hit post-突撃；drag-samefaction = Wei vs Wei mid-drag（敵硬描邊複核）.
+/// Title lock:「三國指大戰」only — never Sega「三國志大戦」.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 
 void main() {
@@ -341,7 +343,25 @@ class _TutorialShellState extends State<TutorialShell> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (kFeelShot == 'drag-aura' || kTutorialShot == 's1aura' || kDemoShot == 's1') {
+      if (kFeelShot == 'drag-live') {
+        // Mid-drag freeze: guide line + hard enemy outline (tip cannot skip drag).
+        _game.setupFeelDragLivePose();
+        _tutorial.forceFeelDragLive();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = true;
+      } else if (kFeelShot == 'drag-samefaction') {
+        // Design re-check: Wei blue vs Wei blue mid-drag — outline+arrow must carry ID.
+        _game.setupFeelDragSameFactionPose();
+        _tutorial.forceFeelDragLive();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = true;
+      } else if (kFeelShot == 'drag-hit') {
+        // Post-hit after select→drag→drop→aura≥1C→突撃.
+        _game.setupFeelDragHitPose();
+        _tutorial.forceFeelDragHit();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = false;
+      } else if (kFeelShot == 'drag-aura' || kTutorialShot == 's1aura' || kDemoShot == 's1') {
         // Layout lock: keep enemy on lower field; drag guide + bright aura.
         _game.setupSession1Field();
         if (kFeelShot == 'drag-aura') {
@@ -770,7 +790,7 @@ class _Hud extends StatelessWidget {
                 height: 28,
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const Text(
-                  '三國大戰',
+                  '三國指大戰',
                   style: TextStyle(
                     color: FactionColors.gold,
                     fontWeight: FontWeight.bold,
