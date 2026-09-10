@@ -14,8 +14,8 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|stratagem|castle.
-/// drag-live/mid-drag；drag-hit post-突撃；drag-samefaction = Wei vs Wei mid-drag（敵硬描邊複核）.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|stratagem|castle.
+/// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢.
 /// Title lock:「三國指大戰」only — never Sega「三國志大戦」.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 
@@ -81,7 +81,7 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     _stage = _initialStage();
-    if (kDemoShot == 'match' || kFeelShot == 'castle') {
+    if (kDemoShot == 'match' || kFeelShot == 'castle' || kFeelShot == 'bow') {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -92,7 +92,7 @@ class _AppRootState extends State<AppRoot> {
   _AppStage _initialStage() {
     if (kDemoShot == 'splash') return _AppStage.splash;
     if (kDemoShot == 'bingfa') return _AppStage.bingfaPick;
-    if (kFeelShot == 'castle' || kDemoShot == 'match') return _AppStage.match;
+    if (kFeelShot == 'castle' || kFeelShot == 'bow' || kDemoShot == 'match') return _AppStage.match;
     if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       return _AppStage.tutorial;
     }
@@ -381,6 +381,12 @@ class _TutorialShellState extends State<TutorialShell> {
         }
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;
+      } else if (kFeelShot == 'intercept-window') {
+        _game.setupFeelInterceptWindowPose();
+        _tutorial.forceFeelInterceptWindow();
+        _game.watchKind = AWindowKind.intercept;
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = true;
       } else if (kFeelShot == 'intercept') {
         _game.setupSession2Field();
         _tutorial.forceFeelIntercept();
@@ -417,9 +423,15 @@ class _TutorialShellState extends State<TutorialShell> {
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;
       }
-      // Tutorial HUD: 99C vocabulary — pause so never red 0 C during teach/shots.
+      // Freeze C only for FEEL_SHOT / TUTORIAL_SHOT / DEMO_SHOT captures.
+      // Free tutorial play keeps HUD clock running so player can count ≥1C / ~1C.
       _game.clock.reset();
-      _game.clock.pause();
+      final freezeClock = kFeelShot.isNotEmpty || kTutorialShot.isNotEmpty || kDemoShot.isNotEmpty;
+      if (freezeClock) {
+        _game.clock.pause();
+      } else {
+        _game.clock.resume();
+      }
       setState(() => _fieldReady = true);
       // Auto-hide session banner after a beat (still readable at start).
       Future<void>.delayed(const Duration(milliseconds: 2200), () {
@@ -701,6 +713,11 @@ class _MatchShellState extends State<MatchShell> {
       if (kFeelShot == 'castle') {
         _game.setupFeelCastleField();
         // 返城 float held for shot (no combat numbers).
+      } else if (kFeelShot == 'bow') {
+        _game.setupFeelBowWindupPose();
+        // Freeze mid-windup for capture; free play match still ticks C.
+        _game.clock.reset();
+        _game.clock.pause();
       } else {
         _game.setupMatchDemoField();
       }

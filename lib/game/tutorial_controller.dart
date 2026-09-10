@@ -42,8 +42,10 @@ class TutorialController extends ChangeNotifier {
   /// Session1: aura armed after ≥1C on drop.
   bool auraReady = false;
 
-  /// Session2: enemy aura visible; facing correct after ≥1C.
+  /// Session2: enemy aura visible; after aura ≥1C turn window opens for manual facing.
   bool enemyAuraVisible = false;
+  /// True once enemy aura has been visible ≥1C — player may change facing then intercept.
+  bool turnWindowOpen = false;
   bool facingCorrect = false;
   bool interceptDone = false;
   bool strategyOrReturnDone = false;
@@ -66,6 +68,7 @@ class TutorialController extends ChangeNotifier {
     auraReady = false;
     didDragDrop = false;
     enemyAuraVisible = false;
+    turnWindowOpen = false;
     facingCorrect = false;
     interceptDone = false;
     strategyOrReturnDone = false;
@@ -81,6 +84,7 @@ class TutorialController extends ChangeNotifier {
     failed = false;
     failReason = null;
     enemyAuraVisible = false;
+    turnWindowOpen = false;
     facingCorrect = false;
     interceptDone = false;
     strategyOrReturnDone = false;
@@ -171,7 +175,7 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s2 = S2Phase.enemyApproach;
           enemyAuraVisible = true;
-          tipText = '敵騎氣場出咗 — 等 ≥1C、面向正確後再點「迎擊」';
+          tipText = '敵騎氣場出咗 — 用 HUD 數 ≥1C，唔好太早迎擊';
           notifyListeners();
         }
         break;
@@ -179,14 +183,15 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 0.3) {
           phaseC = 0;
           s2 = S2Phase.waitTurn;
+          tipText = '氣場可見中… 數 ≥1C 先轉面（點己方槍兵）';
           notifyListeners();
         }
         break;
       case S2Phase.waitTurn:
-        if (phaseC >= 1.0 && !facingCorrect) {
-          facingCorrect = true;
-          s2 = S2Phase.interceptHit;
-          tipText = '面向正確！而家點浮字「迎擊」過關';
+        // Aura must stay visible ≥1C before player may turn facing / intercept.
+        if (phaseC >= 1.0 && !turnWindowOpen) {
+          turnWindowOpen = true;
+          tipText = '轉身窗開！點己方槍兵轉面迎敵，再點「迎擊」';
           tipSkippable = false;
           notifyListeners();
         }
@@ -196,10 +201,11 @@ class TutorialController extends ChangeNotifier {
           failed = false;
           failReason = null;
           facingCorrect = false;
+          turnWindowOpen = false;
           enemyAuraVisible = true;
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '重試：等氣場 ≥1C、面向正確後再點「迎擊」';
+          tipText = '重試：等氣場 ≥1C → 點槍兵轉面 → 再點「迎擊」';
           notifyListeners();
         }
         break;
@@ -260,9 +266,35 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Player taps own spear to change facing once turn window is open.
+  void onTapTurnFacing() {
+    if (session != TutorialSession.session2) return;
+    if (s2 != S2Phase.waitTurn && s2 != S2Phase.interceptHit) return;
+    if (!turnWindowOpen) {
+      _failS2('太早轉面／迎擊 — 敵氣場要可見 ≥1C');
+      return;
+    }
+    if (facingCorrect) return;
+    facingCorrect = true;
+    s2 = S2Phase.interceptHit;
+    tipText = '面向正確！而家點浮字「迎擊」過關';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
   void onTapIntercept({required bool facingWasCorrect}) {
     if (session != TutorialSession.session2) return;
-    if (s2 != S2Phase.interceptHit && s2 != S2Phase.waitTurn) return;
+    if (s2 != S2Phase.interceptHit &&
+        s2 != S2Phase.waitTurn &&
+        s2 != S2Phase.enemyApproach &&
+        s2 != S2Phase.spearGlow) {
+      return;
+    }
+    // Too early: aura not yet visible ≥1C.
+    if (!turnWindowOpen) {
+      _failS2('嚟唔切 — 敵氣場要可見 ≥1C 先迎擊');
+      return;
+    }
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.strategyOrReturn;
@@ -270,13 +302,17 @@ class TutorialController extends ChangeNotifier {
       tipSkippable = false;
       notifyListeners();
     } else {
-      failed = true;
-      failReason = '面向不對 — 重試';
-      phaseC = 0;
-      s2 = S2Phase.failRetry;
-      tipText = failReason;
-      notifyListeners();
+      _failS2('面向不對 — 先點槍兵轉面再迎擊');
     }
+  }
+
+  void _failS2(String reason) {
+    failed = true;
+    failReason = reason;
+    phaseC = 0;
+    s2 = S2Phase.failRetry;
+    tipText = reason;
+    notifyListeners();
   }
 
   void onStrategy() {
@@ -322,6 +358,7 @@ class TutorialController extends ChangeNotifier {
     interceptDone = true;
     strategyOrReturnDone = true;
     facingCorrect = true;
+    turnWindowOpen = true;
     enemyAuraVisible = true;
     failed = false;
     notifyListeners();
@@ -353,6 +390,7 @@ class TutorialController extends ChangeNotifier {
     interceptDone = true;
     strategyOrReturnDone = false;
     facingCorrect = true;
+    turnWindowOpen = true;
     enemyAuraVisible = true;
     failed = false;
     failReason = null;
@@ -403,13 +441,31 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Feel shot: intercept tip glow + facing ready.
+  /// Feel shot: intercept wait window — enemy aura visible, turn window not yet / just open, facing still wrong.
+  void forceFeelInterceptWindow() {
+    shotPassMode = true;
+    session = TutorialSession.session2;
+    s2 = S2Phase.waitTurn;
+    phaseC = 0.85; // mid-wait: aura on, count toward ≥1C
+    facingCorrect = false;
+    turnWindowOpen = false;
+    enemyAuraVisible = true;
+    interceptDone = false;
+    tipText = '敵オーラ可見 — 數 ≥1C 先轉面迎擊（槍尖常在）';
+    tipSkippable = false;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
+  /// Feel shot: intercept tip glow + facing ready (hit pose).
   void forceFeelIntercept() {
     shotPassMode = true;
     session = TutorialSession.session2;
     s2 = S2Phase.interceptHit;
     phaseC = 1.0;
     facingCorrect = true;
+    turnWindowOpen = true;
     enemyAuraVisible = true;
     interceptDone = false;
     tipText = '槍尖常在；敵オーラ≥1C 後轉面迎擊';

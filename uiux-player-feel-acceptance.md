@@ -39,8 +39,13 @@
 
 ## 閘 2 — 嚟得切
 
-- [ ] 靜態截圖唔夠——要可手動打一場，用 C 心算驗 ≥1C／~1C
+- [x] 迎擊轉身窗：敵オーラ可見 ≥1C 後先准轉面＋「迎擊」；太早／錯面 → fail/retry；槍尖常駐大光；單粒肥「迎擊」
+- [x] 弓停~1C：地面印＋瞄準虛線＋準星；郁就取消；停滿先准第一射（視覺飛字「射」，無發明傷害數）
+- [x] 自由教學／對局 HUD C 鐘走表（只 FEEL_SHOT／TUTORIAL_SHOT／DEMO_SHOT 先 freeze）
+- [x] 截圖：`feel-intercept-window.png` · `feel-bow-windup.png`（命中續用 `feel-intercept.png`）
+- [x] Design 武器角標 sheet＋場漆紋 swatch 已掛（唔再用灰圓／slash）
 - [ ] Fail 用語：嚟唔切／睇唔見預兆／擋掣／完全唔似大戦
+- 手動驗：教學場2 睇 HUD 由 99C 向下數 ≥1C 先點槍轉面再迎擊；對局選弓停穩數 ~1C 再點射、拖走會取消
 
 ---
 

@@ -1,8 +1,10 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/card_models.dart';
 import 'c_clock.dart';
@@ -37,6 +39,10 @@ class TaisenGame extends FlameGame {
   double _shakeLeft = 0;
   /// Shot mode: keep 返城 float visible.
   bool holdReturnFlash = false;
+
+  /// Design assets: weapon corner atlas + lacquer field swatch.
+  ui.Image? _weaponSheet;
+  ui.Image? _fieldLacquer;
 
   /// Tutorial token roles (indices into [field]).
   int? tutorialOwnIndex;
@@ -73,6 +79,21 @@ class TaisenGame extends FlameGame {
   int? _matchChargeIndex;
   double _matchChargeC = 0;
 
+  /// Free-match bow: still windup ~1C; moving cancels; first shot only after ready.
+  int? _bowWindupIndex;
+  double _bowWindupC = 0;
+  bool _bowShotReady = false;
+  bool _bowDidShoot = false;
+
+  /// Free-match enemy charge aura (for spear intercept practice) — visual only.
+  int? _matchEnemyChargeIndex;
+  double _matchEnemyChargeC = 0;
+
+  /// Free-match intercept: turn window after enemy aura ≥1C.
+  bool _matchTurnWindowOpen = false;
+  bool _matchFacingCorrect = false;
+  int? _matchSpearIndex;
+
   void Function(CardFace card)? onRequestDetail;
   VoidCallback? onTutorialChanged;
 
@@ -83,7 +104,19 @@ class TaisenGame extends FlameGame {
   Future<void> onLoad() async {
     await super.onLoad();
     camera.viewfinder.anchor = Anchor.topLeft;
+    // Preserve pause: reset() sets running=true; FEEL/TutorialShell may already have paused.
+    final wasRunning = clock.running;
     clock.reset();
+    if (!wasRunning) clock.pause();
+    _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
+    _fieldLacquer = await _loadUiImage('assets/field/field-lacquer-swatch.png');
+  }
+
+  Future<ui.Image> _loadUiImage(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final frame = await codec.getNextFrame();
+    return frame.image;
   }
 
   double get watchH => size.y / 3;
@@ -179,6 +212,26 @@ class TaisenGame extends FlameGame {
     tutorialOwnIndex = 0;
     ownCastle = 0.72;
     enemyCastle = 0.58;
+    // Enemy cavalry auto-charges so spear intercept is manually verifiable (≥1C aura).
+    _matchEnemyChargeIndex = null;
+    _matchEnemyChargeC = 0;
+    _matchTurnWindowOpen = false;
+    _matchFacingCorrect = false;
+    _matchSpearIndex = null;
+    for (var i = 0; i < field.length; i++) {
+      if (fieldIsEnemy[i] && field[i].troop == TroopType.cavalry && _matchEnemyChargeIndex == null) {
+        _matchEnemyChargeIndex = i;
+      }
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.spear && _matchSpearIndex == null) {
+        _matchSpearIndex = i;
+      }
+    }
+    _matchEnemyChargeC = 0;
+    ownFacing = 0.85; // wrong until player turns
+    _bowWindupIndex = null;
+    _bowWindupC = 0;
+    _bowShotReady = false;
+    _bowDidShoot = false;
   }
 
   void setupFeelCastleField() {
@@ -259,6 +312,36 @@ class TaisenGame extends FlameGame {
     dragging = true;
   }
 
+  /// FEEL_SHOT=intercept-window: enemy aura on, spear tip glow, facing still wrong (count C).
+  void setupFeelInterceptWindowPose() {
+    setupSession2Field();
+    ownFacing = 0.9; // wrong facing — player must turn after ≥1C
+    enemyFacing = math.pi;
+    watchKind = AWindowKind.intercept;
+    selectedIndex = tutorialOwnIndex;
+  }
+
+  /// FEEL_SHOT=bow: own bow mid windup (ground seal + aim dash + reticle), still ~1C.
+  void setupFeelBowWindupPose() {
+    setupMatchDemoField();
+    int? bowI;
+    for (var i = 0; i < field.length; i++) {
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.bow) {
+        bowI = i;
+        break;
+      }
+    }
+    bowI ??= 0;
+    selectedIndex = bowI;
+    _bowWindupIndex = bowI;
+    _bowWindupC = 0.72; // mid windup readable
+    _bowShotReady = false;
+    _bowDidShoot = false;
+    watchKind = AWindowKind.bow;
+    // Pause enemy charge noise for clean bow shot.
+    _matchEnemyChargeIndex = null;
+  }
+
   Offset get dropGuidePoint {
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
@@ -269,10 +352,8 @@ class TaisenGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
-    // Tutorial shell keeps C frozen at 99 (paused); match demo still ticks.
-    if (tutorial == null) {
-      clock.update(dt);
-    }
+    // C clock runs whenever [CClock.running] — FEEL_SHOT/TutorialShell pause for freezes only.
+    clock.update(dt);
     _pulse += dt;
     tutorial?.tick(dt);
 
@@ -342,12 +423,36 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Session2: when facing becomes correct, rotate spear tip toward enemy.
+    // Free-match: enemy charge aura visible; after ≥1C open spear turn/intercept window.
+    if (tutorial == null && _matchEnemyChargeIndex != null) {
+      _matchEnemyChargeC += dt / CClock.secondsPerC;
+      if (_matchEnemyChargeC >= FxWindows.interceptTurnAfterAuraC && !_matchTurnWindowOpen) {
+        _matchTurnWindowOpen = true;
+      }
+    }
+
+    // Free-match bow: accumulate still time toward ~1C; first shot only when ready.
+    if (tutorial == null && _bowWindupIndex != null && !_bowDidShoot) {
+      _bowWindupC += dt / CClock.secondsPerC;
+      if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
+        _bowShotReady = true;
+      }
+    }
+
+    // Session2 / match: facing drives spear tip — player sets facingCorrect / _matchFacingCorrect.
     final t = tutorial;
-    if (t != null && t.session == TutorialSession.session2 && t.facingCorrect) {
-      ownFacing = -0.35; // tip toward enemy
-    } else if (t != null && t.session == TutorialSession.session2 && !t.facingCorrect) {
-      ownFacing = 0.9; // wrong facing
+    if (t != null && t.session == TutorialSession.session2) {
+      if (t.facingCorrect) {
+        ownFacing = -0.35; // tip toward enemy
+      } else {
+        ownFacing = 0.9; // wrong facing until player turns
+      }
+    } else if (tutorial == null && _matchSpearIndex != null) {
+      if (_matchFacingCorrect) {
+        ownFacing = -0.35;
+      } else {
+        ownFacing = 0.85;
+      }
     }
   }
 
@@ -375,9 +480,11 @@ class TaisenGame extends FlameGame {
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
 
-    // Bottom 2/3: flat field — own + enemy tokens.
-    canvas.drawRect(Rect.fromLTWH(0, fieldTop, w, h - wh), Paint()..color = const Color(0xFF101010));
-    _drawLacquerGrain(canvas, Rect.fromLTWH(0, fieldTop, w, h - wh), alpha: 0.14);
+    // Bottom 2/3: lacquer field swatch (Design) — not flat grey; tokens stay readable.
+    final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
+    canvas.drawRect(fieldRect, Paint()..color = const Color(0xFF0A0A0A));
+    _drawFieldLacquer(canvas, fieldRect);
+    _drawLacquerGrain(canvas, fieldRect, alpha: 0.06);
 
     final t = tutorial;
     _drawText(canvas, '雙方動向（可操作）', Offset(16, fieldTop + 28), FactionColors.gold, 16);
@@ -492,15 +599,27 @@ class TaisenGame extends FlameGame {
       _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '突撃', ready);
     }
 
-    // Floating 迎擊 — only while awaiting tap; NEVER stack with fat-float「迎擊」(no 迎擊迎擊).
+    // Floating 迎擊 — single fat float; dim while waiting / wrong facing; NEVER stack with hit 飛字.
     final suppressFloatIntercept = _hitFlashLeft > 0 && _hitFlashLabel == '迎擊';
     if (t != null &&
         t.session == TutorialSession.session2 &&
         !suppressFloatIntercept &&
-        (t.s2 == S2Phase.interceptHit || (t.s2 == S2Phase.waitTurn && t.facingCorrect))) {
+        (t.s2 == S2Phase.interceptHit ||
+            t.s2 == S2Phase.waitTurn ||
+            t.s2 == S2Phase.enemyApproach ||
+            (t.shotPassMode && t.enemyAuraVisible))) {
       final at = tutorialOwnIndex != null ? tokenCenter(tutorialOwnIndex!) : Offset(w * 0.35, wh + 160);
-      final ready = t.facingCorrect || t.shotPassMode;
+      final ready = (t.facingCorrect && t.turnWindowOpen) || (t.shotPassMode && t.facingCorrect);
       _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '迎擊', ready);
+    }
+    // Match intercept float when turn window open.
+    if (t == null &&
+        !suppressFloatIntercept &&
+        _matchSpearIndex != null &&
+        _matchEnemyChargeIndex != null &&
+        (_matchTurnWindowOpen || _matchFacingCorrect)) {
+      final at = tokenCenter(_matchSpearIndex!);
+      _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '迎擊', _matchFacingCorrect);
     }
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
@@ -540,8 +659,9 @@ class TaisenGame extends FlameGame {
   void _drawFloatingAction(Canvas canvas, Offset at, String label, bool ready) {
     final bg = ready ? FactionColors.gold : Colors.white24;
     final fg = ready ? FactionColors.lacquer : Colors.white54;
+    final fat = label == '迎擊' || label == '突撃';
     final r = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: at, width: 86, height: 36),
+      Rect.fromCenter(center: at, width: fat ? 100.0 : 86.0, height: fat ? 40.0 : 36.0),
       const Radius.circular(10),
     );
     canvas.drawRRect(r, Paint()..color = bg);
@@ -558,15 +678,18 @@ class TaisenGame extends FlameGame {
   }
 
   Rect floatingActionHitRect(String label) {
-    final t = tutorial;
-    if (t == null) return Rect.zero;
     if (label == '突撃' && tutorialOwnIndex != null) {
       final at = tokenCenter(tutorialOwnIndex!);
-      return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 80, height: 40);
+      return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 96, height: 44);
     }
-    if (label == '迎擊' && tutorialOwnIndex != null) {
-      final at = tokenCenter(tutorialOwnIndex!);
-      return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 80, height: 40);
+    if (label == '迎擊') {
+      final idx = tutorial?.session == TutorialSession.session2
+          ? tutorialOwnIndex
+          : _matchSpearIndex;
+      if (idx != null) {
+        final at = tokenCenter(idx);
+        return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 96, height: 44);
+      }
     }
     return Rect.zero;
   }
@@ -586,6 +709,29 @@ class TaisenGame extends FlameGame {
     }
   }
 
+
+  void _drawFieldLacquer(Canvas canvas, Rect rect) {
+    final img = _fieldLacquer;
+    if (img == null) return;
+    final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
+    // Cover-fit: scale to fill field, crop overflow (keep grid readable).
+    final scale = math.max(rect.width / src.width, rect.height / src.height);
+    final dw = src.width * scale;
+    final dh = src.height * scale;
+    final dx = rect.left + (rect.width - dw) / 2;
+    final dy = rect.top + (rect.height - dh) / 2;
+    canvas.save();
+    canvas.clipRect(rect);
+    canvas.drawImageRect(
+      img,
+      src,
+      Rect.fromLTWH(dx, dy, dw, dh),
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+    // Soft vignette so gold tokens separate from field.
+    canvas.drawRect(rect, Paint()..color = const Color(0xFF000000).withValues(alpha: 0.18));
+    canvas.restore();
+  }
 
   void _drawLacquerGrain(Canvas canvas, Rect rect, {double alpha = 0.12}) {
     final paint = Paint()
@@ -688,7 +834,7 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.bow:
-        _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFD54F));
+        _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFD54F), progress01: 0.85, ready: false);
         break;
       case AWindowKind.stratagem:
         break;
@@ -1043,12 +1189,39 @@ class TaisenGame extends FlameGame {
             whiteCore: true,
           );
         }
+        // Enemy charge aura for intercept turn window (≥1C visible).
+        if (isEnemy && _matchEnemyChargeIndex == index) {
+          final readyBoost = _matchEnemyChargeC >= 1.0 ? 1.0 : (0.55 + 0.4 * (_matchEnemyChargeC.clamp(0, 1)));
+          _drawChargeRings(
+            canvas,
+            c,
+            42,
+            const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
+            whiteCore: true,
+          );
+        }
         break;
       case TroopType.spear:
-        _drawInterceptStance(canvas, c, 40, const Color(0xFF26C6DA).withValues(alpha: 0.5));
+        _drawInterceptStance(
+          canvas,
+          c,
+          42,
+          const Color(0xFF26C6DA).withValues(alpha: 0.75),
+          facing: ownFacing,
+        );
         break;
       case TroopType.bow:
-        _drawBowWindup(canvas, c, c.dx + 70, FactionColors.gold.withValues(alpha: 0.7));
+        final winding = _bowWindupIndex == index;
+        final prog = winding ? (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0) : 0.35;
+        final ready = winding && _bowShotReady;
+        _drawBowWindup(
+          canvas,
+          c,
+          c.dx + 70,
+          FactionColors.gold.withValues(alpha: ready ? 0.95 : 0.7),
+          progress01: prog,
+          ready: ready,
+        );
         break;
       default:
         break;
@@ -1136,36 +1309,63 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
-  void _drawBowWindup(Canvas canvas, Offset c, double aimX, Color color) {
-    canvas.drawCircle(c, 26, Paint()..color = color.withValues(alpha: 0.18));
+  /// Bow stop vocabulary: ground seal + aim dash + reticle. [progress01] 0→1 over ~1C still.
+  void _drawBowWindup(Canvas canvas, Offset c, double aimX, Color color, {double progress01 = 0.55, bool ready = false}) {
+    final p = progress01.clamp(0.0, 1.0);
+    final glow = ready ? 1.0 : (0.45 + 0.55 * p);
+    // Ground seal (停穩蓄勢暈)
+    final sealR = 22.0 + 16.0 * p;
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(c.dx, c.dy + 28), width: sealR * 2.2, height: sealR * 0.9),
+      Paint()..color = color.withValues(alpha: 0.16 * glow),
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(c.dx, c.dy + 28), width: sealR * 2.2, height: sealR * 0.9),
+      Paint()
+        ..color = color.withValues(alpha: 0.55 * glow)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = ready ? 2.4 : 1.6,
+    );
+    // Body windup ring
+    canvas.drawCircle(c, 26, Paint()..color = color.withValues(alpha: 0.14 * glow));
     canvas.drawCircle(
       c,
       26,
       Paint()
-        ..color = color.withValues(alpha: 0.55)
+        ..color = color.withValues(alpha: 0.55 * glow)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6,
+        ..strokeWidth = 1.8,
     );
+    // Vertical draw / aim post
     canvas.drawRect(
       Rect.fromCenter(center: Offset(c.dx, c.dy - 30), width: 10, height: 50),
-      Paint()..color = color.withValues(alpha: 0.22),
+      Paint()..color = color.withValues(alpha: 0.22 * glow),
     );
+    // Aim dash toward reticle
     final y = c.dy;
     final dash = Paint()
-      ..color = color
-      ..strokeWidth = 1.6;
-    for (var x = c.dx + 20; x < aimX; x += 10) {
+      ..color = color.withValues(alpha: 0.55 + 0.45 * p)
+      ..strokeWidth = ready ? 2.2 : 1.6;
+    final endX = c.dx + 20 + (aimX - c.dx - 20) * (0.35 + 0.65 * p);
+    for (var x = c.dx + 20; x < endX; x += 10) {
       canvas.drawLine(Offset(x, y), Offset(x + 5, y), dash);
     }
-    canvas.drawCircle(Offset(aimX, y), 8, Paint()..color = color.withValues(alpha: 0.35));
+    // Reticle
+    final rt = Offset(aimX, y);
+    final rr = ready ? 11.0 : 8.0;
+    canvas.drawCircle(rt, rr, Paint()..color = color.withValues(alpha: 0.28 * glow));
     canvas.drawCircle(
-      Offset(aimX, y),
-      8,
+      rt,
+      rr,
       Paint()
-        ..color = color
+        ..color = color.withValues(alpha: 0.85 * glow)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
+        ..strokeWidth = ready ? 2.2 : 1.5,
     );
+    canvas.drawLine(Offset(rt.dx - rr - 4, rt.dy), Offset(rt.dx - rr + 2, rt.dy), dash);
+    canvas.drawLine(Offset(rt.dx + rr - 2, rt.dy), Offset(rt.dx + rr + 4, rt.dy), dash);
+    canvas.drawLine(Offset(rt.dx, rt.dy - rr - 4), Offset(rt.dx, rt.dy - rr + 2), dash);
+    canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 4), dash);
   }
 
   void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {
@@ -1252,11 +1452,23 @@ class TaisenGame extends FlameGame {
     }
     if (t != null && t.session == TutorialSession.session2) {
       if (floatingActionHitRect('迎擊').contains(local)) {
-        flashHit(tutorialOwnIndex ?? 0, '迎擊');
+        // Flash only on success — early/wrong facing goes to fail/retry without false 迎擊 飛字.
+        final ok = t.turnWindowOpen && t.facingCorrect;
+        if (ok) flashHit(tutorialOwnIndex ?? 0, '迎擊');
         t.onTapIntercept(facingWasCorrect: t.facingCorrect);
         onTutorialChanged?.call();
         return;
       }
+    }
+    // Match: fat「迎擊」when turn window open.
+    if (t == null && floatingActionHitRect('迎擊').contains(local)) {
+      if (_matchTurnWindowOpen && _matchFacingCorrect && _matchSpearIndex != null) {
+        flashHit(_matchSpearIndex!, '迎擊');
+        // Visual only — no damage numbers.
+        _matchEnemyChargeIndex = null;
+        _matchTurnWindowOpen = false;
+      }
+      return;
     }
 
     final i = hitTokenAt(local);
@@ -1276,9 +1488,43 @@ class TaisenGame extends FlameGame {
       if (t.s1 == S1Phase.highlightSelect || t.s1 == S1Phase.dragGuide) return;
       if (isEnemyAt(i)) return;
     }
+
+    // Session2: tap own spear to change facing once turn window open (or fail if early).
+    if (t != null && t.session == TutorialSession.session2 && i == tutorialOwnIndex) {
+      selectedIndex = i;
+      t.onTapTurnFacing();
+      onTutorialChanged?.call();
+      return;
+    }
+
     if (isEnemyAt(i)) {
       // Can highlight enemy for read, but no gold ownership ring actions
       selectedIndex = i;
+      return;
+    }
+
+    // Match: tap spear to turn facing when intercept window open.
+    if (t == null &&
+        _matchSpearIndex != null &&
+        i == _matchSpearIndex &&
+        _matchEnemyChargeIndex != null) {
+      selectedIndex = i;
+      if (_matchTurnWindowOpen) {
+        _matchFacingCorrect = true;
+      }
+      return;
+    }
+
+    // Match bow: select starts still windup; re-tap when ready fires first shot.
+    if (t == null && field[i].troop == TroopType.bow) {
+      if (selectedIndex == i && _bowShotReady && !_bowDidShoot && _bowWindupIndex == i) {
+        flashHit(i, '射');
+        _bowDidShoot = true;
+        _bowShotReady = false;
+        return;
+      }
+      selectedIndex = i;
+      _startBowWindup(i);
       return;
     }
 
@@ -1286,7 +1532,22 @@ class TaisenGame extends FlameGame {
       onRequestDetail?.call(field[i]);
     } else {
       selectedIndex = i;
+      // Selecting non-bow cancels any bow windup.
+      _cancelBowWindup();
     }
+  }
+
+  void _startBowWindup(int index) {
+    _bowWindupIndex = index;
+    _bowWindupC = 0;
+    _bowShotReady = false;
+    _bowDidShoot = false;
+  }
+
+  void _cancelBowWindup() {
+    _bowWindupIndex = null;
+    _bowWindupC = 0;
+    _bowShotReady = false;
   }
 
   void panStart(Offset local) {
@@ -1339,9 +1600,13 @@ class TaisenGame extends FlameGame {
       // Free match drop: move token within lower field (no stack-shadow).
       final y = at.dy.clamp(watchH + 40, size.y - 40);
       final x = at.dx.clamp(36.0, size.x - 36);
+      final moved = dragFrom != null && (Offset(x, y) - dragFrom!).distance > 24;
       fieldPos[selectedIndex!] = Offset(x, y);
-      // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
-      if (field[selectedIndex!].troop == TroopType.cavalry && dragFrom != null) {
+      // Moving cancels bow still-windup.
+      if (moved && field[selectedIndex!].troop == TroopType.bow) {
+        _cancelBowWindup();
+      } else if (field[selectedIndex!].troop == TroopType.cavalry && dragFrom != null) {
+        // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
         if ((Offset(x, y) - dragFrom!).distance > 70) {
           _matchChargeIndex = selectedIndex;
           _matchChargeC = 0;
@@ -1468,7 +1733,43 @@ class TaisenGame extends FlameGame {
     }
   }
 
+  /// Sheet is 1280×720, 4 cells (騎／槍／弓／刀). Crop circular badge (skip gold「騎」label below).
+  static const double _weaponCellW = 320;
+  static const double _weaponSrcPad = 30;
+  static const double _weaponSrcY = 150;
+  static const double _weaponSrcSize = 260; // circle only
+
+  Rect _weaponSrcRect(TroopType troop) {
+    final col = switch (troop) {
+      TroopType.cavalry => 0,
+      TroopType.spear => 1,
+      TroopType.bow => 2,
+      TroopType.infantry => 3,
+      TroopType.siege => 3, // 刀角標
+    };
+    return Rect.fromLTWH(
+      col * _weaponCellW + _weaponSrcPad,
+      _weaponSrcY,
+      _weaponSrcSize,
+      _weaponSrcSize,
+    );
+  }
+
   void _drawWeapon(Canvas canvas, Offset c, TroopType troop, Color color, {double scale = 1}) {
+    final sheet = _weaponSheet;
+    final dstSize = 40.0 * scale;
+    final dst = Rect.fromCenter(center: c, width: dstSize, height: dstSize);
+    if (sheet != null) {
+      final src = _weaponSrcRect(troop);
+      final paint = Paint()
+        ..filterQuality = FilterQuality.high
+        ..colorFilter = color.a < 0.95
+            ? ColorFilter.mode(Colors.white.withValues(alpha: color.a), BlendMode.modulate)
+            : null;
+      canvas.drawImageRect(sheet, src, dst, paint);
+      return;
+    }
+    // Fallback procedural (assets not loaded yet) — never grey-circle slash.
     final s = scale;
     final p = Paint()
       ..color = color
@@ -1477,10 +1778,7 @@ class TaisenGame extends FlameGame {
       ..strokeCap = StrokeCap.round;
     switch (troop) {
       case TroopType.cavalry:
-        // Blade / saber — weapons-only
-        canvas.drawLine(Offset(c.dx - 12 * s, c.dy + 10 * s), Offset(c.dx + 12 * s, c.dy - 12 * s), p);
-        canvas.drawCircle(Offset(c.dx + 12 * s, c.dy - 12 * s), 4.2 * s, Paint()..color = color);
-        canvas.drawLine(Offset(c.dx - 4 * s, c.dy + 4 * s), Offset(c.dx - 14 * s, c.dy + 2 * s), p);
+        canvas.drawArc(Rect.fromCenter(center: c, width: 22 * s, height: 26 * s), 0.4, 2.3, false, p);
         break;
       case TroopType.spear:
         canvas.drawLine(Offset(c.dx, c.dy + 16 * s), Offset(c.dx, c.dy - 16 * s), p);
@@ -1496,18 +1794,12 @@ class TaisenGame extends FlameGame {
           ..moveTo(c.dx - 10 * s, c.dy - 14 * s)
           ..quadraticBezierTo(c.dx + 14 * s, c.dy, c.dx - 10 * s, c.dy + 14 * s);
         canvas.drawPath(arc, p);
-        canvas.drawLine(Offset(c.dx - 10 * s, c.dy - 14 * s), Offset(c.dx - 10 * s, c.dy + 14 * s), p);
         canvas.drawLine(Offset(c.dx - 8 * s, c.dy), Offset(c.dx + 12 * s, c.dy), p);
         break;
       case TroopType.siege:
-        canvas.drawRect(Rect.fromCenter(center: c, width: 16 * s, height: 12 * s), p);
-        canvas.drawLine(Offset(c.dx - 12 * s, c.dy + 10 * s), Offset(c.dx + 12 * s, c.dy + 10 * s), p);
-        break;
       case TroopType.infantry:
-        canvas.drawLine(Offset(c.dx, c.dy - 12 * s), Offset(c.dx, c.dy + 8 * s), p);
-        canvas.drawLine(Offset(c.dx - 9 * s, c.dy - 2 * s), Offset(c.dx + 9 * s, c.dy - 2 * s), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 8 * s), Offset(c.dx - 7 * s, c.dy + 14 * s), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 8 * s), Offset(c.dx + 7 * s, c.dy + 14 * s), p);
+        canvas.drawLine(Offset(c.dx - 10 * s, c.dy + 8 * s), Offset(c.dx + 12 * s, c.dy - 12 * s), p);
+        canvas.drawLine(Offset(c.dx - 2 * s, c.dy + 2 * s), Offset(c.dx - 12 * s, c.dy + 6 * s), p);
         break;
     }
   }

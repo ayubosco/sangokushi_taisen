@@ -145,58 +145,39 @@ class _WeaponGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      size: const Size(28, 28),
-      painter: _TroopPainter(troop),
-      child: const SizedBox(width: 28, height: 28),
+    final col = switch (troop) {
+      TroopType.cavalry => 0,
+      TroopType.spear => 1,
+      TroopType.bow => 2,
+      TroopType.infantry => 3,
+      TroopType.siege => 3,
+    };
+    // Atlas 1280×720 / 4 cells; crop circular badge (skip label).
+    const sheetW = 1280.0;
+    const cell = 320.0;
+    const pad = 48.0;
+    const src = 224.0;
+    const out = 28.0;
+    const scale = out / src;
+    return SizedBox(
+      width: out,
+      height: out,
+      child: ClipRect(
+        child: Transform.translate(
+          offset: Offset(-(col * cell + pad) * scale, -56 * scale),
+          child: Transform.scale(
+            alignment: Alignment.topLeft,
+            scale: scale,
+            child: Image.asset(
+              'assets/ui/token-weapons-sheet.png',
+              width: sheetW,
+              height: 720,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      ),
     );
   }
-}
-
-class _TroopPainter extends CustomPainter {
-  _TroopPainter(this.troop);
-  final TroopType troop;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width / 2, size.height / 2);
-    final p = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    switch (troop) {
-      case TroopType.cavalry:
-        canvas.drawLine(Offset(c.dx - 8, c.dy + 6), Offset(c.dx + 8, c.dy - 8), p);
-        canvas.drawCircle(Offset(c.dx + 8, c.dy - 8), 2.5, Paint()..color = Colors.white);
-        canvas.drawCircle(c, 5, p);
-        break;
-      case TroopType.spear:
-        canvas.drawLine(Offset(c.dx, c.dy + 10), Offset(c.dx, c.dy - 10), p);
-        canvas.drawLine(Offset(c.dx - 4, c.dy - 6), Offset(c.dx, c.dy - 10), p);
-        canvas.drawLine(Offset(c.dx + 4, c.dy - 6), Offset(c.dx, c.dy - 10), p);
-        break;
-      case TroopType.bow:
-        final arc = Path()
-          ..moveTo(c.dx - 6, c.dy - 8)
-          ..quadraticBezierTo(c.dx + 8, c.dy, c.dx - 6, c.dy + 8);
-        canvas.drawPath(arc, p);
-        canvas.drawLine(Offset(c.dx - 6, c.dy - 8), Offset(c.dx - 6, c.dy + 8), p);
-        canvas.drawLine(Offset(c.dx - 4, c.dy), Offset(c.dx + 6, c.dy), p);
-        break;
-      case TroopType.siege:
-        canvas.drawRect(Rect.fromCenter(center: c, width: 12, height: 8), p);
-        canvas.drawLine(Offset(c.dx - 8, c.dy + 6), Offset(c.dx + 8, c.dy + 6), p);
-        break;
-      case TroopType.infantry:
-        canvas.drawLine(Offset(c.dx, c.dy - 8), Offset(c.dx, c.dy + 4), p);
-        canvas.drawLine(Offset(c.dx - 5, c.dy - 2), Offset(c.dx + 5, c.dy - 2), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 4), Offset(c.dx - 4, c.dy + 9), p);
-        canvas.drawLine(Offset(c.dx, c.dy + 4), Offset(c.dx + 4, c.dy + 9), p);
-        break;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

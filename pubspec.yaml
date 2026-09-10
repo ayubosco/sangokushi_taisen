@@ -65,6 +65,8 @@ flutter:
     - assets/icons/cost6-weapon-icons-v2.png
     - assets/portraits/
     - assets/fx/
+    - assets/ui/token-weapons-sheet.png
+    - assets/field/field-lacquer-swatch.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
