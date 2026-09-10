@@ -84,6 +84,9 @@ class TaisenGame extends FlameGame {
   double _bowWindupC = 0;
   bool _bowShotReady = false;
   bool _bowDidShoot = false;
+  bool _verifyLoggedAura = false;
+  bool _verifyLoggedTurn = false;
+  bool _verifyLoggedBowReady = false;
 
   /// Free-match enemy charge aura (for spear intercept practice) — visual only.
   int? _matchEnemyChargeIndex;
@@ -431,10 +434,29 @@ class TaisenGame extends FlameGame {
       }
     }
 
+    // LIVE_VERIFY: HUD C when S2 aura / turn window edge fires.
+    if (coach != null && coach.session == TutorialSession.session2) {
+      if (coach.enemyAuraVisible && !_verifyLoggedAura) {
+        _verifyLoggedAura = true;
+        // ignore: avoid_print
+        print('VERIFY_S2 auraHUD remainingC=${clock.remainingC} phaseC=${coach.phaseC.toStringAsFixed(2)}');
+      }
+      if (coach.turnWindowOpen && !_verifyLoggedTurn) {
+        _verifyLoggedTurn = true;
+        // ignore: avoid_print
+        print('VERIFY_S2 turnHUD remainingC=${clock.remainingC} phaseC=${coach.phaseC.toStringAsFixed(2)}');
+      }
+    }
+
     // Free-match bow: accumulate still time toward ~1C; first shot only when ready.
     if (tutorial == null && _bowWindupIndex != null && !_bowDidShoot) {
       _bowWindupC += dt / CClock.secondsPerC;
       if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
+        if (!_bowShotReady && !_verifyLoggedBowReady) {
+          _verifyLoggedBowReady = true;
+          // ignore: avoid_print
+          print('VERIFY_BOW readyC=${clock.remainingC} windupC=${_bowWindupC.toStringAsFixed(2)}');
+        }
         _bowShotReady = true;
       }
     }
@@ -834,7 +856,7 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.bow:
-        _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFD54F), progress01: 0.85, ready: false);
+        _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
         break;
       case AWindowKind.stratagem:
         break;
@@ -858,9 +880,9 @@ class TaisenGame extends FlameGame {
     _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
     if (showAWindowDebugLabels) {
       final label = switch (kind) {
-        AWindowKind.charge => '突撃オーラ ≥1C',
+        AWindowKind.charge => '突撃氣場 蓄勢',
         AWindowKind.intercept => '迎擊 槍尖常駐',
-        AWindowKind.bow => '弓停射 ~1C',
+        AWindowKind.bow => '弓停射 蓄勢',
         AWindowKind.stratagem => '計略',
       };
       _drawText(canvas, label, Offset(16, band.top + 42), const Color(0xFF80DEEA), 12);
@@ -1031,7 +1053,13 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 2.8,
       );
     }
-    if (selected && !isEnemy) {
+    // Bow windup: skip fat gold select ring so 蓄勢暈 / aim line read as distinct vocabulary.
+    final bowWinding = !isEnemy &&
+        selected &&
+        card.troop == TroopType.bow &&
+        _bowWindupIndex != null &&
+        selectedIndex == _bowWindupIndex;
+    if (selected && !isEnemy && !bowWinding) {
       // Fat gold select ring (own only — never on enemy)
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -1214,11 +1242,12 @@ class TaisenGame extends FlameGame {
         final winding = _bowWindupIndex == index;
         final prog = winding ? (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0) : 0.35;
         final ready = winding && _bowShotReady;
+        // Amber-cyan 蓄勢 (≠ gold select ring).
         _drawBowWindup(
           canvas,
           c,
-          c.dx + 70,
-          FactionColors.gold.withValues(alpha: ready ? 0.95 : 0.7),
+          c.dx + 78,
+          const Color(0xFFFFAB40).withValues(alpha: ready ? 0.98 : 0.82),
           progress01: prog,
           ready: ready,
         );
@@ -1278,11 +1307,12 @@ class TaisenGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.6,
     );
-    // Bigger spear-tip triangle (was too small)
+    // Spear-tip wedge — bottom field larger via tipScale below.
+    final wedgeScale = rx >= 40 ? 1.22 : 1.0;
     final wedge = Path()
-      ..moveTo(c.dx, c.dy - 52)
-      ..lineTo(c.dx - 28, c.dy + 10)
-      ..lineTo(c.dx + 28, c.dy + 10)
+      ..moveTo(c.dx, c.dy - 52 * wedgeScale)
+      ..lineTo(c.dx - 28 * wedgeScale, c.dy + 10)
+      ..lineTo(c.dx + 28 * wedgeScale, c.dy + 10)
       ..close();
     canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.5));
     canvas.drawPath(
@@ -1292,80 +1322,115 @@ class TaisenGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.2,
     );
-    // Persistent spear tip / 槍衾 glow (not a countdown bar) — larger
+    // Persistent spear tip / 槍衾 glow — bottom field (rx≥40) one size larger; watch (scaled rx) stays OK.
     final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
-    final tip = Offset(c.dx, c.dy - 48);
-    canvas.drawCircle(tip, 22, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.4 * glow));
-    canvas.drawCircle(tip, 14, Paint()..color = Colors.white.withValues(alpha: 0.5 * glow));
-    canvas.drawCircle(tip, 8, Paint()..color = Colors.white.withValues(alpha: 0.95));
+    final tipScale = rx >= 40 ? 1.28 : (rx / 36.0).clamp(0.75, 1.05);
+    final tip = Offset(c.dx, c.dy - 48 * tipScale);
+    canvas.drawCircle(tip, 28 * tipScale, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.42 * glow));
+    canvas.drawCircle(tip, 17 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.52 * glow));
+    canvas.drawCircle(tip, 9.5 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.95));
     canvas.drawLine(
-      Offset(c.dx, c.dy + 26),
-      Offset(c.dx, c.dy - 50),
+      Offset(c.dx, c.dy + 26 * tipScale),
+      Offset(c.dx, c.dy - 52 * tipScale),
       Paint()
         ..color = color
-        ..strokeWidth = 4.2
+        ..strokeWidth = 4.2 * tipScale
         ..strokeCap = StrokeCap.round,
     );
     canvas.restore();
   }
 
-  /// Bow stop vocabulary: ground seal + aim dash + reticle. [progress01] 0→1 over ~1C still.
+  /// Bow stop vocabulary: 蓄勢暈 (ground) + arrow aim preview + reticle — NOT gold select ring.
+  /// [progress01] 0→1 over ~1C still; move cancels (郁即斷).
   void _drawBowWindup(Canvas canvas, Offset c, double aimX, Color color, {double progress01 = 0.55, bool ready = false}) {
     final p = progress01.clamp(0.0, 1.0);
-    final glow = ready ? 1.0 : (0.45 + 0.55 * p);
-    // Ground seal (停穩蓄勢暈)
-    final sealR = 22.0 + 16.0 * p;
+    final glow = ready ? 1.0 : (0.5 + 0.5 * p);
+    final amber = color;
+    const cyan = Color(0xFF80DEEA);
+    // Ground 蓄勢暈 — wide oval seal under feet (distinct from card select rect).
+    final sealR = 28.0 + 22.0 * p;
+    for (var i = 0; i < 3; i++) {
+      final expand = i * 10.0 * (0.4 + 0.6 * p);
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(c.dx, c.dy + 32),
+          width: (sealR + expand) * 2.4,
+          height: (sealR * 0.42 + expand * 0.35),
+        ),
+        Paint()
+          ..color = (i.isEven ? amber : cyan).withValues(alpha: (0.22 - i * 0.05) * glow)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = ready ? 2.8 : (2.0 - i * 0.3),
+      );
+    }
     canvas.drawOval(
-      Rect.fromCenter(center: Offset(c.dx, c.dy + 28), width: sealR * 2.2, height: sealR * 0.9),
-      Paint()..color = color.withValues(alpha: 0.16 * glow),
+      Rect.fromCenter(center: Offset(c.dx, c.dy + 32), width: sealR * 2.1, height: sealR * 0.55),
+      Paint()..color = amber.withValues(alpha: 0.18 * glow),
     );
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(c.dx, c.dy + 28), width: sealR * 2.2, height: sealR * 0.9),
+    // Progress arc (not a fat gold card ring)
+    const arcR = 34.0;
+    final sweep = (math.pi * 1.6) * p;
+    canvas.drawArc(
+      Rect.fromCircle(center: c, radius: arcR),
+      -math.pi * 0.8,
+      sweep,
+      false,
       Paint()
-        ..color = color.withValues(alpha: 0.55 * glow)
+        ..color = cyan.withValues(alpha: 0.75 * glow)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = ready ? 2.4 : 1.6,
+        ..strokeWidth = ready ? 3.2 : 2.4
+        ..strokeCap = StrokeCap.round,
     );
-    // Body windup ring
-    canvas.drawCircle(c, 26, Paint()..color = color.withValues(alpha: 0.14 * glow));
-    canvas.drawCircle(
-      c,
-      26,
-      Paint()
-        ..color = color.withValues(alpha: 0.55 * glow)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.8,
-    );
-    // Vertical draw / aim post
-    canvas.drawRect(
-      Rect.fromCenter(center: Offset(c.dx, c.dy - 30), width: 10, height: 50),
-      Paint()..color = color.withValues(alpha: 0.22 * glow),
-    );
-    // Aim dash toward reticle
-    final y = c.dy;
-    final dash = Paint()
-      ..color = color.withValues(alpha: 0.55 + 0.45 * p)
-      ..strokeWidth = ready ? 2.2 : 1.6;
-    final endX = c.dx + 20 + (aimX - c.dx - 20) * (0.35 + 0.65 * p);
-    for (var x = c.dx + 20; x < endX; x += 10) {
-      canvas.drawLine(Offset(x, y), Offset(x + 5, y), dash);
+    if (ready) {
+      canvas.drawCircle(
+        c,
+        arcR + 4,
+        Paint()
+          ..color = cyan.withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+    }
+    // Solid arrow aim / preview line toward reticle (郁即斷 cancels this whole windup).
+    final y = c.dy - 4;
+    final start = Offset(c.dx + 18, y);
+    final endX = c.dx + 22 + (aimX - c.dx - 22) * (0.4 + 0.6 * p);
+    final end = Offset(endX, y);
+    final shaft = Paint()
+      ..color = amber.withValues(alpha: 0.55 + 0.45 * p)
+      ..strokeWidth = ready ? 3.4 : 2.6
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(start, end, shaft);
+    // Arrowhead
+    final head = Path()
+      ..moveTo(end.dx + 10, end.dy)
+      ..lineTo(end.dx - 4, end.dy - 7)
+      ..lineTo(end.dx - 4, end.dy + 7)
+      ..close();
+    canvas.drawPath(head, Paint()..color = amber.withValues(alpha: 0.7 + 0.3 * p));
+    // Soft dashed ghost behind solid shaft
+    final ghost = Paint()
+      ..color = cyan.withValues(alpha: 0.35 * glow)
+      ..strokeWidth = 1.2;
+    for (var x = start.dx; x < end.dx - 8; x += 9) {
+      canvas.drawLine(Offset(x, y + 6), Offset(x + 4, y + 6), ghost);
     }
     // Reticle
     final rt = Offset(aimX, y);
-    final rr = ready ? 11.0 : 8.0;
-    canvas.drawCircle(rt, rr, Paint()..color = color.withValues(alpha: 0.28 * glow));
+    final rr = ready ? 13.0 : 9.0;
+    canvas.drawCircle(rt, rr, Paint()..color = cyan.withValues(alpha: 0.22 * glow));
     canvas.drawCircle(
       rt,
       rr,
       Paint()
-        ..color = color.withValues(alpha: 0.85 * glow)
+        ..color = amber.withValues(alpha: 0.9 * glow)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = ready ? 2.2 : 1.5,
+        ..strokeWidth = ready ? 2.4 : 1.7,
     );
-    canvas.drawLine(Offset(rt.dx - rr - 4, rt.dy), Offset(rt.dx - rr + 2, rt.dy), dash);
-    canvas.drawLine(Offset(rt.dx + rr - 2, rt.dy), Offset(rt.dx + rr + 4, rt.dy), dash);
-    canvas.drawLine(Offset(rt.dx, rt.dy - rr - 4), Offset(rt.dx, rt.dy - rr + 2), dash);
-    canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 4), dash);
+    canvas.drawLine(Offset(rt.dx - rr - 5, rt.dy), Offset(rt.dx - rr + 2, rt.dy), shaft);
+    canvas.drawLine(Offset(rt.dx + rr - 2, rt.dy), Offset(rt.dx + rr + 5, rt.dy), shaft);
+    canvas.drawLine(Offset(rt.dx, rt.dy - rr - 5), Offset(rt.dx, rt.dy - rr + 2), shaft);
+    canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 5), shaft);
   }
 
   void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {

@@ -19,6 +19,9 @@ const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 /// Title lock:「三國指大戰」only — never Sega「三國志大戦」.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 
+/// dart-define: LIVE_VERIFY=s2|bow — clock runs (no FEEL freeze); log HUD C for UIUX manual count.
+const String kLiveVerify = String.fromEnvironment('LIVE_VERIFY', defaultValue: '');
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -81,15 +84,17 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     _stage = _initialStage();
-    if (kDemoShot == 'match' || kFeelShot == 'castle' || kFeelShot == 'bow') {
+    if (kLiveVerify == 'bow' || kDemoShot == 'match' || kFeelShot == 'castle' || kFeelShot == 'bow') {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
-    } else if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+    } else if (kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       _selectedBingfa = '火計';
     }
   }
 
   _AppStage _initialStage() {
+    if (kLiveVerify == 'bow') return _AppStage.match;
+    if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
     if (kDemoShot == 'bingfa') return _AppStage.bingfaPick;
     if (kFeelShot == 'castle' || kFeelShot == 'bow' || kDemoShot == 'match') return _AppStage.match;
@@ -417,6 +422,11 @@ class _TutorialShellState extends State<TutorialShell> {
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
         _game.triggerStrategyFx();
         _showSessionBanner = false;
+      } else if (kLiveVerify == 's2') {
+        _tutorial.resetToSession2();
+        _game.setupSession2Field();
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = true;
       } else {
         _tutorial.resetToSession1();
         _game.setupSession1Field();
@@ -426,11 +436,17 @@ class _TutorialShellState extends State<TutorialShell> {
       // Freeze C only for FEEL_SHOT / TUTORIAL_SHOT / DEMO_SHOT captures.
       // Free tutorial play keeps HUD clock running so player can count ≥1C / ~1C.
       _game.clock.reset();
-      final freezeClock = kFeelShot.isNotEmpty || kTutorialShot.isNotEmpty || kDemoShot.isNotEmpty;
+      // LIVE_VERIFY keeps C ticking for manual HUD count (≥1C / ~1C).
+      final freezeClock = kLiveVerify.isEmpty &&
+          (kFeelShot.isNotEmpty || kTutorialShot.isNotEmpty || kDemoShot.isNotEmpty);
       if (freezeClock) {
         _game.clock.pause();
       } else {
         _game.clock.resume();
+      }
+      if (kLiveVerify == 's2') {
+        // ignore: avoid_print
+        print('VERIFY_S2 startC=${_game.clock.remainingC} phase=${_tutorial.s2}');
       }
       setState(() => _fieldReady = true);
       // Auto-hide session banner after a beat (still readable at start).
@@ -713,6 +729,19 @@ class _MatchShellState extends State<MatchShell> {
       if (kFeelShot == 'castle') {
         _game.setupFeelCastleField();
         // 返城 float held for shot (no combat numbers).
+      } else if (kLiveVerify == 'bow') {
+        _game.setupMatchDemoField();
+        _game.clock.reset();
+        _game.clock.resume();
+        // Start bow windup on own bow token for ~1C live count.
+        for (var i = 0; i < _game.field.length; i++) {
+          if (!_game.fieldIsEnemy[i] && _game.field[i].troop == TroopType.bow) {
+            _game.selectOrDetailAt(_game.tokenCenter(i));
+            break;
+          }
+        }
+        // ignore: avoid_print
+        print('VERIFY_BOW startC=${_game.clock.remainingC} windup=0');
       } else if (kFeelShot == 'bow') {
         _game.setupFeelBowWindupPose();
         // Freeze mid-windup for capture; free play match still ticks C.
@@ -720,6 +749,10 @@ class _MatchShellState extends State<MatchShell> {
         _game.clock.pause();
       } else {
         _game.setupMatchDemoField();
+        if (kLiveVerify.isEmpty && kFeelShot.isEmpty && kDemoShot.isEmpty) {
+          _game.clock.reset();
+          _game.clock.resume();
+        }
       }
       setState(() {});
     });

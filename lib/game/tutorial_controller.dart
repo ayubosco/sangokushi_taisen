@@ -175,7 +175,9 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s2 = S2Phase.enemyApproach;
           enemyAuraVisible = true;
-          tipText = '敵騎氣場出咗 — 用 HUD 數 ≥1C，唔好太早迎擊';
+          tipText = '敵騎氣場出咗 — 等氣勢夠先轉身，唔好太早迎擊';
+          // ignore: avoid_print
+          print('VERIFY_S2 auraVisible phaseC=$phaseC');
           notifyListeners();
         }
         break;
@@ -183,7 +185,7 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 0.3) {
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '氣場可見中… 數 ≥1C 先轉面（點己方槍兵）';
+          tipText = '氣場可見中… 等氣勢夠先轉面（點己方槍兵）';
           notifyListeners();
         }
         break;
@@ -191,8 +193,10 @@ class TutorialController extends ChangeNotifier {
         // Aura must stay visible ≥1C before player may turn facing / intercept.
         if (phaseC >= 1.0 && !turnWindowOpen) {
           turnWindowOpen = true;
-          tipText = '轉身窗開！點己方槍兵轉面迎敵，再點「迎擊」';
+          tipText = '氣勢夠喇！點己方槍兵轉面迎敵，再點「迎擊」';
           tipSkippable = false;
+          // ignore: avoid_print
+          print('VERIFY_S2 turnWindowOpen phaseC=$phaseC');
           notifyListeners();
         }
         break;
@@ -205,7 +209,7 @@ class TutorialController extends ChangeNotifier {
           enemyAuraVisible = true;
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '重試：等氣場 ≥1C → 點槍兵轉面 → 再點「迎擊」';
+          tipText = '重試：等氣勢夠 → 點槍兵轉面 → 再點「迎擊」';
           notifyListeners();
         }
         break;
@@ -228,7 +232,7 @@ class TutorialController extends ChangeNotifier {
     auraReady = false;
     didDragDrop = true;
     s1 = S1Phase.waitAura;
-    tipText = '蓄力中… 等青白環亮起（≥1C）再點「突撃」';
+    tipText = '蓄力中… 等青白環穩陣亮起再點「突撃」';
     tipSkippable = false;
     notifyListeners();
   }
@@ -248,7 +252,7 @@ class TutorialController extends ChangeNotifier {
             s1 == S1Phase.dragGuide ||
             s1 == S1Phase.waitAura ||
             s1 == S1Phase.hitCharge)) {
-      _failS1('未拖到落點 — 要拖＋氣場≥1C 先過關');
+      _failS1('未拖到落點 — 要拖到位、等氣場夠先過關');
       return;
     }
     // Too early / wrong timing
@@ -271,7 +275,7 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session2) return;
     if (s2 != S2Phase.waitTurn && s2 != S2Phase.interceptHit) return;
     if (!turnWindowOpen) {
-      _failS2('太早轉面／迎擊 — 敵氣場要可見 ≥1C');
+      _failS2('太早轉面／迎擊 — 等敵氣勢夠先動');
       return;
     }
     if (facingCorrect) return;
@@ -292,7 +296,7 @@ class TutorialController extends ChangeNotifier {
     }
     // Too early: aura not yet visible ≥1C.
     if (!turnWindowOpen) {
-      _failS2('嚟唔切 — 敵氣場要可見 ≥1C 先迎擊');
+      _failS2('嚟唔切 — 等敵氣勢夠先迎擊');
       return;
     }
     if (facingWasCorrect && facingCorrect) {
@@ -372,7 +376,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 1.0;
     auraReady = true;
     didDragDrop = true; // shot assumes prior drag
-    tipText = '拖到落點後：青白環已亮（≥1C）— 點「突撃」';
+    tipText = '拖到落點後：青白環已亮 — 點「突撃」';
     tipSkippable = false; // soft-fix: tip「點突撃過關」cannot skip drag
     failed = false;
     failReason = null;
@@ -405,7 +409,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 1.0;
     auraReady = true;
     didDragDrop = true;
-    tipText = '拖有導線／落點；青白環≥1C 先撞';
+    tipText = '拖有導線／落點；等青白環夠亮先撞';
     tipSkippable = false;
     failed = false;
     notifyListeners();
@@ -419,7 +423,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 0;
     auraReady = false;
     didDragDrop = false;
-    tipText = '拖向落點（導線）— 未見環唔撞；tip 唔跳拖';
+    tipText = '拖向落點（導線）— 未見環唔好撞；要拖到位';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -434,7 +438,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 1.0;
     auraReady = true;
     didDragDrop = true;
-    tipText = '突撃命中！場1過關（拖＋氣場≥1C）';
+    tipText = '突撃命中！場1過關（拖到位＋氣場夠）';
     tipSkippable = true;
     failed = false;
     failReason = null;
@@ -451,7 +455,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = false;
     enemyAuraVisible = true;
     interceptDone = false;
-    tipText = '敵オーラ可見 — 數 ≥1C 先轉面迎擊（槍尖常在）';
+    tipText = '敵氣場出咗 — 等氣勢夠先轉面迎擊（槍尖常在）';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -468,7 +472,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = true;
     enemyAuraVisible = true;
     interceptDone = false;
-    tipText = '槍尖常在；敵オーラ≥1C 後轉面迎擊';
+    tipText = '槍尖常在；等敵氣勢夠再轉面迎擊';
     tipSkippable = false;
     failed = false;
     notifyListeners();
