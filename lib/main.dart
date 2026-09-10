@@ -14,6 +14,9 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
+/// dart-define: FEEL_SHOT=drag-aura|intercept|stratagem|castle —「打得似」captures.
+const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -76,10 +79,10 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     _stage = _initialStage();
-    if (kDemoShot == 'match') {
+    if (kDemoShot == 'match' || kFeelShot == 'castle') {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
-    } else if (kDemoShot == 's1' || kTutorialShot.isNotEmpty) {
+    } else if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       _selectedBingfa = '火計';
     }
   }
@@ -87,8 +90,10 @@ class _AppRootState extends State<AppRoot> {
   _AppStage _initialStage() {
     if (kDemoShot == 'splash') return _AppStage.splash;
     if (kDemoShot == 'bingfa') return _AppStage.bingfaPick;
-    if (kDemoShot == 's1' || kTutorialShot.isNotEmpty) return _AppStage.tutorial;
-    if (kDemoShot == 'match') return _AppStage.match;
+    if (kFeelShot == 'castle' || kDemoShot == 'match') return _AppStage.match;
+    if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+      return _AppStage.tutorial;
+    }
     // Simulator demo default: splash → 兵法 → tutorial
     return _AppStage.splash;
   }
@@ -336,50 +341,56 @@ class _TutorialShellState extends State<TutorialShell> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (kTutorialShot == 's1pass') {
+      if (kFeelShot == 'drag-aura' || kTutorialShot == 's1aura' || kDemoShot == 's1') {
+        // Layout lock: keep enemy on lower field; drag guide + bright aura.
         _game.setupSession1Field();
-        _tutorial.forceSession1Pass();
-        // Clear dim Wei/Wu tokens so 趙雲蜀綠 isn't covered by 曹操藍.
-        if (_game.field.length > 1) {
-          final own = _game.field.first;
-          _game.field
-            ..clear()
-            ..add(own);
-          _game.fieldPos
-            ..clear()
-            ..add(_game.dropGuidePoint);
-          _game.tutorialOwnIndex = 0;
-        } else if (_game.tutorialOwnIndex != null) {
-          _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
+        if (kFeelShot == 'drag-aura') {
+          _tutorial.forceFeelDragAura();
+        } else {
+          _tutorial.forceSession1AuraGate();
         }
-        _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
-        _showSessionBanner = false;
-      } else if (kTutorialShot == 's1aura' || kDemoShot == 's1') {
-        // 場1: cyan/white charge aura ≥1C gate — fat gold ring, dim others, rings on watch+field.
-        _game.setupSession1Field();
-        _tutorial.forceSession1AuraGate();
         if (_game.tutorialOwnIndex != null) {
           _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
           _game.selectedIndex = _game.tutorialOwnIndex;
         }
         _game.watchKind = AWindowKind.charge;
+        _game.dragging = true;
+        if (_game.tutorialOwnIndex != null) {
+          _game.dragFrom = _game.tokenCenter(_game.tutorialOwnIndex!);
+          _game.dragTo = _game.dropGuidePoint;
+        }
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;
+      } else if (kFeelShot == 'intercept') {
+        _game.setupSession2Field();
+        _tutorial.forceFeelIntercept();
+        _game.watchKind = AWindowKind.intercept;
+        _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = true;
+      } else if (kFeelShot == 'stratagem' || kTutorialShot == 's2coach') {
+        _game.setupSession2Field();
+        _tutorial.forceFeelStratagem();
+        _game.selectedIndex = _game.tutorialOwnIndex;
+        _game.watchKind = AWindowKind.intercept;
+        _game.triggerStrategyFx(notifyTutorial: false);
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = true;
+      } else if (kTutorialShot == 's1pass') {
+        _game.setupSession1Field();
+        _tutorial.forceSession1Pass();
+        // Keep enemy visible (layout lock); move own to drop for pass pose.
+        if (_game.tutorialOwnIndex != null) {
+          _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
+        }
+        _game.flashHit(_game.tutorialOwnIndex ?? 0, '突撃');
+        _showSessionBanner = false;
       } else if (kTutorialShot == 's2pass') {
         _game.setupSession2Field();
         _tutorial.forceSession2Pass();
         _game.flashHit(_game.tutorialOwnIndex ?? 0, '迎擊');
         _game.triggerStrategyFx();
         _showSessionBanner = false;
-      } else if (kTutorialShot == 's2coach') {
-        // 場2: persistent spear tip + stratagem FX in lower 2/3; tip strategyOrReturn.
-        _game.setupSession2Field();
-        _tutorial.forceSession2Coach();
-        _game.selectedIndex = _game.tutorialOwnIndex;
-        _game.watchKind = AWindowKind.intercept;
-        _game.triggerStrategyFx(notifyTutorial: false);
-        _bannerFor = TutorialSession.session2;
-        _showSessionBanner = true;
       } else {
         _tutorial.resetToSession1();
         _game.setupSession1Field();
@@ -667,7 +678,12 @@ class _MatchShellState extends State<MatchShell> {
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _game.setupMatchDemoField();
+      if (kFeelShot == 'castle') {
+        _game.setupFeelCastleField();
+        // 返城 float held for shot (no combat numbers).
+      } else {
+        _game.setupMatchDemoField();
+      }
       setState(() {});
     });
   }
@@ -684,6 +700,18 @@ class _MatchShellState extends State<MatchShell> {
                 behavior: HitTestBehavior.opaque,
                 onTapDown: (d) {
                   _game.selectOrDetailAt(d.localPosition);
+                  setState(() {});
+                },
+                onPanStart: (d) {
+                  _game.panStart(d.localPosition);
+                  setState(() {});
+                },
+                onPanUpdate: (d) {
+                  _game.panUpdate(d.localPosition);
+                  setState(() {});
+                },
+                onPanEnd: (d) {
+                  _game.panEnd(d.localPosition);
                   setState(() {});
                 },
                 child: GameWidget(game: _game),

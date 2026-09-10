@@ -51,16 +51,20 @@ class TutorialController extends ChangeNotifier {
   /// Screenshot / debug: jump to clear-pass visuals.
   bool shotPassMode = false;
 
+  /// Soft-fix: charge pass requires drag-to-drop + aura≥1C (not tip-skip alone).
+  bool didDragDrop = false;
+
   void resetToSession1() {
     session = TutorialSession.session1;
     s1 = S1Phase.highlightSelect;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '而家做：點金色光環嘅己方騎兵（趙雲）— 點中先過關';
-    tipSkippable = true;
+    tipText = '而家做：點金色光環嘅己方騎兵（趙雲）— 點中後要拖去落點';
+    tipSkippable = false; // cannot tip-skip past drag gate
     failed = false;
     failReason = null;
     auraReady = false;
+    didDragDrop = false;
     enemyAuraVisible = false;
     facingCorrect = false;
     interceptDone = false;
@@ -73,7 +77,7 @@ class TutorialController extends ChangeNotifier {
     s2 = S2Phase.spearGlow;
     phaseC = 0;
     tipText = '而家做：睇住己方槍兵槍尖發光，等敵騎氣場出現再迎擊';
-    tipSkippable = true;
+    tipSkippable = false;
     failed = false;
     failReason = null;
     enemyAuraVisible = false;
@@ -85,6 +89,24 @@ class TutorialController extends ChangeNotifier {
 
   void skipTip() {
     if (!tipSkippable || tipText == null) return;
+    // Soft-fix: tips like「點突撃過關」must NOT skip drag+aura gate.
+    if (session == TutorialSession.session1 &&
+        (s1 == S1Phase.highlightSelect ||
+            s1 == S1Phase.dragGuide ||
+            s1 == S1Phase.waitAura ||
+            s1 == S1Phase.hitCharge ||
+            s1 == S1Phase.failRetry)) {
+      return;
+    }
+    if (session == TutorialSession.session2 &&
+        (s2 == S2Phase.spearGlow ||
+            s2 == S2Phase.enemyApproach ||
+            s2 == S2Phase.waitTurn ||
+            s2 == S2Phase.interceptHit ||
+            s2 == S2Phase.failRetry ||
+            s2 == S2Phase.strategyOrReturn)) {
+      return;
+    }
     tipText = null;
     if (session == TutorialSession.session1 && s1 == S1Phase.tipNext) {
       s1 = S1Phase.passed;
@@ -119,7 +141,8 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 1.0 && !auraReady) {
           auraReady = true;
           s1 = S1Phase.hitCharge;
-          tipText = '青白環已亮！而家點浮字「突撃」過關';
+          tipText = '青白環已亮！而家點浮字「突撃」過關（要拖過先）';
+          tipSkippable = false; // tip alone cannot pass without prior drag
           notifyListeners();
         }
         break;
@@ -131,6 +154,8 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s1 = S1Phase.dragGuide;
           tipText = '重試：拖向落點（金圈），等青白環亮起再點「突撃」';
+          tipSkippable = false;
+          didDragDrop = false;
           notifyListeners();
         }
         break;
@@ -162,6 +187,7 @@ class TutorialController extends ChangeNotifier {
           facingCorrect = true;
           s2 = S2Phase.interceptHit;
           tipText = '面向正確！而家點浮字「迎擊」過關';
+          tipSkippable = false;
           notifyListeners();
         }
         break;
@@ -194,18 +220,29 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session1 || s1 != S1Phase.dragGuide) return;
     phaseC = 0;
     auraReady = false;
+    didDragDrop = true;
     s1 = S1Phase.waitAura;
     tipText = '蓄力中… 等青白環亮起（≥1C）再點「突撃」';
+    tipSkippable = false;
     notifyListeners();
   }
 
   void onTapCharge() {
     if (session != TutorialSession.session1) return;
-    if (s1 == S1Phase.hitCharge && auraReady) {
+    // Cannot pass by tip-button alone: need drag drop + aura ≥1C.
+    if (s1 == S1Phase.hitCharge && auraReady && didDragDrop) {
       s1 = S1Phase.tipNext;
       tipText = '場1過關！撳「跳過」進入教學場2：迎擊';
       tipSkippable = true;
       notifyListeners();
+      return;
+    }
+    if (!didDragDrop &&
+        (s1 == S1Phase.highlightSelect ||
+            s1 == S1Phase.dragGuide ||
+            s1 == S1Phase.waitAura ||
+            s1 == S1Phase.hitCharge)) {
+      _failS1('未拖到落點 — 要拖＋氣場≥1C 先過關');
       return;
     }
     // Too early / wrong timing
@@ -230,6 +267,7 @@ class TutorialController extends ChangeNotifier {
       interceptDone = true;
       s2 = S2Phase.strategyOrReturn;
       tipText = '而家做：撳右下「計略」或左「歸城」完成教學';
+      tipSkippable = false;
       notifyListeners();
     } else {
       failed = true;
@@ -270,6 +308,7 @@ class TutorialController extends ChangeNotifier {
     tipText = '場1過關！撳「跳過」進入教學場2：迎擊';
     tipSkippable = true;
     auraReady = true;
+    didDragDrop = true;
     failed = false;
     notifyListeners();
   }
@@ -295,8 +334,9 @@ class TutorialController extends ChangeNotifier {
     s1 = S1Phase.waitAura;
     phaseC = 1.0;
     auraReady = true;
-    tipText = '青白環已亮（≥1C）— 而家可點「突撃」過關';
-    tipSkippable = true;
+    didDragDrop = true; // shot assumes prior drag
+    tipText = '拖到落點後：青白環已亮（≥1C）— 點「突撃」';
+    tipSkippable = false; // soft-fix: tip「點突撃過關」cannot skip drag
     failed = false;
     failReason = null;
     notifyListeners();
@@ -309,7 +349,7 @@ class TutorialController extends ChangeNotifier {
     s2 = S2Phase.strategyOrReturn;
     phaseC = 1.0;
     tipText = '而家做：撳右下「計略」或左「歸城」完成教學';
-    tipSkippable = true;
+    tipSkippable = false;
     interceptDone = true;
     strategyOrReturnDone = false;
     facingCorrect = true;
@@ -317,5 +357,39 @@ class TutorialController extends ChangeNotifier {
     failed = false;
     failReason = null;
     notifyListeners();
+  }
+
+  /// Feel shot: drag guide + bright aura on own + enemy visible on field.
+  void forceFeelDragAura() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.hitCharge;
+    phaseC = 1.0;
+    auraReady = true;
+    didDragDrop = true;
+    tipText = '拖有導線／落點；青白環≥1C 先撞';
+    tipSkippable = false;
+    failed = false;
+    notifyListeners();
+  }
+
+  /// Feel shot: intercept tip glow + facing ready.
+  void forceFeelIntercept() {
+    shotPassMode = true;
+    session = TutorialSession.session2;
+    s2 = S2Phase.interceptHit;
+    phaseC = 1.0;
+    facingCorrect = true;
+    enemyAuraVisible = true;
+    interceptDone = false;
+    tipText = '槍尖常在；敵オーラ≥1C 後轉面迎擊';
+    tipSkippable = false;
+    failed = false;
+    notifyListeners();
+  }
+
+  /// Feel shot: stratagem FX, board tappable (strategyOrReturn).
+  void forceFeelStratagem() {
+    forceSession2Coach();
   }
 }
