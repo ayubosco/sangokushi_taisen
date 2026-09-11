@@ -10,6 +10,7 @@ import '../data/card_models.dart';
 import 'c_clock.dart';
 import 'faction_colors.dart';
 import 'fx_windows.dart';
+import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
@@ -47,10 +48,17 @@ class TaisenGame extends FlameGame {
   /// Shot mode: keep 返城 float visible.
   bool holdReturnFlash = false;
 
-  /// Design assets: weapon corner atlas + lacquer field swatch + card atlas (5:8 dest).
+  /// Design assets: weapon corner atlas + lacquer field swatch + 5:8 token art.
   ui.Image? _weaponSheet;
   ui.Image? _fieldLacquer;
-  ui.Image? _tokenCards34;
+  ui.Image? _tokenCards58;
+  ui.Image? _tokenSpear58;
+  ui.Image? _tokenDao58;
+  ui.Image? _tokenBow58;
+  /// Flame SpriteAnimation bank (spear/dao/bow/cavalry sheets).
+  final TroopSpriteBank troopSprites = TroopSpriteBank();
+  /// Shot / debug: force spear pose for Simulator captures.
+  TroopAnimPose? debugForceSpearPose;
 
   /// Tutorial token roles (indices into [field]).
   int? tutorialOwnIndex;
@@ -121,7 +129,11 @@ class TaisenGame extends FlameGame {
     if (!wasRunning) clock.pause();
     _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
     _fieldLacquer = await _loadUiImage('assets/field/field-lacquer-swatch.png');
-    _tokenCards34 = await _loadUiImage('assets/ui/token-cards-34-moodboard.png');
+    _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
+    _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
+    _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
+    _tokenBow58 = await _loadUiImage('assets/ui/token-card-bow-58.png');
+    await troopSprites.loadAll();
   }
 
   Future<ui.Image> _loadUiImage(String assetPath) async {
@@ -147,8 +159,8 @@ class TaisenGame extends FlameGame {
   /// Own-castle bottom band ≈12% of drag field (Bosco: 10–14%).
   static const double kCastleBandFracOfField = 0.12;
 
-  /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX 0.14–0.18).
-  static const double kTokenWidthFracOfField = 0.16;
+  /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (Bosco 0.11–0.13, hard max 0.14).
+  static const double kTokenWidthFracOfField = 0.12; // Bosco eye: 0.11–0.13 (hard max 0.14); was 0.16 Fail
   static const double kTokenAspectWH = 5 / 8; // W/H
 
   double get castleBandH => fieldH * kCastleBandFracOfField;
@@ -169,8 +181,9 @@ class TaisenGame extends FlameGame {
 
   double get tokenHitR {
     final s = tokenCardSize;
+    // Transparent hit ≥48dp diameter — may exceed smaller 0.12 art.
     final halfDiag = 0.5 * math.sqrt(s.width * s.width + s.height * s.height);
-    return math.max(halfDiag + 4, 24.0); // ≥48dp diameter
+    return math.max(halfDiag + 4, 24.0);
   }
 
   /// Debug metrics for H0 gate (printed once when size known).
@@ -321,7 +334,7 @@ class TaisenGame extends FlameGame {
     selectedIndex = 0;
     holdReturnFlash = true;
     _returnFlashLeft = 1.0;
-    // UIUX: 5:8 cards @16% field_w + 己城 band highlight (drag-in 返城).
+    // UIUX: 5:8 cards @12% field_w + 己城 band highlight (drag-in 返城).
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
@@ -405,6 +418,24 @@ class TaisenGame extends FlameGame {
     dragging = true;
   }
 
+  /// FEEL_SHOT=spear-idle: own spear SpriteAnimation idle loop (5:8 @0.12 field_w).
+  void setupFeelSpearIdlePose() {
+    setupSession2Field();
+    debugForceSpearPose = TroopAnimPose.idle;
+    ownFacing = -0.2;
+    selectedIndex = tutorialOwnIndex;
+    watchKind = AWindowKind.intercept;
+  }
+
+  /// FEEL_SHOT=spear-attack: row3 tip-glow attack loop readable for UIUX.
+  void setupFeelSpearAttackPose() {
+    setupSession2Field();
+    debugForceSpearPose = TroopAnimPose.attack;
+    ownFacing = -0.35;
+    selectedIndex = tutorialOwnIndex;
+    watchKind = AWindowKind.intercept;
+  }
+
   /// FEEL_SHOT=intercept-window: enemy aura on, spear tip glow, facing still wrong (count C).
   void setupFeelInterceptWindowPose() {
     setupSession2Field();
@@ -448,6 +479,8 @@ class TaisenGame extends FlameGame {
     // C clock runs whenever [CClock.running] — FEEL_SHOT/TutorialShell pause for freezes only.
     clock.update(dt);
     _pulse += dt;
+    // Troop SpriteAnimations — independent of drag/buttons; never blocks input.
+    troopSprites.update(dt);
     tutorial?.tick(dt);
 
     _watchPhaseLeft -= dt;
@@ -656,7 +689,7 @@ class TaisenGame extends FlameGame {
       );
     }
 
-    // Real-card 5:8; width ≈16% field (UIUX 0.14–0.18).
+    // Real-card 5:8; width ≈12% field (Bosco 0.11–0.13, max 0.14).
     final tokenSize = tokenCardSize;
     for (var i = 0; i < field.length; i++) {
       final card = field[i];
@@ -681,6 +714,7 @@ class TaisenGame extends FlameGame {
         canvas,
         center,
         card,
+        index: i,
         cardW: tokenSize.width,
         cardH: tokenSize.height,
         selected: selected || (tutorialOwnIndex == i && t != null),
@@ -1142,6 +1176,7 @@ class TaisenGame extends FlameGame {
     Canvas canvas,
     Offset center,
     CardFace card, {
+    required int index,
     required double cardW,
     required double cardH,
     required bool selected,
@@ -1153,33 +1188,62 @@ class TaisenGame extends FlameGame {
     final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
 
-    final painted = _drawTokenCardFace(canvas, dest, card, dim: dim);
-    if (!painted) {
-      // Procedural 5:8 lacquer + gold border + weapon (until token-cards-58 lands).
-      final base = _tokenFill(card);
-      final fill = dim ? base.withValues(alpha: 0.35) : base;
-      canvas.drawRRect(rrect, Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.4 : 0.96));
+    final hasAnim = troopSprites.has(card.troop);
+    if (hasAnim) {
+      // Prefer readable SpriteAnimation on field; 5:8 chrome under / wraps.
       canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(dest.left, dest.top, cardW, cardH * 0.18),
-          Radius.circular(cardW * 0.07),
-        ),
-        Paint()..color = fill,
+        rrect,
+        Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.45 : 0.97),
       );
-      _drawWeapon(
+      // Dim 5:8 weapon token as under-chrome (not the hero read).
+      _drawTokenCardFace(canvas, dest, card, dim: true);
+      final pose = _poseForToken(index, card, isEnemy: isEnemy);
+      // Cover-fit anim into card so spear tip glow / body stay readable at 0.12 width.
+      final inset = dest.deflate(cardW * 0.04);
+      troopSprites.render(
         canvas,
-        Offset(center.dx, center.dy + cardH * 0.02),
+        inset,
         card.troop,
-        dim ? Colors.white38 : Colors.white,
-        scale: (cardW / 54.0) * 1.1,
+        pose,
+        opacity: dim ? 0.5 : 1.0,
+        fit: BoxFit.cover,
       );
       canvas.drawRRect(
         rrect,
         Paint()
-          ..color = FactionColors.gold
+          ..color = FactionColors.gold.withValues(alpha: dim ? 0.45 : 0.95)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.4,
       );
+    } else {
+      final painted = _drawTokenCardFace(canvas, dest, card, dim: dim);
+      if (!painted) {
+        // Procedural 5:8 lacquer + gold border + weapon fallback.
+        final base = _tokenFill(card);
+        final fill = dim ? base.withValues(alpha: 0.35) : base;
+        canvas.drawRRect(rrect, Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.4 : 0.96));
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(dest.left, dest.top, cardW, cardH * 0.18),
+            Radius.circular(cardW * 0.07),
+          ),
+          Paint()..color = fill,
+        );
+        _drawWeapon(
+          canvas,
+          Offset(center.dx, center.dy + cardH * 0.02),
+          card.troop,
+          dim ? Colors.white38 : Colors.white,
+          scale: (cardW / 54.0) * 1.1,
+        );
+        canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = FactionColors.gold
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.4,
+        );
+      }
     }
 
     if (isEnemy) {
@@ -1256,27 +1320,61 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Moodboard atlas crops (3:4 sheet adapted into 5:8 dest until token-cards-58).
-  static Rect _tokenCard34Src(TroopType troop) {
+  /// Single-card 5:8 gold-frame crops inside 1280×720 canvases (Design token-*-58).
+  static Rect _tokenCard58Src(TroopType troop) {
     switch (troop) {
-      case TroopType.cavalry:
-        return const Rect.fromLTWH(55, 113, 244, 466);
       case TroopType.spear:
-        return const Rect.fromLTWH(355, 100, 245, 485);
-      case TroopType.bow:
-        return const Rect.fromLTWH(680, 113, 237, 466);
+        return const Rect.fromLTWH(436, 12, 412, 676);
       case TroopType.infantry:
       case TroopType.siege:
-        return const Rect.fromLTWH(980, 114, 245, 465);
+        return const Rect.fromLTWH(444, 8, 396, 690);
+      case TroopType.bow:
+        return const Rect.fromLTWH(762, 12, 382, 692);
+      case TroopType.cavalry:
+        // No single cavalry-58 yet — moodboard card 4 (CAVALRY LANCE TIP).
+        return const Rect.fromLTWH(970, 52, 270, 476);
     }
   }
 
-  /// Draw card face: cover-fit moodboard crop into 5:8 dest (or false → procedural).
+  ui.Image? _tokenImageFor(TroopType troop) {
+    switch (troop) {
+      case TroopType.spear:
+        return _tokenSpear58;
+      case TroopType.infantry:
+      case TroopType.siege:
+        return _tokenDao58;
+      case TroopType.bow:
+        return _tokenBow58;
+      case TroopType.cavalry:
+        return _tokenCards58;
+    }
+  }
+
+  /// Moodboard 5:8 crops: SPEAR / DAO / BOW / CAVALRY (fallback).
+  static Rect _tokenCard58MoodSrc(TroopType troop) {
+    switch (troop) {
+      case TroopType.spear:
+        return const Rect.fromLTWH(45, 52, 267, 475);
+      case TroopType.infantry:
+      case TroopType.siege:
+        return const Rect.fromLTWH(349, 52, 266, 508);
+      case TroopType.bow:
+        return const Rect.fromLTWH(629, 38, 326, 522);
+      case TroopType.cavalry:
+        return const Rect.fromLTWH(970, 52, 270, 476);
+    }
+  }
+
+  /// Draw 5:8 token face from Design *-58 art (cover-fit). False → procedural.
   bool _drawTokenCardFace(Canvas canvas, Rect dest, CardFace card, {required bool dim}) {
-    final sheet = _tokenCards34;
-    if (sheet == null) return false;
-    final src = _tokenCard34Src(card.troop);
-    // Cover-fit src into dest (5:8), crop overflow — keeps weapon centered.
+    final troop = card.troop;
+    var img = _tokenImageFor(troop);
+    var src = _tokenCard58Src(troop);
+    if (img == null && _tokenCards58 != null) {
+      img = _tokenCards58;
+      src = _tokenCard58MoodSrc(troop);
+    }
+    if (img == null) return false;
     final scale = math.max(dest.width / src.width, dest.height / src.height);
     final dw = src.width * scale;
     final dh = src.height * scale;
@@ -1288,9 +1386,8 @@ class TaisenGame extends FlameGame {
       ..filterQuality = FilterQuality.high
       ..isAntiAlias = true
       ..color = Color.fromRGBO(255, 255, 255, dim ? 0.42 : 1.0);
-    canvas.drawImageRect(sheet, src, Rect.fromLTWH(dx, dy, dw, dh), paint);
+    canvas.drawImageRect(img, src, Rect.fromLTWH(dx, dy, dw, dh), paint);
     canvas.restore();
-    // Heavy gold border on top of atlas (atlas already has ornate frame; reinforce for 5:8 crop).
     canvas.drawRRect(
       RRect.fromRectAndRadius(dest, Radius.circular(dest.width * 0.08)),
       Paint()
@@ -1299,6 +1396,38 @@ class TaisenGame extends FlameGame {
         ..strokeWidth = 2.2,
     );
     return true;
+  }
+
+  /// Active SpriteAnimation pose for a field token (never blocks drag/buttons).
+  TroopAnimPose _poseForToken(int index, CardFace card, {required bool isEnemy}) {
+    if (card.troop == TroopType.spear && debugForceSpearPose != null) {
+      return debugForceSpearPose!;
+    }
+    if (dragging && selectedIndex == index) return TroopAnimPose.move;
+    if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
+    switch (card.troop) {
+      case TroopType.spear:
+        final tipLive = (!isEnemy) && (
+          (tutorial != null && tutorial!.session == TutorialSession.session2) ||
+          (_matchSpearIndex == index) ||
+          (_matchEnemyChargeIndex != null)
+        );
+        if (tipLive) return TroopAnimPose.attack;
+        return TroopAnimPose.idle;
+      case TroopType.cavalry:
+        if (_matchChargeIndex == index || (isEnemy && _matchEnemyChargeIndex == index)) {
+          return TroopAnimPose.attack;
+        }
+        return TroopAnimPose.idle;
+      case TroopType.bow:
+        if (_bowWindupIndex == index) {
+          return _bowShotReady ? TroopAnimPose.attack : TroopAnimPose.move;
+        }
+        return TroopAnimPose.idle;
+      case TroopType.infantry:
+      case TroopType.siege:
+        return TroopAnimPose.idle;
+    }
   }
 
   void _drawFacingArrow(Canvas canvas, Offset c, double facing, Color color, {bool enemyHard = false}) {

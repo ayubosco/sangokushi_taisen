@@ -68,6 +68,14 @@ flutter:
     - assets/ui/token-weapons-sheet.png
     - assets/ui/token-cards-34-moodboard.png
     - assets/ui/token-card-spear-34.png
+    - assets/ui/token-cards-58-moodboard.png
+    - assets/ui/token-card-spear-58.png
+    - assets/ui/token-card-dao-58.png
+    - assets/ui/token-card-bow-58.png
+    - assets/sprites/troop-spear-sheet-v1.png
+    - assets/sprites/troop-dao-sheet-v1.png
+    - assets/sprites/troop-bow-sheet-v1.png
+    - assets/sprites/troop-cavalry-sheet-v1.png
     - assets/field/field-lacquer-swatch.png
 
   # To add assets to your application, add an assets section, like this:

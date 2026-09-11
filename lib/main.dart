@@ -14,7 +14,7 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|stratagem|castle.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|stratagem|castle|spear-idle|spear-attack.
 /// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢.
 /// Title lock: on-screen art = branding PNG lockup (三國＋手指＋大戰). Oral/CFBundleDisplayName may stay「三國指大戰」; never Sega「三國志大戦」. Never draw「指」glyph in title art.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
@@ -405,6 +405,18 @@ class _TutorialShellState extends State<TutorialShell> {
         }
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;
+      } else if (kFeelShot == 'spear-idle') {
+        _game.setupFeelSpearIdlePose();
+        _tutorial.forceFeelInterceptWindow();
+        _game.watchKind = AWindowKind.intercept;
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = false;
+      } else if (kFeelShot == 'spear-attack') {
+        _game.setupFeelSpearAttackPose();
+        _tutorial.forceFeelInterceptWindow();
+        _game.watchKind = AWindowKind.intercept;
+        _bannerFor = TutorialSession.session2;
+        _showSessionBanner = false;
       } else if (kFeelShot == 'intercept-window') {
         _game.setupFeelInterceptWindowPose();
         _tutorial.forceFeelInterceptWindow();
