@@ -33,7 +33,12 @@ class TaisenGame extends FlameGame {
   final List<Offset> fieldPos = [];
   /// Parallel to [field]: true = enemy token on lower field (dark outline).
   final List<bool> fieldIsEnemy = [];
+  /// Parallel to [field]: own token parked in bottom 己城 band (返城 / heal-redeploy).
+  final List<bool> fieldInCastle = [];
   int? selectedIndex;
+
+  /// Drag hover: pointer currently inside own-castle band (highlight).
+  bool castleBandHot = false;
 
   /// Cosmetic castle race fills (0–1). No combat damage numbers invented.
   double ownCastle = 0.78;
@@ -42,9 +47,10 @@ class TaisenGame extends FlameGame {
   /// Shot mode: keep 返城 float visible.
   bool holdReturnFlash = false;
 
-  /// Design assets: weapon corner atlas + lacquer field swatch.
+  /// Design assets: weapon corner atlas + lacquer field swatch + card atlas (5:8 dest).
   ui.Image? _weaponSheet;
   ui.Image? _fieldLacquer;
+  ui.Image? _tokenCards34;
 
   /// Tutorial token roles (indices into [field]).
   int? tutorialOwnIndex;
@@ -115,6 +121,7 @@ class TaisenGame extends FlameGame {
     if (!wasRunning) clock.pause();
     _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
     _fieldLacquer = await _loadUiImage('assets/field/field-lacquer-swatch.png');
+    _tokenCards34 = await _loadUiImage('assets/ui/token-cards-34-moodboard.png');
   }
 
   Future<ui.Image> _loadUiImage(String assetPath) async {
@@ -137,6 +144,35 @@ class TaisenGame extends FlameGame {
   /// Flat operable field below watch (excludes watch; castle sits on divider).
   double get fieldH => (size.y - watchH).clamp(0.0, double.infinity);
 
+  /// Own-castle bottom band ≈12% of drag field (Bosco: 10–14%).
+  static const double kCastleBandFracOfField = 0.12;
+
+  /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX 0.14–0.18).
+  static const double kTokenWidthFracOfField = 0.16;
+  static const double kTokenAspectWH = 5 / 8; // W/H
+
+  double get castleBandH => fieldH * kCastleBandFracOfField;
+
+  Rect get castleBandRect {
+    final h = size.y;
+    final bh = castleBandH;
+    return Rect.fromLTWH(0, h - bh, size.x, bh);
+  }
+
+  bool inCastleBand(Offset p) => castleBandRect.contains(p);
+
+  /// Field token art size (5:8). Hit target may be larger (≥48dp).
+  Size get tokenCardSize {
+    final w = size.x * kTokenWidthFracOfField;
+    return Size(w, w / kTokenAspectWH);
+  }
+
+  double get tokenHitR {
+    final s = tokenCardSize;
+    final halfDiag = 0.5 * math.sqrt(s.width * s.width + s.height * s.height);
+    return math.max(halfDiag + 4, 24.0); // ≥48dp diameter
+  }
+
   /// Debug metrics for H0 gate (printed once when size known).
   bool _loggedH0Metrics = false;
 
@@ -145,12 +181,15 @@ class TaisenGame extends FlameGame {
     _loggedH0Metrics = true;
     final wh = watchH;
     final fh = fieldH;
+    final tw = size.x * kTokenWidthFracOfField;
     // ignore: avoid_print
     print(
       'H0_MEASURE gameW=${size.x.toStringAsFixed(1)} gameH=${size.y.toStringAsFixed(1)} '
       'watchH=${wh.toStringAsFixed(1)} fieldH=${fh.toStringAsFixed(1)} '
       'watch/game=${(wh / size.y).toStringAsFixed(3)} field/game=${(fh / size.y).toStringAsFixed(3)} '
-      'dragAspect=${(size.x / fh).toStringAsFixed(3)}',
+      'dragAspect=${(size.x / fh).toStringAsFixed(3)} '
+      'tokenW=${tw.toStringAsFixed(1)} tokenW/fieldW=${(tw / size.x).toStringAsFixed(3)} '
+      'tokenAspect=${kTokenAspectWH.toStringAsFixed(3)} castleBand/field=${kCastleBandFracOfField.toStringAsFixed(2)}',
     );
   }
 
@@ -164,12 +203,14 @@ class TaisenGame extends FlameGame {
     field.clear();
     fieldPos.clear();
     fieldIsEnemy.clear();
+    fieldInCastle.clear();
     selectedIndex = null;
     final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
     final cao = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
     // Layout lock: lower field shows BOTH own + enemy (not own-only).
     field.addAll([zhao, cao]);
     fieldIsEnemy.addAll([false, true]);
+    fieldInCastle.addAll([false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     fieldPos.addAll([
@@ -187,11 +228,13 @@ class TaisenGame extends FlameGame {
     field.clear();
     fieldPos.clear();
     fieldIsEnemy.clear();
+    fieldInCastle.clear();
     selectedIndex = null;
     final spear = Cost6Roster.all.firstWhere((c) => c.id == 'zhanghe');
     final enemyCav = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
     field.addAll([spear, enemyCav]);
     fieldIsEnemy.addAll([false, true]);
+    fieldInCastle.addAll([false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
@@ -210,6 +253,7 @@ class TaisenGame extends FlameGame {
     field.clear();
     fieldPos.clear();
     fieldIsEnemy.clear();
+    fieldInCastle.clear();
     selectedIndex = null;
     tutorialOwnIndex = null;
     tutorialEnemyIndex = null;
@@ -228,11 +272,13 @@ class TaisenGame extends FlameGame {
     for (var i = 0; i < ownCards.length; i++) {
       field.add(ownCards[i]);
       fieldIsEnemy.add(false);
+      fieldInCastle.add(false);
       fieldPos.add(Offset(w * (0.22 + i * 0.22), wh + fh * 0.62));
     }
     for (var i = 0; i < enemyCards.length; i++) {
       field.add(enemyCards[i]);
       fieldIsEnemy.add(true);
+      fieldInCastle.add(false);
       fieldPos.add(Offset(w * (0.35 + i * 0.28), wh + fh * 0.22));
     }
     // Cap visual stack: never more than fieldMax total, no stack-shadow.
@@ -240,6 +286,7 @@ class TaisenGame extends FlameGame {
       field.removeLast();
       fieldPos.removeLast();
       fieldIsEnemy.removeLast();
+      if (fieldInCastle.isNotEmpty) fieldInCastle.removeLast();
     }
     selectedIndex = 0;
     tutorialOwnIndex = 0;
@@ -274,13 +321,24 @@ class TaisenGame extends FlameGame {
     selectedIndex = 0;
     holdReturnFlash = true;
     _returnFlashLeft = 1.0;
-    // Show drag rubber-band on Zhao for 拖得郁 readability in match.
+    // UIUX: 5:8 cards @16% field_w + 己城 band highlight (drag-in 返城).
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
+    final band = size.y > 0
+        ? castleBandRect
+        : Rect.fromLTWH(0, wh + fh * 0.88, w, fh * 0.12);
+    if (fieldPos.isNotEmpty) {
+      fieldPos[0] = Offset(w * 0.28, band.top + band.height * 0.55);
+      while (fieldInCastle.length < field.length) {
+        fieldInCastle.add(false);
+      }
+      fieldInCastle[0] = true;
+    }
     dragging = true;
-    dragFrom = fieldPos.isNotEmpty ? fieldPos[0] : Offset(w * 0.22, wh + fh * 0.62);
-    dragTo = Offset(w * 0.55, wh + fh * 0.34);
+    castleBandHot = true;
+    dragFrom = Offset(w * 0.28, wh + fh * 0.55);
+    dragTo = fieldPos.isNotEmpty ? fieldPos[0] : Offset(w * 0.28, band.top + band.height * 0.55);
   }
 
   /// FEEL_SHOT=drag-live: freeze mid-drag rubber-band toward drop (enemy outlined).
@@ -319,10 +377,12 @@ class TaisenGame extends FlameGame {
     field.clear();
     fieldPos.clear();
     fieldIsEnemy.clear();
+    fieldInCastle.clear();
     final own = Cost6Roster.all.firstWhere((c) => c.id == 'caoren'); // 魏騎
     final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao'); // 魏騎
     field.addAll([own, enemy]);
     fieldIsEnemy.addAll([false, true]);
+    fieldInCastle.addAll([false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
@@ -533,21 +593,24 @@ class TaisenGame extends FlameGame {
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
 
-    // Bottom flat 2D playfield (H0 ≥55% screen target): lacquer + gold-border tokens only — NO 3D unit blocks.
+    // Bottom flat ortho playfield (H0 ≥55%): lacquer + ortho gold grid — NO perspective/vanishing.
     final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
     canvas.drawRect(fieldRect, Paint()..color = const Color(0xFF0A0A0A));
     _drawFieldLacquer(canvas, fieldRect);
-    _drawLacquerGrain(canvas, fieldRect, alpha: 0.06);
+    _drawOrthoFieldGrid(canvas, fieldRect);
+    _drawLacquerGrain(canvas, fieldRect, alpha: 0.04);
+    _drawOwnCastleBand(canvas, fieldRect);
 
     final t = tutorial;
-    _drawText(canvas, '雙方動向（可操作）', Offset(16, fieldTop + 28), FactionColors.gold, 16);
+    // Light vertical padding (tip is overlay; keep dragH ≥0.55).
+    _drawText(canvas, '雙方動向（可操作）', Offset(16, fieldTop + 14), FactionColors.gold, 16);
     if (t == null) {
       final ownN = fieldIsEnemy.where((e) => !e).length;
       final enN = fieldIsEnemy.where((e) => e).length;
       _drawText(
         canvas,
         'Cost $costCap · 場上 ${field.length}/$fieldMax（己$ownN／敵$enN）',
-        Offset(16, fieldTop + 50),
+        Offset(16, fieldTop + 34),
         Colors.white54,
         12,
       );
@@ -593,7 +656,8 @@ class TaisenGame extends FlameGame {
       );
     }
 
-    const tokenR = 30.0;
+    // Real-card 5:8; width ≈16% field (UIUX 0.14–0.18).
+    final tokenSize = tokenCardSize;
     for (var i = 0; i < field.length; i++) {
       final card = field[i];
       final center = tokenCenter(i);
@@ -612,14 +676,16 @@ class TaisenGame extends FlameGame {
 
       _drawFieldTelegraph(canvas, center, card, i, isOwn: !isEnemy && tutorialOwnIndex == i, isEnemy: isEnemy);
 
+      final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       _drawCardLikeToken(
         canvas,
         center,
         card,
-        tokenR: tokenR,
+        cardW: tokenSize.width,
+        cardH: tokenSize.height,
         selected: selected || (tutorialOwnIndex == i && t != null),
         isEnemy: isEnemy,
-        dim: dim,
+        dim: dim || inCastle,
         pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
       );
 
@@ -630,14 +696,16 @@ class TaisenGame extends FlameGame {
         _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
       }
 
+      // Labels sit just under 5:8 card.
+      final labelY = center.dy + tokenSize.height / 2 + 4;
       _drawText(
         canvas,
         card.nameZh,
-        Offset(center.dx - 18, center.dy + tokenR + 4),
+        Offset(center.dx - 18, labelY),
         dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
         11,
       );
-      _drawCostStars(canvas, Offset(center.dx - 18, center.dy + tokenR + 20), card.cost);
+      _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
     }
 
     // Floating 突撃 (session1) — not a tip-skip; requires auraReady after drag.
@@ -767,7 +835,7 @@ class TaisenGame extends FlameGame {
     final img = _fieldLacquer;
     if (img == null) return;
     final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
-    // Cover-fit: scale to fill field, crop overflow (keep grid readable).
+    // Cover-fit texture only (no baked perspective grid — ortho drawn in code).
     final scale = math.max(rect.width / src.width, rect.height / src.height);
     final dw = src.width * scale;
     final dh = src.height * scale;
@@ -786,20 +854,86 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
+  /// Flat orthographic gold grid on operable field — parallel lines, equal cells, no vanishing point.
+  void _drawOrthoFieldGrid(Canvas canvas, Rect rect) {
+    const cols = 8;
+    const rows = 10;
+    const inset = 10.0;
+    final left = rect.left + inset;
+    final right = rect.right - inset;
+    final top = rect.top + inset;
+    final bottom = rect.bottom - inset;
+    final cellW = (right - left) / cols;
+    final cellH = (bottom - top) / rows;
+    final line = Paint()
+      ..color = FactionColors.gold.withValues(alpha: 0.42)
+      ..strokeWidth = 1.15
+      ..isAntiAlias = true;
+    final soft = Paint()
+      ..color = FactionColors.gold.withValues(alpha: 0.16)
+      ..strokeWidth = 2.4
+      ..isAntiAlias = true;
+    for (var r = 0; r <= rows; r++) {
+      final y = top + r * cellH;
+      canvas.drawLine(Offset(left, y), Offset(right, y), soft);
+      canvas.drawLine(Offset(left, y), Offset(right, y), line);
+    }
+    for (var c = 0; c <= cols; c++) {
+      final x = left + c * cellW;
+      canvas.drawLine(Offset(x, top), Offset(x, bottom), soft);
+      canvas.drawLine(Offset(x, top), Offset(x, bottom), line);
+    }
+    final dot = Paint()..color = FactionColors.gold.withValues(alpha: 0.7);
+    for (var r = 0; r <= rows; r++) {
+      for (var c = 0; c <= cols; c++) {
+        canvas.drawCircle(Offset(left + c * cellW, top + r * cellH), 1.6, dot);
+      }
+    }
+  }
+
+  /// Bottom own-castle band (drag-in = 返城, drag-out = 出陣). Lacquer + pale gold.
+  void _drawOwnCastleBand(Canvas canvas, Rect fieldRect) {
+    final band = castleBandRect;
+    // Fill
+    canvas.drawRect(band, Paint()..color = const Color(0xFF0C0C0C));
+    // Top pale-gold edge
+    final edge = Paint()
+      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.45)
+      ..strokeWidth = castleBandHot ? 2.6 : 1.4;
+    canvas.drawLine(Offset(band.left + 8, band.top), Offset(band.right - 8, band.top), edge);
+    // Soft inner wash when hot
+    if (castleBandHot) {
+      canvas.drawRect(
+        band,
+        Paint()..color = FactionColors.gold.withValues(alpha: 0.14),
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(band.left, band.top, band.width, 3),
+        Paint()..color = FactionColors.gold.withValues(alpha: 0.55),
+      );
+    }
+    // Corner ticks
+    final tick = Paint()
+      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.85 : 0.35)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(Offset(band.left + 10, band.top + 6), Offset(band.left + 10, band.top + 18), tick);
+    canvas.drawLine(Offset(band.right - 10, band.top + 6), Offset(band.right - 10, band.top + 18), tick);
+    _drawText(
+      canvas,
+      castleBandHot ? '歸城區' : '己城',
+      Offset(16, band.top + 10),
+      FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.55),
+      12,
+    );
+  }
+
   void _drawLacquerGrain(Canvas canvas, Rect rect, {double alpha = 0.12}) {
     final paint = Paint()
-      ..color = FactionColors.gold.withValues(alpha: alpha * 0.35)
+      ..color = FactionColors.gold.withValues(alpha: alpha * 0.28)
       ..strokeWidth = 1;
-    for (var i = 0; i < 14; i++) {
-      final y = rect.top + (i + 1) * (rect.height / 15);
+    for (var i = 0; i < 10; i++) {
+      final y = rect.top + (i + 1) * (rect.height / 11);
       canvas.drawLine(Offset(rect.left + 8, y), Offset(rect.right - 8, y), paint);
-    }
-    final v = Paint()
-      ..color = Colors.white.withValues(alpha: alpha * 0.2)
-      ..strokeWidth = 1;
-    for (var i = 0; i < 6; i++) {
-      final x = rect.left + (i + 1) * (rect.width / 7);
-      canvas.drawLine(Offset(x, rect.top + 6), Offset(x, rect.bottom - 6), v);
     }
   }
 
@@ -1008,122 +1142,163 @@ class TaisenGame extends FlameGame {
     Canvas canvas,
     Offset center,
     CardFace card, {
-    required double tokenR,
+    required double cardW,
+    required double cardH,
     required bool selected,
     required bool isEnemy,
     required bool dim,
     required bool pulseOwn,
   }) {
-    final base = _tokenFill(card);
-    final fill = dim ? base.withValues(alpha: 0.35) : base;
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: center, width: tokenR * 1.7, height: tokenR * 2.05),
-      const Radius.circular(8),
-    );
-    // Gold-border card shape: lacquer face + thin faction stripe (NOT portrait blob).
-    canvas.drawRRect(rect, Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.4 : 0.96));
-    final stripe = RRect.fromRectAndRadius(
-      Rect.fromLTWH(center.dx - tokenR * 0.85, center.dy - tokenR * 1.025, tokenR * 1.7, tokenR * 0.42),
-      const Radius.circular(7),
-    );
-    canvas.drawRRect(stripe, Paint()..color = fill);
-    // Soft inner panel so weapon icon pops
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(center: center.translate(0, 4), width: tokenR * 1.25, height: tokenR * 1.15),
-        const Radius.circular(6),
-      ),
-      Paint()..color = const Color(0xFF1E1E1E).withValues(alpha: dim ? 0.35 : 0.9),
-    );
+    // Design 5:8 gold-border cards (real-card 54×86). Finger = card.
+    final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
+    final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
+
+    final painted = _drawTokenCardFace(canvas, dest, card, dim: dim);
+    if (!painted) {
+      // Procedural 5:8 lacquer + gold border + weapon (until token-cards-58 lands).
+      final base = _tokenFill(card);
+      final fill = dim ? base.withValues(alpha: 0.35) : base;
+      canvas.drawRRect(rrect, Paint()..color = const Color(0xFF141414).withValues(alpha: dim ? 0.4 : 0.96));
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(dest.left, dest.top, cardW, cardH * 0.18),
+          Radius.circular(cardW * 0.07),
+        ),
+        Paint()..color = fill,
+      );
+      _drawWeapon(
+        canvas,
+        Offset(center.dx, center.dy + cardH * 0.02),
+        card.troop,
+        dim ? Colors.white38 : Colors.white,
+        scale: (cardW / 54.0) * 1.1,
+      );
+      canvas.drawRRect(
+        rrect,
+        Paint()
+          ..color = FactionColors.gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4,
+      );
+    }
 
     if (isEnemy) {
-      // PRIORITY: Wei=Wei — thick dark outline + cool/white halo (NOT gold; own keeps gold ring).
-      // Facing arrow stays yellow/white separately.
       final halo = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: center, width: tokenR * 1.7 + 24, height: tokenR * 2.05 + 24),
-        const Radius.circular(14),
+        Rect.fromCenter(center: center, width: cardW + 20, height: cardH + 20),
+        Radius.circular(cardW * 0.14),
       );
       canvas.drawRRect(
         halo,
         Paint()
-          ..color = const Color(0xFFECEFF1) // silver-white halo ≠ gold select
+          ..color = const Color(0xFFECEFF1)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.5,
+          ..strokeWidth = 4.0,
       );
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: tokenR * 1.7 + 14, height: tokenR * 2.05 + 14),
-          const Radius.circular(12),
+          Rect.fromCenter(center: center, width: cardW + 12, height: cardH + 12),
+          Radius.circular(cardW * 0.12),
         ),
         Paint()
           ..color = const Color(0xFF000000)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 10.0,
+          ..strokeWidth = 8.0,
       );
       canvas.drawRRect(
-        rect,
+        rrect,
         Paint()
           ..color = const Color(0xFF0A0A0A)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5.5,
+          ..strokeWidth = 4.5,
       );
       canvas.drawRRect(
-        rect,
+        rrect,
         Paint()
           ..color = const Color(0xFFB0BEC5)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.0,
-      );
-    } else {
-      // Own: gold-border card
-      canvas.drawRRect(
-        rect,
-        Paint()
-          ..color = FactionColors.gold
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.8,
+          ..strokeWidth = 1.8,
       );
     }
-    // Bow windup: skip fat gold select ring so 蓄勢暈 / aim line read as distinct vocabulary.
+
     final bowWinding = !isEnemy &&
         selected &&
         card.troop == TroopType.bow &&
         _bowWindupIndex != null &&
         selectedIndex == _bowWindupIndex;
     if (selected && !isEnemy && !bowWinding) {
-      // Fat gold select ring (own only — never on enemy)
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: tokenR * 1.7 + 12, height: tokenR * 2.05 + 12),
-          const Radius.circular(11),
+          Rect.fromCenter(center: center, width: cardW + 10, height: cardH + 10),
+          Radius.circular(cardW * 0.12),
         ),
         Paint()
           ..color = FactionColors.gold
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5.0,
+          ..strokeWidth = 4.2,
       );
     }
     if (pulseOwn) {
       final pulse = 0.5 + 0.5 * math.sin(_pulse * 3);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: tokenR * 1.7 + 16 + pulse * 4, height: tokenR * 2.05 + 16 + pulse * 4),
-          const Radius.circular(12),
+          Rect.fromCenter(
+            center: center,
+            width: cardW + 14 + pulse * 3,
+            height: cardH + 14 + pulse * 3,
+          ),
+          Radius.circular(cardW * 0.13),
         ),
         Paint()
           ..color = FactionColors.gold.withValues(alpha: 0.55)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.5,
+          ..strokeWidth = 2.2,
       );
     }
-    // Weapons-only icon (larger) — no face/portrait blob.
-    _drawWeapon(
-      canvas,
-      Offset(center.dx, center.dy + 2),
-      card.troop,
-      dim ? Colors.white38 : Colors.white,
-      scale: 1.35,
+  }
+
+  /// Moodboard atlas crops (3:4 sheet adapted into 5:8 dest until token-cards-58).
+  static Rect _tokenCard34Src(TroopType troop) {
+    switch (troop) {
+      case TroopType.cavalry:
+        return const Rect.fromLTWH(55, 113, 244, 466);
+      case TroopType.spear:
+        return const Rect.fromLTWH(355, 100, 245, 485);
+      case TroopType.bow:
+        return const Rect.fromLTWH(680, 113, 237, 466);
+      case TroopType.infantry:
+      case TroopType.siege:
+        return const Rect.fromLTWH(980, 114, 245, 465);
+    }
+  }
+
+  /// Draw card face: cover-fit moodboard crop into 5:8 dest (or false → procedural).
+  bool _drawTokenCardFace(Canvas canvas, Rect dest, CardFace card, {required bool dim}) {
+    final sheet = _tokenCards34;
+    if (sheet == null) return false;
+    final src = _tokenCard34Src(card.troop);
+    // Cover-fit src into dest (5:8), crop overflow — keeps weapon centered.
+    final scale = math.max(dest.width / src.width, dest.height / src.height);
+    final dw = src.width * scale;
+    final dh = src.height * scale;
+    final dx = dest.left + (dest.width - dw) / 2;
+    final dy = dest.top + (dest.height - dh) / 2;
+    canvas.save();
+    canvas.clipRRect(RRect.fromRectAndRadius(dest, Radius.circular(dest.width * 0.08)));
+    final paint = Paint()
+      ..filterQuality = FilterQuality.high
+      ..isAntiAlias = true
+      ..color = Color.fromRGBO(255, 255, 255, dim ? 0.42 : 1.0);
+    canvas.drawImageRect(sheet, src, Rect.fromLTWH(dx, dy, dw, dh), paint);
+    canvas.restore();
+    // Heavy gold border on top of atlas (atlas already has ornate frame; reinforce for 5:8 crop).
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(dest, Radius.circular(dest.width * 0.08)),
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: dim ? 0.45 : 0.92)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
     );
+    return true;
   }
 
   void _drawFacingArrow(Canvas canvas, Offset c, double facing, Color color, {bool enemyHard = false}) {
@@ -1510,11 +1685,12 @@ class TaisenGame extends FlameGame {
 
   bool spawnCard(CardFace card, {bool enemy = false}) {
     if (field.length >= fieldMax) return false;
-    const tokenR = 30.0;
+    final tw = size.x > 0 ? size.x * kTokenWidthFracOfField : 64.0;
     final i = field.length;
     field.add(card);
     fieldIsEnemy.add(enemy);
-    fieldPos.add(Offset(48.0 + i * (tokenR * 2 + 18), watchH + 120));
+    fieldInCastle.add(false);
+    fieldPos.add(Offset(48.0 + i * (tw * 1.35), watchH + 120));
     return true;
   }
 
@@ -1522,12 +1698,12 @@ class TaisenGame extends FlameGame {
 
   int? hitTokenAt(Offset local) {
     if (local.dy < watchH) return null; // watch band read-only
-    const tokenR = 34.0;
+    final hitR = tokenHitR;
     for (var i = 0; i < field.length; i++) {
       final c = tokenCenter(i);
       final dx = local.dx - c.dx;
       final dy = local.dy - c.dy;
-      if (dx * dx + dy * dy <= (tokenR + 10) * (tokenR + 10)) return i;
+      if (dx * dx + dy * dy <= hitR * hitR) return i;
     }
     return null;
   }
@@ -1676,6 +1852,7 @@ class TaisenGame extends FlameGame {
     // Clamp to flat field — never into watch band
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
+    castleBandHot = inCastleBand(dragTo!);
   }
 
   void panEnd(Offset local) {
@@ -1685,6 +1862,8 @@ class TaisenGame extends FlameGame {
     final drop = dropGuidePoint;
     final at = Offset(local.dx, local.dy < watchH + 8 ? watchH + 8 : local.dy);
     dragTo = at;
+    final bandHot = inCastleBand(at);
+    castleBandHot = false;
     if (t != null && t.session == TutorialSession.session1 && tutorialOwnIndex != null) {
       final d = (at - drop).distance;
       if (d <= 48) {
@@ -1693,19 +1872,44 @@ class TaisenGame extends FlameGame {
         onTutorialChanged?.call();
       }
     } else if (t == null && selectedIndex != null && selectedIndex! < fieldPos.length) {
+      final i = selectedIndex!;
       // Free match drop: move token within lower field (no stack-shadow).
-      final y = at.dy.clamp(watchH + 40, size.y - 40);
+      final y = at.dy.clamp(watchH + 40, size.y - 20);
       final x = at.dx.clamp(36.0, size.x - 36);
       final moved = dragFrom != null && (Offset(x, y) - dragFrom!).distance > 24;
-      fieldPos[selectedIndex!] = Offset(x, y);
-      // Moving cancels bow still-windup.
-      if (moved && field[selectedIndex!].troop == TroopType.bow) {
+      final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
+
+      if (bandHot && !isEnemyAt(i)) {
+        // Drag INTO 己城 band → 返城 (heal/redeploy state; no invented numbers).
+        final band = castleBandRect;
+        fieldPos[i] = Offset(x.clamp(48.0, size.x - 48), band.top + band.height * 0.55);
+        while (fieldInCastle.length <= i) {
+          fieldInCastle.add(false);
+        }
+        fieldInCastle[i] = true;
+        triggerReturnCityFx();
         _cancelBowWindup();
-      } else if (field[selectedIndex!].troop == TroopType.cavalry && dragFrom != null) {
-        // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
-        if ((Offset(x, y) - dragFrom!).distance > 70) {
-          _matchChargeIndex = selectedIndex;
-          _matchChargeC = 0;
+      } else {
+        fieldPos[i] = Offset(x, y);
+        while (fieldInCastle.length <= i) {
+          fieldInCastle.add(false);
+        }
+        if (wasInCastle && !bandHot) {
+          // Drag OUT of band onto field → 出陣 (visual flytext only).
+          fieldInCastle[i] = false;
+          flashHit(i, '出陣');
+        } else {
+          fieldInCastle[i] = false;
+        }
+        // Moving cancels bow still-windup.
+        if (moved && field[i].troop == TroopType.bow) {
+          _cancelBowWindup();
+        } else if (field[i].troop == TroopType.cavalry && dragFrom != null && !wasInCastle) {
+          // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
+          if ((Offset(x, y) - dragFrom!).distance > 70) {
+            _matchChargeIndex = i;
+            _matchChargeC = 0;
+          }
         }
       }
     }

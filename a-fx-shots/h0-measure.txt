@@ -1,17 +1,21 @@
-H0 Plan A measure (iPhone 17 Pro sim screenshot 1206x2622)
-source: a-fx-shots/h0-after.png
-FEEL_SHOT=drag-aura (frozen)
-built: kWatchFractionOfGame=0.18
+H0 ortho + 5:8 tokens @16% field_w + 己城 band (iPhone 17 Pro 1206x2622)
+sources: h0-ortho-after.png, card-tokens-58.png, card-tokens-58-measure.png, castle-band-highlight.png
+FEEL_SHOT=castle
+built: kWatchFractionOfGame=0.18 kTokenWidthFracOfField=0.16 kTokenAspectWH=0.625 kCastleBandFracOfField=0.12
 
-screen fractions (from screenshot bands):
-  gameTop_y=285 (0.109)
-  castleDivider_y=665 (0.254) goldish=845
-  bottomBarTop_y=2181 (0.832) delta=15.02
+flutter H0_MEASURE:
+  gameW=402.0 gameH=678.0 watchH=122.0 fieldH=556.0
+  watch/game=0.180 field/game=0.820 dragAspect=0.723
+  tokenW=64.3 tokenW/fieldW=0.160 tokenAspect=0.625 castleBand/field=0.12
 
-  hudH/screenH   ≈ 0.041  (≤0.06)
-  watchH/screenH ≈ 0.145  (15–18%, ≤0.20)
-  dragH/screenH  ≈ 0.578  (≥0.55 accept; aim 0.58–0.62)
-  dragW/dragH    ≈ 0.796
+UIUX gates:
+  token_w/field_w=0.160 ∈ [0.14,0.18] PASS (Fail if >0.20)
+  aspect 5:8 (0.625) PASS (supersedes 3:4)
+  castleBand/field=0.12 ∈ [0.10,0.14] PASS
+  watch≤0.20 drag≥0.55 (flutter field/game=0.82 of game band)
 
-playfield: 2D tokens only (no 3D unit blocks); 3D/perspective in watch only.
+playfield: FLAT ortho gold grid
+tokens: 5:8 gold-border (moodboard cover-fit until token-cards-58)
+己城 band: drag-in=返城 drag-out=出陣
+spear SpriteAnimation: DEFERRED next commit
 flutter analyze lib/: clean

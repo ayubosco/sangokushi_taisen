@@ -633,7 +633,7 @@ class _TipBanner extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
         decoration: BoxDecoration(
           color: failed ? const Color(0xFF4A1515) : const Color(0xE6121212),
           borderRadius: BorderRadius.circular(10),
