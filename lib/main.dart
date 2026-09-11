@@ -14,8 +14,8 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|stratagem|castle|spear-idle|spear-attack.
-/// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|bow-idle|bow-attack|cav-idle|cav-attack|stratagem|castle|spear-idle|spear-attack.
+/// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢；cav/bow-*-sheet idle|attack.
 /// Title lock: on-screen art = branding PNG lockup (三國＋手指＋大戰). Oral/CFBundleDisplayName may stay「三國指大戰」; never Sega「三國志大戦」. Never draw「指」glyph in title art.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 
@@ -84,7 +84,13 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     _stage = _initialStage();
-    if (kLiveVerify == 'bow' || kDemoShot == 'match' || kFeelShot == 'castle' || kFeelShot == 'bow') {
+    const feelMatch = kFeelShot == 'castle' ||
+        kFeelShot == 'bow' ||
+        kFeelShot == 'bow-idle' ||
+        kFeelShot == 'bow-attack' ||
+        kFeelShot == 'cav-idle' ||
+        kFeelShot == 'cav-attack';
+    if (kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -97,7 +103,15 @@ class _AppRootState extends State<AppRoot> {
     if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
     if (kDemoShot == 'bingfa') return _AppStage.bingfaPick;
-    if (kFeelShot == 'castle' || kFeelShot == 'bow' || kDemoShot == 'match') return _AppStage.match;
+    if (kFeelShot == 'castle' ||
+        kFeelShot == 'bow' ||
+        kFeelShot == 'bow-idle' ||
+        kFeelShot == 'bow-attack' ||
+        kFeelShot == 'cav-idle' ||
+        kFeelShot == 'cav-attack' ||
+        kDemoShot == 'match') {
+      return _AppStage.match;
+    }
     if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       return _AppStage.tutorial;
     }
@@ -776,6 +790,22 @@ class _MatchShellState extends State<MatchShell> {
       } else if (kFeelShot == 'bow') {
         _game.setupFeelBowWindupPose();
         // Freeze mid-windup for capture; free play match still ticks C.
+        _game.clock.reset();
+        _game.clock.pause();
+      } else if (kFeelShot == 'cav-idle') {
+        _game.setupFeelCavalryIdlePose();
+        _game.clock.reset();
+        _game.clock.pause();
+      } else if (kFeelShot == 'cav-attack') {
+        _game.setupFeelCavalryAttackPose();
+        _game.clock.reset();
+        _game.clock.pause();
+      } else if (kFeelShot == 'bow-idle') {
+        _game.setupFeelBowIdlePose();
+        _game.clock.reset();
+        _game.clock.pause();
+      } else if (kFeelShot == 'bow-attack') {
+        _game.setupFeelBowAttackPose();
         _game.clock.reset();
         _game.clock.pause();
       } else {

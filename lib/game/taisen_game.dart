@@ -57,8 +57,9 @@ class TaisenGame extends FlameGame {
   ui.Image? _tokenBow58;
   /// Flame SpriteAnimation bank (spear/dao/bow/cavalry sheets).
   final TroopSpriteBank troopSprites = TroopSpriteBank();
-  /// Shot / debug: force spear pose for Simulator captures.
-  TroopAnimPose? debugForceSpearPose;
+  /// Shot / debug: force SpriteAnimation pose on [debugForcePoseIndex] (FEEL sheets).
+  TroopAnimPose? debugForcePose;
+  int? debugForcePoseIndex;
 
   /// Tutorial token roles (indices into [field]).
   int? tutorialOwnIndex;
@@ -419,10 +420,12 @@ class TaisenGame extends FlameGame {
   }
 
   /// FEEL_SHOT=spear-idle: own spear SpriteAnimation idle loop (5:8 @0.12 field_w).
+  /// Tip glow FX stays on (槍尖光常在) even in idle pose.
   void setupFeelSpearIdlePose() {
     setupSession2Field();
-    debugForceSpearPose = TroopAnimPose.idle;
-    ownFacing = -0.2;
+    debugForcePose = TroopAnimPose.idle;
+    debugForcePoseIndex = tutorialOwnIndex;
+    ownFacing = -0.2; // idle facing — tip glow still drawn via telegraph
     selectedIndex = tutorialOwnIndex;
     watchKind = AWindowKind.intercept;
   }
@@ -430,10 +433,94 @@ class TaisenGame extends FlameGame {
   /// FEEL_SHOT=spear-attack: row3 tip-glow attack loop readable for UIUX.
   void setupFeelSpearAttackPose() {
     setupSession2Field();
-    debugForceSpearPose = TroopAnimPose.attack;
+    debugForcePose = TroopAnimPose.attack;
+    debugForcePoseIndex = tutorialOwnIndex;
     ownFacing = -0.35;
     selectedIndex = tutorialOwnIndex;
     watchKind = AWindowKind.intercept;
+  }
+
+  /// FEEL_SHOT=cav-idle: own cavalry sheet idle @0.12 field_w.
+  void setupFeelCavalryIdlePose() {
+    setupMatchDemoField();
+    _matchEnemyChargeIndex = null;
+    _matchChargeIndex = null;
+    int? cavI;
+    for (var i = 0; i < field.length; i++) {
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.cavalry) {
+        cavI = i;
+        break;
+      }
+    }
+    cavI ??= 0;
+    selectedIndex = cavI;
+    debugForcePose = TroopAnimPose.idle;
+    debugForcePoseIndex = cavI;
+    watchKind = AWindowKind.charge;
+  }
+
+  /// FEEL_SHOT=cav-attack: cavalry charge/attack row readable for UIUX.
+  void setupFeelCavalryAttackPose() {
+    setupMatchDemoField();
+    _matchEnemyChargeIndex = null;
+    int? cavI;
+    for (var i = 0; i < field.length; i++) {
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.cavalry) {
+        cavI = i;
+        break;
+      }
+    }
+    cavI ??= 0;
+    selectedIndex = cavI;
+    _matchChargeIndex = cavI;
+    _matchChargeC = 1.0;
+    debugForcePose = TroopAnimPose.attack;
+    debugForcePoseIndex = cavI;
+    watchKind = AWindowKind.charge;
+  }
+
+  /// FEEL_SHOT=bow-idle: own bow sheet idle @0.12 field_w (no windup FX clutter).
+  void setupFeelBowIdlePose() {
+    setupMatchDemoField();
+    _matchEnemyChargeIndex = null;
+    int? bowI;
+    for (var i = 0; i < field.length; i++) {
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.bow) {
+        bowI = i;
+        break;
+      }
+    }
+    bowI ??= 0;
+    selectedIndex = bowI;
+    _bowWindupIndex = null;
+    _bowWindupC = 0;
+    _bowShotReady = false;
+    _bowDidShoot = false;
+    debugForcePose = TroopAnimPose.idle;
+    debugForcePoseIndex = bowI;
+    watchKind = AWindowKind.bow;
+  }
+
+  /// FEEL_SHOT=bow-attack: bow attack/windup row (+ light 蓄勢) for UIUX.
+  void setupFeelBowAttackPose() {
+    setupMatchDemoField();
+    _matchEnemyChargeIndex = null;
+    int? bowI;
+    for (var i = 0; i < field.length; i++) {
+      if (!fieldIsEnemy[i] && field[i].troop == TroopType.bow) {
+        bowI = i;
+        break;
+      }
+    }
+    bowI ??= 0;
+    selectedIndex = bowI;
+    _bowWindupIndex = bowI;
+    _bowWindupC = 0.85;
+    _bowShotReady = true;
+    _bowDidShoot = false;
+    debugForcePose = TroopAnimPose.attack;
+    debugForcePoseIndex = bowI;
+    watchKind = AWindowKind.bow;
   }
 
   /// FEEL_SHOT=intercept-window: enemy aura on, spear tip glow, facing still wrong (count C).
@@ -1400,8 +1487,8 @@ class TaisenGame extends FlameGame {
 
   /// Active SpriteAnimation pose for a field token (never blocks drag/buttons).
   TroopAnimPose _poseForToken(int index, CardFace card, {required bool isEnemy}) {
-    if (card.troop == TroopType.spear && debugForceSpearPose != null) {
-      return debugForceSpearPose!;
+    if (debugForcePose != null && debugForcePoseIndex == index) {
+      return debugForcePose!;
     }
     if (dragging && selectedIndex == index) return TroopAnimPose.move;
     if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
@@ -1523,7 +1610,7 @@ class TaisenGame extends FlameGame {
     if (t != null && t.session == TutorialSession.session2) {
       if (isOwn && card.troop == TroopType.spear) {
         // Persistent spear-tip glow (not a countdown bar) for all S2 coaching phases.
-        _drawInterceptStance(canvas, c, 44, const Color(0xFF26C6DA).withValues(alpha: 0.85), facing: ownFacing);
+        _drawInterceptStance(canvas, c, 44, const Color(0xFFB2EBF2).withValues(alpha: 0.88), facing: ownFacing);
         return;
       }
       if (isEnemy && (t.enemyAuraVisible || t.shotPassMode)) {
@@ -1565,15 +1652,20 @@ class TaisenGame extends FlameGame {
         }
         break;
       case TroopType.spear:
+        // Idle facing still shows tip glow (槍尖光常在) — cyan-white / gold-lacquer.
         _drawInterceptStance(
           canvas,
           c,
           42,
-          const Color(0xFF26C6DA).withValues(alpha: 0.75),
+          const Color(0xFFB2EBF2).withValues(alpha: 0.82),
           facing: ownFacing,
         );
         break;
       case TroopType.bow:
+        // FEEL bow-idle: show sheet only (no 蓄勢 clutter).
+        if (debugForcePoseIndex == index && debugForcePose == TroopAnimPose.idle) {
+          break;
+        }
         final winding = _bowWindupIndex == index;
         final prog = winding ? (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0) : 0.35;
         final ready = winding && _bowShotReady;
@@ -1657,18 +1749,29 @@ class TaisenGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.2,
     );
-    // Persistent spear tip / 槍衾 glow — bottom field (rx≥40) one size larger; watch (scaled rx) stays OK.
+    // Persistent spear tip / 槍尖光 — always on (idle facing too). Cyan-white + gold-lacquer (less neon green).
     final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
     final tipScale = rx >= 40 ? 1.28 : (rx / 36.0).clamp(0.75, 1.05);
     final tip = Offset(c.dx, c.dy - 48 * tipScale);
-    canvas.drawCircle(tip, 28 * tipScale, Paint()..color = const Color(0xFF80DEEA).withValues(alpha: 0.42 * glow));
-    canvas.drawCircle(tip, 17 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.52 * glow));
-    canvas.drawCircle(tip, 9.5 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.95));
+    const cyanSoft = Color(0xFFB2EBF2);
+    const cyanCore = Color(0xFFE0F7FA);
+    canvas.drawCircle(tip, 30 * tipScale, Paint()..color = cyanSoft.withValues(alpha: 0.38 * glow));
+    canvas.drawCircle(tip, 20 * tipScale, Paint()..color = cyanCore.withValues(alpha: 0.55 * glow));
+    canvas.drawCircle(tip, 11 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.96));
+    // Thin gold-lacquer rim — A-window palette, not neon green.
+    canvas.drawCircle(
+      tip,
+      14 * tipScale,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: 0.42 * glow)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6 * tipScale,
+    );
     canvas.drawLine(
       Offset(c.dx, c.dy + 26 * tipScale),
       Offset(c.dx, c.dy - 52 * tipScale),
       Paint()
-        ..color = color
+        ..color = Color.lerp(color, cyanCore, 0.35)!.withValues(alpha: 0.92)
         ..strokeWidth = 4.2 * tipScale
         ..strokeCap = StrokeCap.round,
     );
