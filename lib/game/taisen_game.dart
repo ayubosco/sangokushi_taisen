@@ -14,7 +14,9 @@ import 'tutorial_controller.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
-/// Offline 1v1 CPU stub: top 1/3 watch (read-only), bottom 2/3 flat field.
+/// Offline 1v1 CPU stub — H0 Plan A: short watch (read-only) + large flat 2D field.
+/// Watch ≤18% of game band (~15–18% screen); draggable field is the hero (≥55% screen).
+/// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
 class TaisenGame extends FlameGame {
   TaisenGame({this.tutorial});
 
@@ -122,7 +124,35 @@ class TaisenGame extends FlameGame {
     return frame.image;
   }
 
-  double get watchH => size.y / 3;
+  /// H0 Plan A: watch fraction of [GameWidget] height (not old top-⅓).
+  /// GameWidget sits between slim HUD (~≤6% screen) and bottom bar (~8–10%),
+  /// so ~0.18 of game ≈ 15–17% of full screen; hard cap still ≤0.20 screen.
+  static const double kWatchFractionOfGame = 0.18;
+
+  /// Castle strip height inside the game band (~3–4% screen after shell chrome).
+  static const double kCastleStripPx = 22.0;
+
+  double get watchH => size.y * kWatchFractionOfGame;
+
+  /// Flat operable field below watch (excludes watch; castle sits on divider).
+  double get fieldH => (size.y - watchH).clamp(0.0, double.infinity);
+
+  /// Debug metrics for H0 gate (printed once when size known).
+  bool _loggedH0Metrics = false;
+
+  void _maybeLogH0Metrics() {
+    if (_loggedH0Metrics || size.y <= 0 || size.x <= 0) return;
+    _loggedH0Metrics = true;
+    final wh = watchH;
+    final fh = fieldH;
+    // ignore: avoid_print
+    print(
+      'H0_MEASURE gameW=${size.x.toStringAsFixed(1)} gameH=${size.y.toStringAsFixed(1)} '
+      'watchH=${wh.toStringAsFixed(1)} fieldH=${fh.toStringAsFixed(1)} '
+      'watch/game=${(wh / size.y).toStringAsFixed(3)} field/game=${(fh / size.y).toStringAsFixed(3)} '
+      'dragAspect=${(size.x / fh).toStringAsFixed(3)}',
+    );
+  }
 
   Offset tokenCenter(int i) {
     if (i >= 0 && i < fieldPos.length) return fieldPos[i];
@@ -481,6 +511,7 @@ class TaisenGame extends FlameGame {
   @override
   void render(Canvas canvas) {
     super.render(canvas);
+    _maybeLogH0Metrics();
     final w = size.x;
     final h = size.y;
     final wh = watchH;
@@ -493,16 +524,16 @@ class TaisenGame extends FlameGame {
       canvas.translate(mag * math.sin(_pulse * 40), mag * math.cos(_pulse * 33));
     }
 
-    // Top 1/3: full battlefield watch — BOTH sides in frame, READ-ONLY.
+    // Top short watch (H0 ≤18% game): full battlefield — BOTH sides, READ-ONLY. 3D/perspective OK here.
     canvas.drawRect(Rect.fromLTWH(0, 0, w, wh), Paint()..color = const Color(0xFF141414));
     _drawLacquerGrain(canvas, Rect.fromLTWH(0, 0, w, wh), alpha: 0.08);
-    _drawText(canvas, '全戰場（只睇）', const Offset(16, 18), FactionColors.gold, 17);
+    _drawText(canvas, '全戰場（只睇）', const Offset(12, 8), FactionColors.gold, 13);
     _drawWatchFullField(canvas, Rect.fromLTWH(0, 0, w, wh));
 
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
 
-    // Bottom 2/3: lacquer field swatch (Design) — not flat grey; tokens stay readable.
+    // Bottom flat 2D playfield (H0 ≥55% screen target): lacquer + gold-border tokens only — NO 3D unit blocks.
     final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
     canvas.drawRect(fieldRect, Paint()..color = const Color(0xFF0A0A0A));
     _drawFieldLacquer(canvas, fieldRect);
@@ -1434,7 +1465,7 @@ class TaisenGame extends FlameGame {
   }
 
   void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {
-    // Translucent gold burst ≤1C — canvas paint only (lower 2/3 clip); never blocks 歸城/計略.
+    // Translucent gold burst ≤1C — canvas paint only (field clip); never blocks 歸城/計略.
     final a = (life01.clamp(0.0, 1.0));
     final alpha = a * 0.55;
     // Fan / cone preview distinct from spear intercept wedge (opens right-up).
@@ -1490,7 +1521,7 @@ class TaisenGame extends FlameGame {
   bool isEnemyAt(int i) => i >= 0 && i < fieldIsEnemy.length && fieldIsEnemy[i];
 
   int? hitTokenAt(Offset local) {
-    if (local.dy < watchH) return null; // top 1/3 read-only
+    if (local.dy < watchH) return null; // watch band read-only
     const tokenR = 34.0;
     for (var i = 0; i < field.length; i++) {
       final c = tokenCenter(i);
@@ -1502,7 +1533,7 @@ class TaisenGame extends FlameGame {
   }
 
   void selectOrDetailAt(Offset local) {
-    // Watch band is read-only — ignore taps in top 1/3
+    // Watch band is read-only — ignore taps in short watch
     if (local.dy < watchH) return;
 
     final t = tutorial;
@@ -1642,7 +1673,7 @@ class TaisenGame extends FlameGame {
 
   void panUpdate(Offset local) {
     if (!dragging) return;
-    // Clamp to field (lower 2/3) — never into watch band
+    // Clamp to flat field — never into watch band
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
   }

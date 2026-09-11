@@ -581,7 +581,7 @@ class _TutorialShellState extends State<TutorialShell> {
                     Positioned(
                       left: 12,
                       right: 12,
-                      // Sit above bottom of field stack — bottom bar is sibling below,
+                      // H0: tip overlays field (no permanent 8% height). Bottom bar is sibling below,
                       // so tips never cover 歸城/出陣/詳/計略.
                       bottom: 8,
                       child: _TipBanner(
@@ -850,13 +850,13 @@ class _Hud extends StatelessWidget {
         final c = game.clock.remainingC;
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           color: FactionColors.lacquer,
           child: Row(
             children: [
               Image.asset(
                 'assets/branding/sangokushi-yubi-title-v2.png',
-                height: 28,
+                height: 24,
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const Row(
                   mainAxisSize: MainAxisSize.min,
@@ -913,7 +913,7 @@ class _Hud extends StatelessWidget {
                 style: TextStyle(
                   color: (game.clock.running && c <= 10) ? Colors.redAccent : FactionColors.gold,
                   fontWeight: FontWeight.w700,
-                  fontSize: 20,
+                  fontSize: 18,
                 ),
               ),
             ],
@@ -941,7 +941,7 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const minTap = 48.0;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       color: FactionColors.lacquer,
       child: Row(
         children: [

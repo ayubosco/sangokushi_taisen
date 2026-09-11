@@ -1,0 +1,17 @@
+H0 Plan A measure (iPhone 17 Pro sim screenshot 1206x2622)
+source: a-fx-shots/h0-after.png
+FEEL_SHOT=drag-aura (frozen)
+built: kWatchFractionOfGame=0.18
+
+screen fractions (from screenshot bands):
+  gameTop_y=285 (0.109)
+  castleDivider_y=665 (0.254) goldish=845
+  bottomBarTop_y=2181 (0.832) delta=15.02
+
+  hudH/screenH   ≈ 0.041  (≤0.06)
+  watchH/screenH ≈ 0.145  (15–18%, ≤0.20)
+  dragH/screenH  ≈ 0.578  (≥0.55 accept; aim 0.58–0.62)
+  dragW/dragH    ≈ 0.796
+
+playfield: 2D tokens only (no 3D unit blocks); 3D/perspective in watch only.
+flutter analyze lib/: clean
