@@ -67,9 +67,13 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
+  /// Arcade: finger = steer target; unit walks at troop speed (never snap/teleport).
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
+  /// Continuous travel while steering — charge aura accumulates from this (not teleport).
+  double _dragTravelDist = 0;
+  static const double kChargeTravelNeed = 120.0; // px of walking to fill charge aura
 
   /// Session2 facing: radians; 0 = up (toward enemy).
   double ownFacing = 0;
@@ -205,6 +209,31 @@ class TaisenGame extends FlameGame {
       'tokenW=${tw.toStringAsFixed(1)} tokenW/fieldW=${(tw / size.x).toStringAsFixed(3)} '
       'tokenAspect=${kTokenAspectWH.toStringAsFixed(3)} castleBand/field=${kCastleBandFracOfField.toStringAsFixed(2)}',
     );
+  }
+
+  /// px/s toward finger while dragging — cavalry fastest.
+  double _troopSpeedPx(TroopType troop) {
+    final w = size.x > 0 ? size.x : 390.0;
+    return switch (troop) {
+      TroopType.cavalry => w * 0.55,
+      TroopType.spear => w * 0.32,
+      TroopType.bow => w * 0.30,
+      TroopType.infantry => w * 0.28,
+      TroopType.siege => w * 0.22,
+    };
+  }
+
+  Offset _clampFieldPos(Offset p) {
+    final minY = watchH + 36;
+    final maxY = size.y > 0 ? size.y - 16 : minY + 400;
+    final maxX = size.x > 0 ? size.x - 36 : 360.0;
+    return Offset(p.dx.clamp(36.0, maxX), p.dy.clamp(minY, maxY));
+  }
+
+  /// Facing 0 = up (−Y). Movement (dx,dy) → atan2(dx, −dy).
+  double _facingFromDelta(Offset delta) {
+    if (delta.distance < 0.5) return ownFacing;
+    return math.atan2(delta.dx, -delta.dy);
   }
 
   Offset tokenCenter(int i) {
@@ -588,6 +617,64 @@ class TaisenGame extends FlameGame {
 
     // Tutorial coaching: keep watch telegraph aligned with current gate (aura / spear).
     final coach = tutorial;
+
+    // Arcade drag-follow: walk toward finger at troop speed; facing follows move; aura from travel.
+    if (dragging && selectedIndex != null && dragTo != null && selectedIndex! < fieldPos.length) {
+      final i = selectedIndex!;
+      if (!isEnemyAt(i)) {
+        final pos = fieldPos[i];
+        final target = dragTo!;
+        final delta = target - pos;
+        final dist = delta.distance;
+        if (dist > 2) {
+          final speed = _troopSpeedPx(field[i].troop);
+          final step = math.min(dist, speed * dt);
+          final dir = Offset(delta.dx / dist, delta.dy / dist);
+          final next = _clampFieldPos(pos + dir * step);
+          final walked = (next - pos).distance;
+          fieldPos[i] = next;
+          _dragTravelDist += walked;
+          ownFacing = _facingFromDelta(dir);
+          castleBandHot = inCastleBand(next);
+
+          // Charge aura fills from continuous travel (teleport would skip this).
+          final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+          if (field[i].troop == TroopType.cavalry) {
+            if (coach != null && coach.session == TutorialSession.session1) {
+              coach.onChargeTravelProgress(travel01);
+              // Controller notifyListeners drives UI; avoid per-frame setState spam.
+            } else if (coach == null) {
+              if (travel01 >= 1.0) {
+                _matchChargeIndex = i;
+                _matchChargeC = 1.0;
+              } else if (_matchChargeIndex == i) {
+                _matchChargeC = travel01;
+              } else if (travel01 > 0.2) {
+                _matchChargeIndex = i;
+                _matchChargeC = travel01;
+              }
+            }
+          }
+
+          // S1 collide while walking: aura ready + near enemy → auto 突撃
+          if (coach != null &&
+              coach.session == TutorialSession.session1 &&
+              tutorialOwnIndex == i &&
+              tutorialEnemyIndex != null &&
+              coach.auraReady &&
+              coach.didDragDrop &&
+              !coach.shotPassMode) {
+            final enemyAt = tokenCenter(tutorialEnemyIndex!);
+            if ((next - enemyAt).distance <= 58) {
+              flashHit(i, '突撃');
+              coach.onAutoCharge();
+              onTutorialChanged?.call();
+            }
+          }
+        }
+      }
+    }
+
     if (coach != null) {
       if (coach.session == TutorialSession.session1 &&
           (coach.s1 == S1Phase.waitAura ||
@@ -625,7 +712,7 @@ class TaisenGame extends FlameGame {
       if (_shakeLeft < 0) _shakeLeft = 0;
     }
 
-    // Free-match: cavalry drop → wait aura ≥1C → 突撃 flash (no combat numbers).
+    // Free-match: cavalry drop → wait aura ≥1C → 突撃 flash (no combat numbers; no button).
     if (tutorial == null && _matchChargeIndex != null) {
       _matchChargeC += dt / CClock.secondsPerC;
       if (_matchChargeC >= 1.0) {
@@ -636,12 +723,46 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Free-match: enemy charge aura visible; after ≥1C open spear turn/intercept window.
+    // Free-match: enemy charge aura visible; after ≥1C tip-hit → auto 迎擊 (no button).
     if (tutorial == null && _matchEnemyChargeIndex != null) {
       _matchEnemyChargeC += dt / CClock.secondsPerC;
       if (_matchEnemyChargeC >= FxWindows.interceptTurnAfterAuraC && !_matchTurnWindowOpen) {
         _matchTurnWindowOpen = true;
+        _matchFacingCorrect = true; // spear tip always on toward threat
       }
+      if (_matchTurnWindowOpen &&
+          _matchFacingCorrect &&
+          _matchSpearIndex != null &&
+          _matchEnemyChargeIndex != null) {
+        flashHit(_matchSpearIndex!, '迎擊');
+        _matchEnemyChargeIndex = null;
+        _matchTurnWindowOpen = false;
+      }
+    }
+
+    // Tutorial S1: auto 突撃 after drag/collide + aura ≥1C (no floating button).
+    if (coach != null &&
+        coach.session == TutorialSession.session1 &&
+        coach.s1 == S1Phase.hitCharge &&
+        coach.auraReady &&
+        coach.didDragDrop &&
+        !coach.shotPassMode) {
+      flashHit(tutorialOwnIndex ?? 0, '突撃');
+      coach.onAutoCharge();
+      onTutorialChanged?.call();
+    }
+
+    // Tutorial S2: auto 迎擊 when aura hits tip (facingCorrect + turnWindow).
+    if (coach != null &&
+        coach.session == TutorialSession.session2 &&
+        !coach.shotPassMode &&
+        coach.turnWindowOpen &&
+        coach.facingCorrect &&
+        !coach.interceptDone &&
+        (coach.s2 == S2Phase.interceptHit || coach.s2 == S2Phase.waitTurn)) {
+      flashHit(tutorialOwnIndex ?? 0, '迎擊');
+      coach.onAutoIntercept(facingWasCorrect: true);
+      onTutorialChanged?.call();
     }
 
     // LIVE_VERIFY: HUD C when S2 aura / turn window edge fires.
@@ -830,40 +951,8 @@ class TaisenGame extends FlameGame {
       _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
     }
 
-    // Floating 突撃 (session1) — not a tip-skip; requires auraReady after drag.
-    // Suppress when fat-float hit label is 突撃 (one label only).
-    final suppressFloatCharge = _hitFlashLeft > 0 && _hitFlashLabel == '突撃';
-    if (t != null &&
-        t.session == TutorialSession.session1 &&
-        !suppressFloatCharge &&
-        (t.s1 == S1Phase.hitCharge || t.s1 == S1Phase.waitAura)) {
-      final at = tutorialOwnIndex != null ? tokenCenter(tutorialOwnIndex!) : dropGuidePoint;
-      final ready = t.auraReady || t.shotPassMode;
-      _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '突撃', ready);
-    }
-
-    // Floating 迎擊 — single fat float; dim while waiting / wrong facing; NEVER stack with hit 飛字.
-    final suppressFloatIntercept = _hitFlashLeft > 0 && _hitFlashLabel == '迎擊';
-    if (t != null &&
-        t.session == TutorialSession.session2 &&
-        !suppressFloatIntercept &&
-        (t.s2 == S2Phase.interceptHit ||
-            t.s2 == S2Phase.waitTurn ||
-            t.s2 == S2Phase.enemyApproach ||
-            (t.shotPassMode && t.enemyAuraVisible))) {
-      final at = tutorialOwnIndex != null ? tokenCenter(tutorialOwnIndex!) : Offset(w * 0.35, wh + 160);
-      final ready = (t.facingCorrect && t.turnWindowOpen) || (t.shotPassMode && t.facingCorrect);
-      _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '迎擊', ready);
-    }
-    // Match intercept float when turn window open.
-    if (t == null &&
-        !suppressFloatIntercept &&
-        _matchSpearIndex != null &&
-        _matchEnemyChargeIndex != null &&
-        (_matchTurnWindowOpen || _matchFacingCorrect)) {
-      final at = tokenCenter(_matchSpearIndex!);
-      _drawFloatingAction(canvas, Offset(at.dx, at.dy - 58), '迎擊', _matchFacingCorrect);
-    }
+    // Design lock: NO floating「突撃」/「迎擊」buttons.
+    // Charge = drag far → aura → collide (auto flash). Intercept = tip always on × enemy aura (auto).
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
@@ -899,43 +988,8 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _drawFloatingAction(Canvas canvas, Offset at, String label, bool ready) {
-    final bg = ready ? FactionColors.gold : Colors.white24;
-    final fg = ready ? FactionColors.lacquer : Colors.white54;
-    final fat = label == '迎擊' || label == '突撃';
-    final r = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: at, width: fat ? 100.0 : 86.0, height: fat ? 40.0 : 36.0),
-      const Radius.circular(10),
-    );
-    canvas.drawRRect(r, Paint()..color = bg);
-    if (ready) {
-      canvas.drawRRect(
-        r,
-        Paint()
-          ..color = Colors.white.withValues(alpha: 0.35)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.6,
-      );
-    }
-    _drawText(canvas, label, Offset(at.dx - 20, at.dy - 9), fg, 16);
-  }
-
-  Rect floatingActionHitRect(String label) {
-    if (label == '突撃' && tutorialOwnIndex != null) {
-      final at = tokenCenter(tutorialOwnIndex!);
-      return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 96, height: 44);
-    }
-    if (label == '迎擊') {
-      final idx = tutorial?.session == TutorialSession.session2
-          ? tutorialOwnIndex
-          : _matchSpearIndex;
-      if (idx != null) {
-        final at = tokenCenter(idx);
-        return Rect.fromCenter(center: Offset(at.dx, at.dy - 56), width: 96, height: 44);
-      }
-    }
-    return Rect.zero;
-  }
+  /// Removed: floating charge/intercept buttons (Design/UIUX lock).
+  Rect floatingActionHitRect(String label) => Rect.zero;
 
   void _drawDashedLine(Canvas canvas, Offset a, Offset b, Color color) {
     final paint = Paint()
@@ -1130,16 +1184,16 @@ class TaisenGame extends FlameGame {
             t.s1 == S1Phase.hitCharge ||
             t.s1 == S1Phase.tipNext;
         if (showCharge) {
-          _drawChargeRings(canvas, ownC, 34 * ownScale, const Color(0xFF00E5FF), whiteCore: true);
+          _drawChargeRings(canvas, ownC, 34 * ownScale, const Color(0xFF00E5FF), whiteCore: true, facing: ownFacing);
         }
         if (showCharge && (t == null || t.enemyAuraVisible || t.session == TutorialSession.session1 || t.shotPassMode)) {
-          _drawChargeRings(canvas, enemyC, 28 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.75), whiteCore: true);
+          _drawChargeRings(canvas, enemyC, 28 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.75), whiteCore: true, facing: enemyFacing);
         }
         break;
       case AWindowKind.intercept:
         _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
         if (t == null || t.enemyAuraVisible || t.shotPassMode) {
-          _drawChargeRings(canvas, enemyC, 26 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.8), whiteCore: true);
+          _drawChargeRings(canvas, enemyC, 26 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.8), whiteCore: true, facing: enemyFacing);
         }
         break;
       case AWindowKind.bow:
@@ -1586,17 +1640,24 @@ class TaisenGame extends FlameGame {
   }) {
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session1 && isOwn) {
-      // Charge cyan/white aura — only after drop (waitAura+). Mid-drag FEEL shots stay ring-free.
-      if (t.s1 == S1Phase.waitAura ||
+      // Charge aura grows from continuous travel; wave faces movement direction.
+      final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+      final show = t.s1 == S1Phase.dragGuide ||
+          t.s1 == S1Phase.waitAura ||
           t.s1 == S1Phase.hitCharge ||
-          t.s1 == S1Phase.tipNext) {
-        final readyBoost = (t.auraReady || (t.shotPassMode && t.auraReady)) ? 1.0 : 0.72;
+          t.s1 == S1Phase.tipNext ||
+          dragging;
+      if (show && (travel01 > 0.08 || t.auraReady || t.shotPassMode)) {
+        final readyBoost = t.auraReady
+            ? 1.0
+            : (0.4 + 0.55 * travel01);
         _drawChargeRings(
           canvas,
           c,
           48,
           const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
           whiteCore: true,
+          facing: ownFacing,
         );
       }
       return;
@@ -1631,6 +1692,7 @@ class TaisenGame extends FlameGame {
             44,
             const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
             whiteCore: true,
+            facing: ownFacing,
           );
         }
         // Enemy charge aura for intercept turn window (≥1C visible).
@@ -1642,6 +1704,7 @@ class TaisenGame extends FlameGame {
             42,
             const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
             whiteCore: true,
+            facing: enemyFacing,
           );
         }
         break;
@@ -1678,9 +1741,21 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _drawChargeRings(Canvas canvas, Offset c, double baseR, Color color, {bool whiteCore = false}) {
+  void _drawChargeRings(
+    Canvas canvas,
+    Offset c,
+    double baseR,
+    Color color, {
+    bool whiteCore = false,
+    double facing = 0,
+  }) {
     final t = (_pulse % 1.2) / 1.2;
     final baseA = color.a.clamp(0.25, 1.0);
+    // Rings + forward wave rotate with movement facing (not locked upright).
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    canvas.rotate(facing);
+    canvas.translate(-c.dx, -c.dy);
     for (var i = 0; i < 3; i++) {
       final r = baseR + i * 12 + t * 16;
       canvas.drawCircle(
@@ -1702,8 +1777,19 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 2.4,
       );
     }
+    // Directional charge wave ahead of facing (0 = up).
+    final wave = Path()
+      ..moveTo(c.dx - baseR * 0.85, c.dy - baseR * 0.1)
+      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.55, c.dx + baseR * 0.85, c.dy - baseR * 0.1);
+    canvas.drawPath(
+      wave,
+      Paint()
+        ..color = color.withValues(alpha: (baseA * 0.75).clamp(0.2, 0.9))
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.2,
+    );
     for (var i = 0; i < 8; i++) {
-      final a = i * math.pi / 4 + _pulse;
+      final a = i * math.pi / 4 + _pulse * 0.35;
       canvas.drawLine(
         Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
         Offset(c.dx + math.cos(a) * (baseR + 22), c.dy + math.sin(a) * (baseR + 22)),
@@ -1712,7 +1798,9 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 1.8,
       );
     }
+    canvas.restore();
   }
+
 
   void _drawInterceptStance(Canvas canvas, Offset c, double rx, Color color, {double facing = 0}) {
     canvas.save();
@@ -1939,35 +2027,7 @@ class TaisenGame extends FlameGame {
     if (local.dy < watchH) return;
 
     final t = tutorial;
-    // Floating actions first
-    if (t != null && t.session == TutorialSession.session1) {
-      if (floatingActionHitRect('突撃').contains(local)) {
-        flashHit(tutorialOwnIndex ?? 0, '突撃');
-        t.onTapCharge();
-        onTutorialChanged?.call();
-        return;
-      }
-    }
-    if (t != null && t.session == TutorialSession.session2) {
-      if (floatingActionHitRect('迎擊').contains(local)) {
-        // Flash only on success — early/wrong facing goes to fail/retry without false 迎擊 飛字.
-        final ok = t.turnWindowOpen && t.facingCorrect;
-        if (ok) flashHit(tutorialOwnIndex ?? 0, '迎擊');
-        t.onTapIntercept(facingWasCorrect: t.facingCorrect);
-        onTutorialChanged?.call();
-        return;
-      }
-    }
-    // Match: fat「迎擊」when turn window open.
-    if (t == null && floatingActionHitRect('迎擊').contains(local)) {
-      if (_matchTurnWindowOpen && _matchFacingCorrect && _matchSpearIndex != null) {
-        flashHit(_matchSpearIndex!, '迎擊');
-        // Visual only — no damage numbers.
-        _matchEnemyChargeIndex = null;
-        _matchTurnWindowOpen = false;
-      }
-      return;
-    }
+    // No floating「突撃」/「迎擊」— charge/intercept resolve automatically.
 
     final i = hitTokenAt(local);
     if (i == null) {
@@ -2061,80 +2121,87 @@ class TaisenGame extends FlameGame {
       selectedIndex = i;
       t.onSelectOwnCavalry();
       dragging = true;
+      _dragTravelDist = 0;
       dragFrom = tokenCenter(i);
       dragTo = local;
       onTutorialChanged?.call();
       return;
     }
-    // Free match: select→drag with guide line + drop
+    // Free match: steer with finger — unit walks at troop speed (no teleport).
     selectedIndex = i;
     dragging = true;
+    _dragTravelDist = 0;
     dragFrom = tokenCenter(i);
     dragTo = local;
   }
 
   void panUpdate(Offset local) {
     if (!dragging) return;
-    // Clamp to flat field — never into watch band
+    // Finger = steer target only; unit follows in update() at troop speed.
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
-    castleBandHot = inCastleBand(dragTo!);
   }
 
   void panEnd(Offset local) {
     if (!dragging) return;
     dragging = false;
     final t = tutorial;
-    final drop = dropGuidePoint;
-    final at = Offset(local.dx, local.dy < watchH + 8 ? watchH + 8 : local.dy);
-    dragTo = at;
-    final bandHot = inCastleBand(at);
-    castleBandHot = false;
-    if (t != null && t.session == TutorialSession.session1 && tutorialOwnIndex != null) {
-      final d = (at - drop).distance;
-      if (d <= 48) {
-        fieldPos[tutorialOwnIndex!] = drop;
-        t.onDropAtGuide();
-        onTutorialChanged?.call();
-      }
-    } else if (t == null && selectedIndex != null && selectedIndex! < fieldPos.length) {
+    final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
+    dragTo = Offset(local.dx, y);
+    // Release = stop where the unit already is (arcade). Never snap/teleport to finger/drop.
+    if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
-      // Free match drop: move token within lower field (no stack-shadow).
-      final y = at.dy.clamp(watchH + 40, size.y - 20);
-      final x = at.dx.clamp(36.0, size.x - 36);
-      final moved = dragFrom != null && (Offset(x, y) - dragFrom!).distance > 24;
-      final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
+      final at = fieldPos[i];
+      final bandHot = inCastleBand(at);
+      castleBandHot = false;
 
-      if (bandHot && !isEnemyAt(i)) {
-        // Drag INTO 己城 band → 返城 (heal/redeploy state; no invented numbers).
-        final band = castleBandRect;
-        fieldPos[i] = Offset(x.clamp(48.0, size.x - 48), band.top + band.height * 0.55);
+      if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
+        final enemyAt = tutorialEnemyIndex != null ? tokenCenter(tutorialEnemyIndex!) : null;
+        final nearEnemy = enemyAt != null && (at - enemyAt).distance <= 58;
+        if (nearEnemy && t.auraReady && t.didDragDrop && !t.shotPassMode) {
+          flashHit(i, '突撃');
+          t.onAutoCharge();
+          onTutorialChanged?.call();
+        }
+        // else: stay put; tip already teaches keep dragging to walk/collide
+      } else if (t == null && !isEnemyAt(i)) {
+        final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
         while (fieldInCastle.length <= i) {
           fieldInCastle.add(false);
         }
-        fieldInCastle[i] = true;
-        triggerReturnCityFx();
-        _cancelBowWindup();
-      } else {
-        fieldPos[i] = Offset(x, y);
-        while (fieldInCastle.length <= i) {
-          fieldInCastle.add(false);
-        }
-        if (wasInCastle && !bandHot) {
-          // Drag OUT of band onto field → 出陣 (visual flytext only).
-          fieldInCastle[i] = false;
-          flashHit(i, '出陣');
-        } else {
-          fieldInCastle[i] = false;
-        }
-        // Moving cancels bow still-windup.
-        if (moved && field[i].troop == TroopType.bow) {
+        if (bandHot) {
+          final band = castleBandRect;
+          fieldPos[i] = Offset(
+            at.dx.clamp(48.0, size.x - 48),
+            band.top + band.height * 0.55,
+          );
+          fieldInCastle[i] = true;
+          triggerReturnCityFx();
           _cancelBowWindup();
-        } else if (field[i].troop == TroopType.cavalry && dragFrom != null && !wasInCastle) {
-          // Cavalry drag far enough → wait aura ≥1C then 突撃 hit (visual only).
-          if ((Offset(x, y) - dragFrom!).distance > 70) {
+          _matchChargeIndex = null;
+          _matchChargeC = 0;
+        } else {
+          if (wasInCastle) {
+            fieldInCastle[i] = false;
+            flashHit(i, '出陣');
+          }
+          if (field[i].troop == TroopType.bow && _dragTravelDist > 8) {
+            _cancelBowWindup();
+          }
+          // Cavalry: aura already from travel; if full, hold ready for collide feel (flash if near enemy).
+          if (field[i].troop == TroopType.cavalry && _dragTravelDist >= kChargeTravelNeed) {
             _matchChargeIndex = i;
-            _matchChargeC = 0;
+            _matchChargeC = 1.0;
+            // Auto 突撃 flash if stopped overlapping an enemy
+            for (var e = 0; e < field.length; e++) {
+              if (!isEnemyAt(e)) continue;
+              if ((at - tokenCenter(e)).distance <= 58) {
+                flashHit(i, '突撃');
+                _matchChargeIndex = null;
+                _matchChargeC = 0;
+                break;
+              }
+            }
           }
         }
       }

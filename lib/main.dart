@@ -608,7 +608,7 @@ class _TutorialShellState extends State<TutorialShell> {
                       left: 12,
                       right: 12,
                       // H0: tip overlays field (no permanent 8% height). Bottom bar is sibling below,
-                      // so tips never cover 歸城/出陣/詳/計略.
+                      // so tips never cover 計略 (only remaining field button).
                       bottom: 8,
                       child: _TipBanner(
                         text: _tutorial.tipText!,
@@ -624,18 +624,6 @@ class _TutorialShellState extends State<TutorialShell> {
               ),
             ),
             _BottomBar(
-              onReturnCity: () {
-                _game.triggerReturnCityFx();
-                setState(() {});
-              },
-              onSpawn: () {
-                // Tutorial: spawn disabled / no-op (keep button visible)
-              },
-              onDetail: () {
-                final idx = _game.selectedIndex;
-                if (idx == null || idx >= _game.field.length) return;
-                showCardDetailSheet(context, _game.field[idx]);
-              },
               onStrategy: () {
                 _game.triggerStrategyFx();
                 setState(() {});
@@ -763,8 +751,6 @@ class MatchShell extends StatefulWidget {
 
 class _MatchShellState extends State<MatchShell> {
   late final TaisenGame _game;
-  int _spawnCursor = 0;
-
   @override
   void initState() {
     super.initState();
@@ -849,22 +835,6 @@ class _MatchShellState extends State<MatchShell> {
               ),
             ),
             _BottomBar(
-              onReturnCity: () {
-                _game.triggerReturnCityFx();
-                setState(() {});
-              },
-              onSpawn: () {
-                final pool = Cost6Roster.byFaction(widget.faction);
-                final list = pool.isEmpty ? Cost6Roster.all : pool;
-                final card = list[_spawnCursor % list.length];
-                _spawnCursor++;
-                if (_game.spawnCard(card)) setState(() {});
-              },
-              onDetail: () {
-                final idx = _game.selectedIndex;
-                if (idx == null || idx >= _game.field.length) return;
-                showCardDetailSheet(context, _game.field[idx]);
-              },
               onStrategy: () {
                 _game.triggerStrategyFx();
                 // Cosmetic: using 計略 does not consume 兵法; stub only.
@@ -966,17 +936,12 @@ class _Hud extends StatelessWidget {
   }
 }
 
+/// Field chrome buttons: Design lock keeps ONLY「計略」(morale).
+/// Select card = tap token; 兵法 = once at match start; 歸城/出陣 = drag castle band (no buttons).
+/// Charge/intercept = auto from drag/collide — never floating「突撃」/「迎擊」.
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({
-    required this.onReturnCity,
-    required this.onSpawn,
-    required this.onDetail,
-    required this.onStrategy,
-  });
+  const _BottomBar({required this.onStrategy});
 
-  final VoidCallback onReturnCity;
-  final VoidCallback onSpawn;
-  final VoidCallback onDetail;
   final VoidCallback onStrategy;
 
   @override
@@ -987,45 +952,6 @@ class _BottomBar extends StatelessWidget {
       color: FactionColors.lacquer,
       child: Row(
         children: [
-          SizedBox(
-            width: minTap * 1.8,
-            height: minTap,
-            child: OutlinedButton(
-              onPressed: onReturnCity,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: FactionColors.gold,
-                side: const BorderSide(color: FactionColors.gold),
-              ),
-              child: const Text('歸城', style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: minTap * 1.5,
-            height: minTap,
-            child: OutlinedButton(
-              onPressed: onSpawn,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: FactionColors.gold,
-                side: const BorderSide(color: FactionColors.gold),
-              ),
-              child: const Text('出陣', style: TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: minTap,
-            height: minTap,
-            child: OutlinedButton(
-              onPressed: onDetail,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: FactionColors.gold,
-                side: const BorderSide(color: FactionColors.gold),
-                padding: EdgeInsets.zero,
-              ),
-              child: const Text('詳', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-            ),
-          ),
           const Spacer(),
           SizedBox(
             width: minTap * 1.8,

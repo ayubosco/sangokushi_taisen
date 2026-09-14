@@ -61,8 +61,8 @@ class TutorialController extends ChangeNotifier {
     s1 = S1Phase.highlightSelect;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '先點發光嗰隊己方騎兵（趙雲），再拖去落點';
-    tipSkippable = false; // cannot tip-skip past drag gate
+    tipText = '先點發光己方騎兵（趙雲），按住拖行去撞敵（跟手指行，唔係瞬移）';
+    tipSkippable = false; // cannot tip-skip past drag/collide gate
     failed = false;
     failReason = null;
     auraReady = false;
@@ -79,7 +79,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '睇住己方槍兵槍尖光（常在），等敵騎氣勢出嚟再迎擊';
+    tipText = '睇住己方槍兵槍尖光（常在）；敵騎氣勢撞到槍尖就自動迎擊';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -93,7 +93,7 @@ class TutorialController extends ChangeNotifier {
 
   void skipTip() {
     if (!tipSkippable || tipText == null) return;
-    // Soft-fix: tips like「點突撃過關」must NOT skip drag+aura gate.
+    // Soft-fix: tips must NOT skip drag+aura/collide gate (no charge/intercept buttons).
     if (session == TutorialSession.session1 &&
         (s1 == S1Phase.highlightSelect ||
             s1 == S1Phase.dragGuide ||
@@ -145,8 +145,8 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 1.0 && !auraReady) {
           auraReady = true;
           s1 = S1Phase.hitCharge;
-          tipText = '光環穩晒喇！撳場上「突撃」過關（要拖過先）';
-          tipSkippable = false; // tip alone cannot pass without prior drag
+          tipText = '光環穩晒 — 拖行撞敵就自動突撃（唔使撳掣）';
+          tipSkippable = false; // tip alone cannot pass without prior drag/collide
           notifyListeners();
         }
         break;
@@ -157,7 +157,7 @@ class TutorialController extends ChangeNotifier {
           auraReady = false;
           phaseC = 0;
           s1 = S1Phase.dragGuide;
-          tipText = '再嚟過：拖去金圈落點，等光環亮晒先突撃';
+          tipText = '再嚟過：按住拖行累積光環，撞敵就自動突撃';
           tipSkippable = false;
           didDragDrop = false;
           notifyListeners();
@@ -175,7 +175,7 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s2 = S2Phase.enemyApproach;
           enemyAuraVisible = true;
-          tipText = '敵騎氣勢出咗 — 唔好急，等夠晒先轉身迎擊';
+          tipText = '敵騎氣勢出咗 — 唔好急，等氣勢撞到槍尖就自動迎擊';
           // ignore: avoid_print
           print('VERIFY_S2 auraVisible phaseC=$phaseC');
           notifyListeners();
@@ -185,7 +185,7 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 0.3) {
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '仲要等陣… 氣勢夠先轉面（點吓己方槍兵）';
+          tipText = '仲要等陣… 槍尖光常在，等敵氣勢夠撞尖';
           notifyListeners();
         }
         break;
@@ -193,8 +193,9 @@ class TutorialController extends ChangeNotifier {
         // Aura must stay visible ≥1C before player may turn facing / intercept.
         if (phaseC >= 1.0 && !turnWindowOpen) {
           turnWindowOpen = true;
-          tipText = '夠喇！點己方槍兵轉面向敵，再撳「迎擊」';
+          tipText = '夠喇！敵氣勢撞到槍尖 — 自動迎擊';
           tipSkippable = false;
+          facingCorrect = true; // tip always on toward threat
           // ignore: avoid_print
           print('VERIFY_S2 turnWindowOpen phaseC=$phaseC');
           notifyListeners();
@@ -209,7 +210,7 @@ class TutorialController extends ChangeNotifier {
           enemyAuraVisible = true;
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '再嚟過：等夠氣勢，點槍兵轉面，先迎擊';
+          tipText = '再嚟過：等敵氣勢撞到槍尖就自動迎擊';
           notifyListeners();
         }
         break;
@@ -222,27 +223,62 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session1) return;
     if (s1 != S1Phase.highlightSelect && s1 != S1Phase.dragGuide) return;
     s1 = S1Phase.dragGuide;
-    tipText = '拖去敵騎方向嘅金圈落點，等光環亮先突撃';
+    tipText = '按住拖行：部隊跟手指走，行路累積光環，撞敵就自動突撃';
     notifyListeners();
   }
 
   void onDropAtGuide() {
+    // Legacy FEEL/shot helper — live play uses onChargeTravelProgress (walk distance).
     if (session != TutorialSession.session1 || s1 != S1Phase.dragGuide) return;
     phaseC = 0;
     auraReady = false;
     didDragDrop = true;
     s1 = S1Phase.waitAura;
-    tipText = '頂住… 等光環穩晒先撳「突撃」';
+    tipText = '繼續拖行… 光環靠行路距離累積，鬆手就停喺原位';
     tipSkippable = false;
     notifyListeners();
   }
 
-  void onTapCharge() {
+  /// Arcade: charge aura fills from continuous walk distance (0..1). No teleport.
+  void onChargeTravelProgress(double dist01) {
     if (session != TutorialSession.session1) return;
-    // Cannot pass by tip-button alone: need drag drop + aura ≥1C.
+    if (s1 != S1Phase.dragGuide && s1 != S1Phase.waitAura && s1 != S1Phase.hitCharge) {
+      return;
+    }
+    if (shotPassMode) return;
+    final d = dist01.clamp(0.0, 1.0);
+    if (d >= 1.0) {
+      if (!auraReady || s1 != S1Phase.hitCharge) {
+        auraReady = true;
+        didDragDrop = true;
+        s1 = S1Phase.hitCharge;
+        tipText = '光環夠喇 — 繼續拖行去撞敵就自動突撃（唔使撳掣）';
+        tipSkippable = false;
+        notifyListeners();
+      }
+      return;
+    }
+    if (s1 == S1Phase.dragGuide && d > 0.12) {
+      s1 = S1Phase.waitAura;
+      tipText = '跟住手指拖行累積氣勢… 鬆手就停，唔會瞬移';
+      tipSkippable = false;
+      notifyListeners();
+    } else if (s1 == S1Phase.waitAura) {
+      final pct = (d * 10).floor() * 10; // 0/10/20… tip throttle
+      final next = '繼續拖行… 氣勢 $pct% — 夠咗再撞敵';
+      if (tipText != next) {
+        tipText = next;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Auto charge after drag/collide + aura ≥1C — no floating「突撃」button.
+  void onAutoCharge() {
+    if (session != TutorialSession.session1) return;
     if (s1 == S1Phase.hitCharge && auraReady && didDragDrop) {
       s1 = S1Phase.tipNext;
-      tipText = '場1過關！撳「跳過」入教學場2：迎擊';
+      tipText = '撞中自動突撃！場1過關 — 撳「跳過」入教學場2：迎擊';
       tipSkippable = true;
       notifyListeners();
       return;
@@ -252,14 +288,16 @@ class TutorialController extends ChangeNotifier {
             s1 == S1Phase.dragGuide ||
             s1 == S1Phase.waitAura ||
             s1 == S1Phase.hitCharge)) {
-      _failS1('未拖到位 — 拖到落點、等光環夠先過關');
+      _failS1('未拖到位 — 拖去撞敵／落點、等光環夠先過關');
       return;
     }
-    // Too early / wrong timing
     if (s1 == S1Phase.waitAura || s1 == S1Phase.dragGuide || s1 == S1Phase.hitCharge) {
       _failS1('仲未夠／時機唔啱 — 再嚟過');
     }
   }
+
+  @Deprecated('Use onAutoCharge — charge button removed')
+  void onTapCharge() => onAutoCharge();
 
   void _failS1(String reason) {
     failed = true;
@@ -281,12 +319,13 @@ class TutorialController extends ChangeNotifier {
     if (facingCorrect) return;
     facingCorrect = true;
     s2 = S2Phase.interceptHit;
-    tipText = '面向啱晒！撳「迎擊」過關';
+    tipText = '槍尖朝敵 — 氣勢撞尖就自動迎擊';
     tipSkippable = false;
     notifyListeners();
   }
 
-  void onTapIntercept({required bool facingWasCorrect}) {
+  /// Auto intercept when enemy aura hits spear tip — no floating「迎擊」button.
+  void onAutoIntercept({required bool facingWasCorrect}) {
     if (session != TutorialSession.session2) return;
     if (s2 != S2Phase.interceptHit &&
         s2 != S2Phase.waitTurn &&
@@ -294,21 +333,24 @@ class TutorialController extends ChangeNotifier {
         s2 != S2Phase.spearGlow) {
       return;
     }
-    // Too early: aura not yet visible ≥1C.
     if (!turnWindowOpen) {
-      _failS2('嚟唔切 — 等敵氣勢夠先迎擊');
+      _failS2('嚟唔切 — 等敵氣勢撞到槍尖');
       return;
     }
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.strategyOrReturn;
-      tipText = '撳右下「計略」或者左邊「歸城」就搞掂';
+      tipText = '迎擊成功！撳右下「計略」，或拖返己城帶';
       tipSkippable = false;
       notifyListeners();
     } else {
-      _failS2('面向未啱 — 先點槍兵轉面再迎擊');
+      _failS2('槍尖未對敵 — 等氣勢撞尖先');
     }
   }
+
+  @Deprecated('Use onAutoIntercept — intercept button removed')
+  void onTapIntercept({required bool facingWasCorrect}) =>
+      onAutoIntercept(facingWasCorrect: facingWasCorrect);
 
   void _failS2(String reason) {
     failed = true;
@@ -345,7 +387,7 @@ class TutorialController extends ChangeNotifier {
     shotPassMode = true;
     session = TutorialSession.session1;
     s1 = S1Phase.tipNext;
-    tipText = '場1過關！撳「跳過」入教學場2：迎擊';
+    tipText = '撞中自動突撃！場1過關 — 撳「跳過」入教學場2：迎擊';
     tipSkippable = true;
     auraReady = true;
     didDragDrop = true;
@@ -376,8 +418,8 @@ class TutorialController extends ChangeNotifier {
     phaseC = 1.0;
     auraReady = true;
     didDragDrop = true; // shot assumes prior drag
-    tipText = '拖到落點喇：光環亮晒 — 撳「突撃」';
-    tipSkippable = false; // soft-fix: tip「點突撃過關」cannot skip drag
+    tipText = '拖到落點／撞敵喇：光環亮晒 — 會自動突撃';
+    tipSkippable = false; // soft-fix: tip cannot skip drag/collide
     failed = false;
     failReason = null;
     notifyListeners();
@@ -389,7 +431,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.strategyOrReturn;
     phaseC = 1.0;
-    tipText = '撳右下「計略」或者左邊「歸城」就搞掂';
+    tipText = '撳右下「計略」，或拖返己城帶搞掂';
     tipSkippable = false;
     interceptDone = true;
     strategyOrReturnDone = false;
@@ -455,7 +497,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = false;
     enemyAuraVisible = true;
     interceptDone = false;
-    tipText = '敵氣勢出咗 — 等夠晒先轉面迎擊（槍尖光常在）';
+    tipText = '敵氣勢出咗 — 等夠晒撞槍尖就自動迎擊（槍尖光常在）';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -472,7 +514,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = true;
     enemyAuraVisible = true;
     interceptDone = false;
-    tipText = '槍尖光常在；等敵氣勢夠再轉面迎擊';
+    tipText = '槍尖光常在；敵氣勢撞尖就自動迎擊';
     tipSkippable = false;
     failed = false;
     notifyListeners();
