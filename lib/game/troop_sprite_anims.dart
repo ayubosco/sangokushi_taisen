@@ -14,7 +14,7 @@ enum TroopAnimPose { idle, move, attack, recover }
 ///
 /// Sheet layout (Design): 1280×720 → 4×4 cells of 320×180 (landscape packing).
 /// Figures sit in a ~110–130px window that slides per column — we crop that
-/// window so portrait 5:8 tokens stay readable (Bosco 0.11–0.13 width).
+/// window so portrait 5:8 tokens stay readable (UIUX gate 0.10–0.11 width).
 /// Independent FX (aura / tip / flytext) stay outside the sheet.
 class TroopSpriteBank {
   static const double cellW = 320;

@@ -160,8 +160,8 @@ class TaisenGame extends FlameGame {
   /// Own-castle bottom band ≈12% of drag field (Bosco: 10–14%).
   static const double kCastleBandFracOfField = 0.12;
 
-  /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (Bosco 0.11–0.13, hard max 0.14).
-  static const double kTokenWidthFracOfField = 0.12; // Bosco eye: 0.11–0.13 (hard max 0.14); was 0.16 Fail
+  /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
+  static const double kTokenWidthFracOfField = 0.10; // Bosco eye: still too big at 0.12; try 0.10
   static const double kTokenAspectWH = 5 / 8; // W/H
 
   double get castleBandH => fieldH * kCastleBandFracOfField;
@@ -182,7 +182,7 @@ class TaisenGame extends FlameGame {
 
   double get tokenHitR {
     final s = tokenCardSize;
-    // Transparent hit ≥48dp diameter — may exceed smaller 0.12 art.
+    // Transparent hit ≥48dp diameter — may exceed smaller 0.10 art.
     final halfDiag = 0.5 * math.sqrt(s.width * s.width + s.height * s.height);
     return math.max(halfDiag + 4, 24.0);
   }
@@ -419,7 +419,7 @@ class TaisenGame extends FlameGame {
     dragging = true;
   }
 
-  /// FEEL_SHOT=spear-idle: own spear SpriteAnimation idle loop (5:8 @0.12 field_w).
+  /// FEEL_SHOT=spear-idle: own spear SpriteAnimation idle loop (5:8 @0.10 field_w).
   /// Tip glow FX stays on (槍尖光常在) even in idle pose.
   void setupFeelSpearIdlePose() {
     setupSession2Field();
@@ -440,7 +440,7 @@ class TaisenGame extends FlameGame {
     watchKind = AWindowKind.intercept;
   }
 
-  /// FEEL_SHOT=cav-idle: own cavalry sheet idle @0.12 field_w.
+  /// FEEL_SHOT=cav-idle: own cavalry sheet idle @0.10 field_w.
   void setupFeelCavalryIdlePose() {
     setupMatchDemoField();
     _matchEnemyChargeIndex = null;
@@ -479,7 +479,7 @@ class TaisenGame extends FlameGame {
     watchKind = AWindowKind.charge;
   }
 
-  /// FEEL_SHOT=bow-idle: own bow sheet idle @0.12 field_w (no windup FX clutter).
+  /// FEEL_SHOT=bow-idle: own bow sheet idle @0.10 field_w (no windup FX clutter).
   void setupFeelBowIdlePose() {
     setupMatchDemoField();
     _matchEnemyChargeIndex = null;
@@ -776,7 +776,7 @@ class TaisenGame extends FlameGame {
       );
     }
 
-    // Real-card 5:8; width ≈12% field (Bosco 0.11–0.13, max 0.14).
+    // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
     final tokenSize = tokenCardSize;
     for (var i = 0; i < field.length; i++) {
       final card = field[i];
@@ -1285,7 +1285,7 @@ class TaisenGame extends FlameGame {
       // Dim 5:8 weapon token as under-chrome (not the hero read).
       _drawTokenCardFace(canvas, dest, card, dim: true);
       final pose = _poseForToken(index, card, isEnemy: isEnemy);
-      // Cover-fit anim into card so spear tip glow / body stay readable at 0.12 width.
+      // Cover-fit anim into card so spear tip glow / body stay readable at 0.10 width.
       final inset = dest.deflate(cardW * 0.04);
       troopSprites.render(
         canvas,
