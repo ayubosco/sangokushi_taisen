@@ -23,6 +23,10 @@ const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
 /// dart-define: LIVE_VERIFY=s2|bow — clock runs (no FEEL freeze); log HUD C for UIUX manual count.
 const String kLiveVerify = String.fromEnvironment('LIVE_VERIFY', defaultValue: '');
 
+/// dart-define: CHARGE_AUTO_VERIFY=true — after 場1 ready, auto-steer 趙雲 toward enemy to prove charge pipeline.
+const bool kChargeAutoVerify =
+    bool.fromEnvironment('CHARGE_AUTO_VERIFY', defaultValue: false);
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -94,7 +98,7 @@ class _AppRootState extends State<AppRoot> {
     if (kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
-    } else if (kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+    } else if (kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       _selectedBingfa = '火計';
     }
   }
@@ -113,7 +117,7 @@ class _AppRootState extends State<AppRoot> {
         kDemoShot == 'match') {
       return _AppStage.match;
     }
-    if (kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+    if (kChargeAutoVerify || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       return _AppStage.tutorial;
     }
     // Simulator demo default: splash → 兵法 → tutorial
@@ -522,7 +526,70 @@ class _TutorialShellState extends State<TutorialShell> {
         if (kDemoShot == 's1') return; // keep title visible for shot
         setState(() => _showSessionBanner = false);
       });
+      if (kChargeAutoVerify) {
+        Future<void>.delayed(const Duration(milliseconds: 900), _runChargeAutoVerify);
+      }
     });
+  }
+
+  /// Temp: drive panStart→steer→hold so travel/aura/collide paint without OS mouse.
+  Future<void> _runChargeAutoVerify() async {
+    if (!mounted) return;
+    if (_tutorial.session != TutorialSession.session1) return;
+    final own = _game.tutorialOwnIndex;
+    if (own == null) return;
+    final from = _game.tokenCenter(own);
+    final enemyIdx = _game.tutorialEnemyIndex;
+    // Overshoot past enemy so walked distance can reach kChargeTravelNeed (120px).
+    final enemyAt = enemyIdx != null ? _game.tokenCenter(enemyIdx) : from;
+    final to = Offset(
+      enemyAt.dx + (enemyAt.dx - from.dx) * 0.35,
+      enemyAt.dy + (enemyAt.dy - from.dy) * 0.35,
+    );
+    // ignore: avoid_print
+    print('CHARGE_AUTO_VERIFY start from=$from to=$to shotPass=${_tutorial.shotPassMode}');
+    _game.panStart(from);
+    setState(() {});
+    for (var i = 1; i <= 60; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (!mounted || !_game.dragging) break;
+      final t = i / 60.0;
+      _game.panUpdate(Offset.lerp(from, to, t)!);
+      if (i % 15 == 0) {
+        // ignore: avoid_print
+        print(
+          'CHARGE_AUTO_VERIFY tick travel=${(_game.debugTravel01 * 100).round()}% '
+          'aura=${_tutorial.auraReady} s1=${_tutorial.s1}',
+        );
+      }
+    }
+    // Hold at target so unit finishes walk + collide.
+    await Future<void>.delayed(const Duration(milliseconds: 2800));
+    if (!mounted) return;
+    // ignore: avoid_print
+    print(
+      'CHARGE_AUTO_VERIFY mid travel=${(_game.debugTravel01 * 100).round()}% '
+      'aura=${_tutorial.auraReady} s1=${_tutorial.s1} drag=${_game.dragging}',
+    );
+    if (_game.dragging) {
+      _game.panEnd(_game.dragTo ?? to);
+    }
+    setState(() {});
+    // ignore: avoid_print
+    print(
+      'CHARGE_AUTO_VERIFY end travel=${(_game.debugTravel01 * 100).round()}% '
+      'aura=${_tutorial.auraReady} s1=${_tutorial.s1} flash=${_game.debugHitLabel}',
+    );
+    // Leave Bosco on clean 場1 gold 趙雲 after proof.
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+    _tutorial.resetToSession1();
+    _game.setupSession1Field();
+    _bannerFor = TutorialSession.session1;
+    _showSessionBanner = true;
+    setState(() {});
+    // ignore: avoid_print
+    print('CHARGE_AUTO_VERIFY reset → clean 場1 趙雲');
   }
 
   void _maybeShowSessionBanner() {

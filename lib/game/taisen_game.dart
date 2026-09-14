@@ -74,6 +74,8 @@ class TaisenGame extends FlameGame {
   /// Continuous travel while steering — charge aura accumulates from this (not teleport).
   double _dragTravelDist = 0;
   static const double kChargeTravelNeed = 120.0; // px of walking to fill charge aura
+  double get debugTravel01 => (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+  String get debugHitLabel => _hitFlashLabel;
 
   /// Session2 facing: radians; 0 = up (toward enemy).
   double ownFacing = 0;
@@ -684,11 +686,16 @@ class TaisenGame extends FlameGame {
               coach.session == TutorialSession.session1 &&
               tutorialOwnIndex == i &&
               tutorialEnemyIndex != null &&
-              coach.auraReady &&
-              coach.didDragDrop &&
+              (coach.auraReady || travel01 >= 1.0) &&
+              (coach.didDragDrop || travel01 >= 1.0) &&
               !coach.shotPassMode) {
             final enemyAt = tokenCenter(tutorialEnemyIndex!);
             if ((next - enemyAt).distance <= 58) {
+              if (!coach.auraReady || !coach.didDragDrop) {
+                coach.auraReady = true;
+                coach.didDragDrop = true;
+                coach.s1 = S1Phase.hitCharge;
+              }
               flashHit(i, '突撃');
               coach.onAutoCharge();
               onTutorialChanged?.call();
@@ -703,12 +710,24 @@ class TaisenGame extends FlameGame {
       _dragTravelDist = math.max(0.0, _dragTravelDist - 95.0 * dt);
       final fade01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
       if (coach != null && coach.session == TutorialSession.session1) {
-        if (fade01 < 1.0 && coach.auraReady && coach.s1 == S1Phase.hitCharge) {
+        if (fade01 < 1.0 &&
+            (coach.auraReady || coach.s1 == S1Phase.hitCharge) &&
+            coach.s1 != S1Phase.tipNext &&
+            coach.s1 != S1Phase.passed) {
+          final wasReady = coach.auraReady || coach.s1 == S1Phase.hitCharge;
           coach.auraReady = false;
-          coach.s1 = S1Phase.waitAura;
-          coach.tipText = '鬆手氣勢散咗 — 再拖行重新累積光環';
-          coach.tipSkippable = false;
-          onTutorialChanged?.call();
+          coach.didDragDrop = false;
+          if (coach.s1 == S1Phase.hitCharge || coach.s1 == S1Phase.waitAura) {
+            coach.s1 = S1Phase.waitAura;
+          }
+          if (wasReady) {
+            final next = '鬆手氣勢散咗 — 再拖行重新累積光環';
+            if (coach.tipText != next) {
+              coach.tipText = next;
+              coach.tipSkippable = false;
+              onTutorialChanged?.call();
+            }
+          }
         }
         if (fade01 <= 0.08 &&
             (coach.s1 == S1Phase.waitAura || coach.s1 == S1Phase.dragGuide)) {
@@ -716,6 +735,7 @@ class TaisenGame extends FlameGame {
           if (coach.s1 != S1Phase.dragGuide) {
             coach.s1 = S1Phase.dragGuide;
             coach.didDragDrop = false;
+            coach.auraReady = false;
             coach.tipText = '跟住手指拖行累積氣勢 — 光環夠咗再撞敵';
             coach.tipSkippable = false;
             onTutorialChanged?.call();
@@ -1025,6 +1045,20 @@ class TaisenGame extends FlameGame {
 
     // Design lock: NO floating「突撃」/「迎擊」buttons.
     // Charge = drag far → aura → collide (auto flash). Intercept = tip always on × enemy aura (auto).
+
+    // Temporary charge-pipeline debug (travel% / aura on) — Bosco fail triage.
+    if (t != null && t.session == TutorialSession.session1) {
+      final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+      final pct = (travel01 * 100).round();
+      final aura = t.auraReady || travel01 >= 1.0;
+      _drawText(
+        canvas,
+        'DBG travel $pct%  aura ${aura ? "ON" : "off"}  drag ${dragging ? "Y" : "n"}  ${t.s1.name}',
+        Offset(12, fieldTop + 36),
+        const Color(0xFF00E5FF),
+        11,
+      );
+    }
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
@@ -2219,12 +2253,31 @@ class TaisenGame extends FlameGame {
     if (isEnemyAt(i)) return; // enemy tokens not draggable
     if (t != null) {
       if (t.session != TutorialSession.session1) return;
-      if (t.s1 != S1Phase.dragGuide && t.s1 != S1Phase.highlightSelect) return;
+      // Allow waitAura/hitCharge so stop→fade→drag-again rebuilds travel/aura.
+      // (1c43843 fade left s1=waitAura; old gate blocked re-drag until full decay.)
+      final canSteer = t.s1 == S1Phase.highlightSelect ||
+          t.s1 == S1Phase.dragGuide ||
+          t.s1 == S1Phase.waitAura ||
+          t.s1 == S1Phase.hitCharge;
+      if (!canSteer) return;
       if (i != tutorialOwnIndex) return;
       selectedIndex = i;
-      t.onSelectOwnCavalry();
+      if (t.shotPassMode) {
+        // FEEL/DEMO freezes own coaching — steer only, never reset shot pose.
+      } else if (t.s1 == S1Phase.highlightSelect || t.s1 == S1Phase.dragGuide) {
+        t.onSelectOwnCavalry();
+      } else {
+        // Re-drag mid fade / after partial charge: rebuild from 0.
+        t.auraReady = false;
+        t.didDragDrop = false;
+        t.s1 = S1Phase.dragGuide;
+        t.tipText = '跟住手指拖行累積氣勢 — 光環夠咗再撞敵';
+        t.tipSkippable = false;
+      }
       dragging = true;
       _dragTravelDist = 0;
+      _matchChargeIndex = null;
+      _matchChargeC = 0;
       dragFrom = tokenCenter(i);
       dragTo = local;
       onTutorialChanged?.call();
@@ -2263,7 +2316,14 @@ class TaisenGame extends FlameGame {
       if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
         final enemyAt = tutorialEnemyIndex != null ? tokenCenter(tutorialEnemyIndex!) : null;
         final nearEnemy = enemyAt != null && (at - enemyAt).distance <= 58;
-        if (nearEnemy && t.auraReady && t.didDragDrop && !t.shotPassMode) {
+        final travelFull = _dragTravelDist >= kChargeTravelNeed;
+        if (nearEnemy &&
+            (t.auraReady || travelFull) &&
+            (t.didDragDrop || travelFull) &&
+            !t.shotPassMode) {
+          t.auraReady = true;
+          t.didDragDrop = true;
+          t.s1 = S1Phase.hitCharge;
           flashHit(i, '突撃');
           t.onAutoCharge();
           onTutorialChanged?.call();

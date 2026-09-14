@@ -143,13 +143,9 @@ class TutorialController extends ChangeNotifier {
   void _tickS1() {
     switch (s1) {
       case S1Phase.waitAura:
-        if (phaseC >= 1.0 && !auraReady) {
-          auraReady = true;
-          s1 = S1Phase.hitCharge;
-          tipText = '光環穩晒 — 拖行撞敵就自動突撃（唔使撳掣）';
-          tipSkippable = false; // tip alone cannot pass without prior drag/collide
-          notifyListeners();
-        }
+        // Travel-distance model owns aura (onChargeTravelProgress).
+        // Do NOT promote via wall-clock ≥1C — that fought fade-on-stop and
+        // spam-notified every frame after release (phaseC already high).
         break;
       case S1Phase.failRetry:
         if (phaseC >= 0.8) {
@@ -225,7 +221,7 @@ class TutorialController extends ChangeNotifier {
     if (s1 != S1Phase.highlightSelect && s1 != S1Phase.dragGuide) return;
     s1 = S1Phase.dragGuide;
     tipText = '按住拖行：部隊跟手指走，行路累積光環，撞敵就自動突撃';
-    notifyListeners();
+    _notifyUi();
   }
 
   void onDropAtGuide() {
@@ -242,15 +238,29 @@ class TutorialController extends ChangeNotifier {
 
 
   /// Safe notify: Flame may call us from GameWidget layout/build.
+  /// Coalesce post-frame callbacks so deferred tips never drop / spam.
+  /// Travel/aura game paint must NOT depend on this — only Flutter tip/HUD.
+  bool _notifyUiScheduled = false;
+
   void _notifyUi() {
-    final phase = SchedulerBinding.instance.schedulerPhase;
-    if (phase == SchedulerPhase.idle ||
-        phase == SchedulerPhase.postFrameCallbacks) {
-      notifyListeners();
-    } else {
+    try {
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      if (phase == SchedulerPhase.idle ||
+          phase == SchedulerPhase.postFrameCallbacks) {
+        _notifyUiScheduled = false;
+        notifyListeners();
+        return;
+      }
+      if (_notifyUiScheduled) return;
+      _notifyUiScheduled = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        _notifyUiScheduled = false;
         notifyListeners();
       });
+    } catch (_) {
+      // Binding not ready (tests) or exotic phase — never throw into Flame update.
+      _notifyUiScheduled = false;
+      notifyListeners();
     }
   }
 
@@ -295,7 +305,7 @@ class TutorialController extends ChangeNotifier {
       s1 = S1Phase.tipNext;
       tipText = '撞中自動突撃！場1過關 — 撳「跳過」入教學場2：迎擊';
       tipSkippable = true;
-      notifyListeners();
+      _notifyUi();
       return;
     }
     if (!didDragDrop &&
