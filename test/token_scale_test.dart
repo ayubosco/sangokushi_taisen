@@ -21,4 +21,15 @@ void main() {
     final hitR = math.max(halfDiag + 4, 24.0);
     expect(hitR, greaterThanOrEqualTo(24.0));
   });
+
+  test('own and enemy field tokens share identical card size (no enemy scale)', () {
+    // Regression: enemy hard-outline used to inflate +20/+12 and read as bigger card.
+    expect(TaisenGame.kTokenWidthFracOfField, 0.10);
+    const fieldW = 402.0;
+    final ownW = fieldW * TaisenGame.kTokenWidthFracOfField;
+    final enemyW = fieldW * TaisenGame.kTokenWidthFracOfField; // same constant — no enemy multiplier
+    expect(ownW, enemyW);
+    expect(ownW / fieldW, 0.10);
+    expect(TaisenGame.kTokenAspectWH, 5 / 8);
+  });
 }

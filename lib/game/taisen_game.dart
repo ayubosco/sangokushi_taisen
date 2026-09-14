@@ -777,6 +777,7 @@ class TaisenGame extends FlameGame {
     }
 
     // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
+    // Own + enemy share ONE tokenSize — faction via outline/facing/color only, never scale.
     final tokenSize = tokenCardSize;
     for (var i = 0; i < field.length; i++) {
       final card = field[i];
@@ -1334,40 +1335,32 @@ class TaisenGame extends FlameGame {
     }
 
     if (isEnemy) {
-      final halo = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: center, width: cardW + 20, height: cardH + 20),
-        Radius.circular(cardW * 0.14),
+      // Faction ID = hard outline color only. Same cardW/cardH as own — NEVER scale
+      // or inflate the chrome (old +20/+12 halos read as a bigger enemy token at 0.10).
+      final hard = RRect.fromRectAndRadius(
+        dest.inflate(2.0),
+        Radius.circular(cardW * 0.09),
       );
       canvas.drawRRect(
-        halo,
+        hard,
         Paint()
           ..color = const Color(0xFFECEFF1)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.0,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: cardW + 12, height: cardH + 12),
-          Radius.circular(cardW * 0.12),
-        ),
-        Paint()
-          ..color = const Color(0xFF000000)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 8.0,
+          ..strokeWidth = 2.4,
       );
       canvas.drawRRect(
         rrect,
         Paint()
           ..color = const Color(0xFF0A0A0A)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.5,
+          ..strokeWidth = 3.6,
       );
       canvas.drawRRect(
         rrect,
         Paint()
           ..color = const Color(0xFFB0BEC5)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.8,
+          ..strokeWidth = 1.4,
       );
     }
 
@@ -1377,15 +1370,16 @@ class TaisenGame extends FlameGame {
         _bowWindupIndex != null &&
         selectedIndex == _bowWindupIndex;
     if (selected && !isEnemy && !bowWinding) {
+      // Selection ring tracks card (Design: 跟卡縮) — keep ≤+4 so own ≠ bigger than enemy.
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromCenter(center: center, width: cardW + 10, height: cardH + 10),
-          Radius.circular(cardW * 0.12),
+          Rect.fromCenter(center: center, width: cardW + 4, height: cardH + 4),
+          Radius.circular(cardW * 0.10),
         ),
         Paint()
           ..color = FactionColors.gold
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.2,
+          ..strokeWidth = 2.8,
       );
     }
     if (pulseOwn) {
@@ -1394,15 +1388,15 @@ class TaisenGame extends FlameGame {
         RRect.fromRectAndRadius(
           Rect.fromCenter(
             center: center,
-            width: cardW + 14 + pulse * 3,
-            height: cardH + 14 + pulse * 3,
+            width: cardW + 6 + pulse * 2,
+            height: cardH + 6 + pulse * 2,
           ),
-          Radius.circular(cardW * 0.13),
+          Radius.circular(cardW * 0.11),
         ),
         Paint()
           ..color = FactionColors.gold.withValues(alpha: 0.55)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.2,
+          ..strokeWidth = 1.8,
       );
     }
   }
