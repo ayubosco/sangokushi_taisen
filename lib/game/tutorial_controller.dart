@@ -447,11 +447,25 @@ class TutorialController extends ChangeNotifier {
   void forceFeelDragAura() {
     shotPassMode = true;
     session = TutorialSession.session1;
-    s1 = S1Phase.hitCharge;
-    phaseC = 1.0;
-    auraReady = true;
+    // Mid continuous travel foreshadow — rings on before full fill.
+    s1 = S1Phase.waitAura;
+    phaseC = 0.7;
+    auraReady = false;
     didDragDrop = true;
-    tipText = '跟住拖線拖去落點；光環夠亮先撞';
+    tipText = '行路中氣勢光環 — 場同 Watch 都要見青白環';
+    tipSkippable = false;
+    failed = false;
+    notifyListeners();
+  }
+
+  void forceChargeAuraLive() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.waitAura;
+    phaseC = 0.7;
+    auraReady = false;
+    didDragDrop = true;
+    tipText = '連續拖行中 — 青白氣場環（未滿亦要見）';
     tipSkippable = false;
     failed = false;
     notifyListeners();

@@ -14,7 +14,7 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|intercept|intercept-window|bow|bow-idle|bow-attack|cav-idle|cav-attack|stratagem|castle|spear-idle|spear-attack.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|charge-aura-live|intercept|intercept-window|bow|bow-idle|bow-attack|cav-idle|cav-attack|stratagem|castle|spear-idle|spear-attack.
 /// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢；cav/bow-*-sheet idle|attack.
 /// Title lock: on-screen art = branding PNG lockup (三國＋手指＋大戰). Oral/CFBundleDisplayName may stay「三國指大戰」; never Sega「三國志大戦」. Never draw「指」glyph in title art.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
@@ -399,23 +399,30 @@ class _TutorialShellState extends State<TutorialShell> {
         _tutorial.forceFeelDragHit();
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = false;
+      } else if (kFeelShot == 'charge-aura-live') {
+        // Mid continuous travel — rings on field + Watch (not only full fill).
+        _game.setupChargeAuraLivePose();
+        _tutorial.forceChargeAuraLive();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = false;
       } else if (kFeelShot == 'drag-aura' || kTutorialShot == 's1aura' || kDemoShot == 's1') {
         // Layout lock: keep enemy on lower field; drag guide + bright aura.
-        _game.setupSession1Field();
         if (kFeelShot == 'drag-aura') {
+          _game.setupChargeAuraLivePose();
           _tutorial.forceFeelDragAura();
         } else {
+          _game.setupSession1Field();
           _tutorial.forceSession1AuraGate();
-        }
-        if (_game.tutorialOwnIndex != null) {
-          _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
-          _game.selectedIndex = _game.tutorialOwnIndex;
-        }
-        _game.watchKind = AWindowKind.charge;
-        _game.dragging = true;
-        if (_game.tutorialOwnIndex != null) {
-          _game.dragFrom = _game.tokenCenter(_game.tutorialOwnIndex!);
-          _game.dragTo = _game.dropGuidePoint;
+          if (_game.tutorialOwnIndex != null) {
+            _game.fieldPos[_game.tutorialOwnIndex!] = _game.dropGuidePoint;
+            _game.selectedIndex = _game.tutorialOwnIndex;
+          }
+          _game.watchKind = AWindowKind.charge;
+          _game.dragging = true;
+          if (_game.tutorialOwnIndex != null) {
+            _game.dragFrom = _game.tokenCenter(_game.tutorialOwnIndex!);
+            _game.dragTo = _game.dropGuidePoint;
+          }
         }
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;

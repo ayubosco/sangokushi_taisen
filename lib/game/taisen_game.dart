@@ -385,7 +385,30 @@ class TaisenGame extends FlameGame {
   }
 
   /// FEEL_SHOT=drag-live: freeze mid-drag rubber-band toward drop (enemy outlined).
+  /// Live charge foreshadow: mid continuous travel (not only full fill) — field+Watch rings.
+  void setupChargeAuraLivePose() {
+    setupSession1Field();
+    if (tutorialOwnIndex != null) {
+      final i = tutorialOwnIndex!;
+      selectedIndex = i;
+      // Mid-fill (~70%) so cyan-white rings read before full 突撃 ready.
+      _dragTravelDist = kChargeTravelNeed * 0.70;
+      ownFacing = -0.35; // slight turn so Watch facing sync is obvious
+      final from = tokenCenter(i);
+      final drop = dropGuidePoint;
+      fieldPos[i] = Offset(
+        from.dx + (drop.dx - from.dx) * 0.45,
+        from.dy + (drop.dy - from.dy) * 0.45,
+      );
+      dragFrom = tokenCenter(i);
+      dragTo = drop;
+      dragging = true; // hold steer so fade does not eat the shot
+    }
+    watchKind = AWindowKind.charge;
+  }
+
   void setupFeelDragLivePose() {
+
     setupSession1Field();
     if (tutorialOwnIndex != null) {
       selectedIndex = tutorialOwnIndex;
@@ -649,7 +672,7 @@ class TaisenGame extends FlameGame {
                 _matchChargeC = 1.0;
               } else if (_matchChargeIndex == i) {
                 _matchChargeC = travel01;
-              } else if (travel01 > 0.2) {
+              } else if (travel01 > 0.08) {
                 _matchChargeIndex = i;
                 _matchChargeC = travel01;
               }
@@ -675,9 +698,75 @@ class TaisenGame extends FlameGame {
       }
     }
 
+    // Stop → aura fades from travel distance; move again rebuilds from 0 on panStart.
+    if (!dragging && _dragTravelDist > 0) {
+      _dragTravelDist = math.max(0.0, _dragTravelDist - 95.0 * dt);
+      final fade01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+      if (coach != null && coach.session == TutorialSession.session1) {
+        if (fade01 < 1.0 && coach.auraReady && coach.s1 == S1Phase.hitCharge) {
+          coach.auraReady = false;
+          coach.s1 = S1Phase.waitAura;
+          coach.tipText = '鬆手氣勢散咗 — 再拖行重新累積光環';
+          coach.tipSkippable = false;
+          onTutorialChanged?.call();
+        }
+        if (fade01 <= 0.08 &&
+            (coach.s1 == S1Phase.waitAura || coach.s1 == S1Phase.dragGuide)) {
+          // Rings gone — stay in dragGuide so player walks again.
+          if (coach.s1 != S1Phase.dragGuide) {
+            coach.s1 = S1Phase.dragGuide;
+            coach.didDragDrop = false;
+            coach.tipText = '跟住手指拖行累積氣勢 — 光環夠咗再撞敵';
+            coach.tipSkippable = false;
+            onTutorialChanged?.call();
+          }
+        }
+      } else if (coach == null) {
+        if (fade01 > 0.08) {
+          _matchChargeIndex = selectedIndex ?? _matchChargeIndex;
+          _matchChargeC = fade01;
+        } else {
+          _matchChargeIndex = null;
+          _matchChargeC = 0;
+        }
+      }
+    }
+
+    // Free-match: collide with full aura while walking → auto 突撃 (no button).
+    if (coach == null &&
+        dragging &&
+        selectedIndex != null &&
+        selectedIndex! < field.length &&
+        field[selectedIndex!].troop == TroopType.cavalry &&
+        _dragTravelDist >= kChargeTravelNeed) {
+      final i = selectedIndex!;
+      final at = fieldPos[i];
+      for (var e = 0; e < field.length; e++) {
+        if (!isEnemyAt(e)) continue;
+        if ((at - tokenCenter(e)).distance <= 58) {
+          flashHit(i, '突撃');
+          _matchChargeIndex = null;
+          _matchChargeC = 0;
+          _dragTravelDist = 0;
+          break;
+        }
+      }
+    }
+
+    // Every frame: Watch telegraph follows live field charge facing + aura (not demo cycle alone).
+    final liveCharge01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+    final liveChargeOn = liveCharge01 > 0.08 ||
+        (coach != null &&
+            coach.session == TutorialSession.session1 &&
+            (coach.auraReady ||
+                coach.s1 == S1Phase.waitAura ||
+                coach.s1 == S1Phase.hitCharge ||
+                coach.s1 == S1Phase.tipNext)) ||
+        (coach == null && _matchChargeIndex != null && _matchChargeC > 0.08);
     if (coach != null) {
       if (coach.session == TutorialSession.session1 &&
-          (coach.s1 == S1Phase.waitAura ||
+          (liveChargeOn ||
+              coach.s1 == S1Phase.waitAura ||
               coach.s1 == S1Phase.hitCharge ||
               coach.s1 == S1Phase.tipNext ||
               (coach.shotPassMode && coach.s1 == S1Phase.waitAura))) {
@@ -685,6 +774,8 @@ class TaisenGame extends FlameGame {
       } else if (coach.session == TutorialSession.session2) {
         watchKind = AWindowKind.intercept;
       }
+    } else if (liveChargeOn) {
+      watchKind = AWindowKind.charge;
     }
 
     // Shot modes freeze FX so Simulator captures stay readable.
@@ -712,16 +803,7 @@ class TaisenGame extends FlameGame {
       if (_shakeLeft < 0) _shakeLeft = 0;
     }
 
-    // Free-match: cavalry drop → wait aura ≥1C → 突撃 flash (no combat numbers; no button).
-    if (tutorial == null && _matchChargeIndex != null) {
-      _matchChargeC += dt / CClock.secondsPerC;
-      if (_matchChargeC >= 1.0) {
-        final i = _matchChargeIndex!;
-        flashHit(i, '突撃');
-        _matchChargeIndex = null;
-        _matchChargeC = 0;
-      }
-    }
+    // Free-match charge fade is driven by _dragTravelDist decay above (no wait-auto 突撃).
 
     // Free-match: enemy charge aura visible; after ≥1C tip-hit → auto 迎擊 (no button).
     if (tutorial == null && _matchEnemyChargeIndex != null) {
@@ -740,17 +822,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Tutorial S1: auto 突撃 after drag/collide + aura ≥1C (no floating button).
-    if (coach != null &&
-        coach.session == TutorialSession.session1 &&
-        coach.s1 == S1Phase.hitCharge &&
-        coach.auraReady &&
-        coach.didDragDrop &&
-        !coach.shotPassMode) {
-      flashHit(tutorialOwnIndex ?? 0, '突撃');
-      coach.onAutoCharge();
-      onTutorialChanged?.call();
-    }
+    // Tutorial S1: 突撃 only on collide while aura ready (handled in walk / panEnd).
 
     // Tutorial S2: auto 迎擊 when aura hits tip (facingCorrect + turnWindow).
     if (coach != null &&
@@ -1178,16 +1250,47 @@ class TaisenGame extends FlameGame {
 
     switch (kind) {
       case AWindowKind.charge:
-        final showCharge = t == null ||
-            t.session != TutorialSession.session1 ||
-            t.s1 == S1Phase.waitAura ||
-            t.s1 == S1Phase.hitCharge ||
-            t.s1 == S1Phase.tipNext;
-        if (showCharge) {
-          _drawChargeRings(canvas, ownC, 34 * ownScale, const Color(0xFF00E5FF), whiteCore: true, facing: ownFacing);
+        final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+        final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
+        final live01 = math.max(travel01, match01);
+        final s1Live = t != null &&
+            t.session == TutorialSession.session1 &&
+            (live01 > 0.08 ||
+                t.auraReady ||
+                t.s1 == S1Phase.waitAura ||
+                t.s1 == S1Phase.hitCharge ||
+                t.s1 == S1Phase.tipNext ||
+                t.shotPassMode);
+        final freeLive = t == null && live01 > 0.08;
+        final showOwnCharge = s1Live || freeLive || (t == null && live01 <= 0.08); // demo cycle when idle
+        if (showOwnCharge) {
+          final readyBoost = (t != null && t.auraReady) || live01 >= 1.0
+              ? 1.0
+              : (freeLive || s1Live ? (0.5 + 0.5 * live01) : 0.85);
+          final r = (40 + 10 * readyBoost) * ownScale;
+          _drawChargeRings(
+            canvas,
+            ownC,
+            r,
+            const Color(0xFF00E5FF).withValues(alpha: (0.9 * readyBoost).clamp(0.45, 1.0)),
+            whiteCore: true,
+            facing: ownFacing,
+          );
         }
-        if (showCharge && (t == null || t.enemyAuraVisible || t.session == TutorialSession.session1 || t.shotPassMode)) {
-          _drawChargeRings(canvas, enemyC, 28 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.75), whiteCore: true, facing: enemyFacing);
+        final showEnemyCharge = (t == null && !freeLive) ||
+            (t != null &&
+                (t.enemyAuraVisible ||
+                    t.session == TutorialSession.session1 ||
+                    t.shotPassMode));
+        if (showEnemyCharge) {
+          _drawChargeRings(
+            canvas,
+            enemyC,
+            32 * enemyScale,
+            const Color(0xFF00E5FF).withValues(alpha: 0.85),
+            whiteCore: true,
+            facing: enemyFacing,
+          );
         }
         break;
       case AWindowKind.intercept:
@@ -1650,12 +1753,12 @@ class TaisenGame extends FlameGame {
       if (show && (travel01 > 0.08 || t.auraReady || t.shotPassMode)) {
         final readyBoost = t.auraReady
             ? 1.0
-            : (0.4 + 0.55 * travel01);
+            : (0.5 + 0.5 * travel01);
         _drawChargeRings(
           canvas,
           c,
-          48,
-          const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
+          56,
+          const Color(0xFF00E5FF).withValues(alpha: (0.95 * readyBoost).clamp(0.5, 1.0)),
           whiteCore: true,
           facing: ownFacing,
         );
@@ -1685,12 +1788,12 @@ class TaisenGame extends FlameGame {
       case TroopType.cavalry:
         // 「見環先撞」: bright aura only after drag-drop while waiting ≥1C.
         if (_matchChargeIndex == index) {
-          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.55 + 0.35 * (_matchChargeC.clamp(0, 1)));
+          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.55 + 0.45 * (_matchChargeC.clamp(0, 1)));
           _drawChargeRings(
             canvas,
             c,
-            44,
-            const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
+            54,
+            const Color(0xFF00E5FF).withValues(alpha: (0.95 * readyBoost).clamp(0.5, 1.0)),
             whiteCore: true,
             facing: ownFacing,
           );
@@ -1750,52 +1853,52 @@ class TaisenGame extends FlameGame {
     double facing = 0,
   }) {
     final t = (_pulse % 1.2) / 1.2;
-    final baseA = color.a.clamp(0.25, 1.0);
-    // Rings + forward wave rotate with movement facing (not locked upright).
+    // Bright cyan-white wind rings — readable on both field + Watch foreshadow.
+    final baseA = color.a.clamp(0.55, 1.0);
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
     canvas.translate(-c.dx, -c.dy);
     for (var i = 0; i < 3; i++) {
-      final r = baseR + i * 12 + t * 16;
+      final r = baseR + i * 14 + t * 18;
       canvas.drawCircle(
         c,
         r,
         Paint()
-          ..color = color.withValues(alpha: (baseA - i * 0.12).clamp(0.12, 1.0))
+          ..color = color.withValues(alpha: (baseA - i * 0.1).clamp(0.28, 1.0))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.0 - i * 0.35,
+          ..strokeWidth = 4.2 - i * 0.4,
       );
     }
     if (whiteCore) {
       canvas.drawCircle(
         c,
-        baseR - 4 + t * 6,
+        baseR - 2 + t * 8,
         Paint()
-          ..color = Colors.white.withValues(alpha: 0.28 + 0.12 * math.sin(_pulse * 5))
+          ..color = Colors.white.withValues(alpha: 0.5 + 0.18 * math.sin(_pulse * 5))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4,
+          ..strokeWidth = 3.2,
       );
     }
     // Directional charge wave ahead of facing (0 = up).
     final wave = Path()
-      ..moveTo(c.dx - baseR * 0.85, c.dy - baseR * 0.1)
-      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.55, c.dx + baseR * 0.85, c.dy - baseR * 0.1);
+      ..moveTo(c.dx - baseR * 0.95, c.dy - baseR * 0.05)
+      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.7, c.dx + baseR * 0.95, c.dy - baseR * 0.05);
     canvas.drawPath(
       wave,
       Paint()
-        ..color = color.withValues(alpha: (baseA * 0.75).clamp(0.2, 0.9))
+        ..color = color.withValues(alpha: (baseA * 0.9).clamp(0.4, 1.0))
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.2,
+        ..strokeWidth = 4.0,
     );
     for (var i = 0; i < 8; i++) {
       final a = i * math.pi / 4 + _pulse * 0.35;
       canvas.drawLine(
         Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
-        Offset(c.dx + math.cos(a) * (baseR + 22), c.dy + math.sin(a) * (baseR + 22)),
+        Offset(c.dx + math.cos(a) * (baseR + 28), c.dy + math.sin(a) * (baseR + 28)),
         Paint()
-          ..color = color.withValues(alpha: (baseA * 0.55).clamp(0.15, 0.7))
-          ..strokeWidth = 1.8,
+          ..color = color.withValues(alpha: (baseA * 0.7).clamp(0.28, 0.9))
+          ..strokeWidth = 2.2,
       );
     }
     canvas.restore();
@@ -2131,6 +2234,8 @@ class TaisenGame extends FlameGame {
     selectedIndex = i;
     dragging = true;
     _dragTravelDist = 0;
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
     dragFrom = tokenCenter(i);
     dragTo = local;
   }
@@ -2188,18 +2293,20 @@ class TaisenGame extends FlameGame {
           if (field[i].troop == TroopType.bow && _dragTravelDist > 8) {
             _cancelBowWindup();
           }
-          // Cavalry: aura already from travel; if full, hold ready for collide feel (flash if near enemy).
-          if (field[i].troop == TroopType.cavalry && _dragTravelDist >= kChargeTravelNeed) {
+          // Cavalry: aura from travel; collide = auto 突撃; else fade on stop (update).
+          if (field[i].troop == TroopType.cavalry && _dragTravelDist > 0.08 * kChargeTravelNeed) {
             _matchChargeIndex = i;
-            _matchChargeC = 1.0;
-            // Auto 突撃 flash if stopped overlapping an enemy
-            for (var e = 0; e < field.length; e++) {
-              if (!isEnemyAt(e)) continue;
-              if ((at - tokenCenter(e)).distance <= 58) {
-                flashHit(i, '突撃');
-                _matchChargeIndex = null;
-                _matchChargeC = 0;
-                break;
+            _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+            if (_dragTravelDist >= kChargeTravelNeed) {
+              for (var e = 0; e < field.length; e++) {
+                if (!isEnemyAt(e)) continue;
+                if ((at - tokenCenter(e)).distance <= 58) {
+                  flashHit(i, '突撃');
+                  _matchChargeIndex = null;
+                  _matchChargeC = 0;
+                  _dragTravelDist = 0;
+                  break;
+                }
               }
             }
           }
