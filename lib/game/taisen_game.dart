@@ -73,7 +73,9 @@ class TaisenGame extends FlameGame {
   Offset? dragTo;
   /// Continuous travel while steering — charge aura accumulates from this (not teleport).
   double _dragTravelDist = 0;
-  static const double kChargeTravelNeed = 120.0; // px of walking to fill charge aura
+  /// Last move dir while dragging — used to fade aura on sharp turn.
+  Offset? _lastDragDir;
+  static const double kChargeTravelNeed = 120.0; // px of finger-travel to fill charge aura
   double get debugTravel01 => (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
   String get debugHitLabel => _hitFlashLabel;
 
@@ -211,18 +213,6 @@ class TaisenGame extends FlameGame {
       'tokenW=${tw.toStringAsFixed(1)} tokenW/fieldW=${(tw / size.x).toStringAsFixed(3)} '
       'tokenAspect=${kTokenAspectWH.toStringAsFixed(3)} castleBand/field=${kCastleBandFracOfField.toStringAsFixed(2)}',
     );
-  }
-
-  /// px/s toward finger while dragging — cavalry fastest.
-  double _troopSpeedPx(TroopType troop) {
-    final w = size.x > 0 ? size.x : 390.0;
-    return switch (troop) {
-      TroopType.cavalry => w * 0.55,
-      TroopType.spear => w * 0.32,
-      TroopType.bow => w * 0.30,
-      TroopType.infantry => w * 0.28,
-      TroopType.siege => w * 0.22,
-    };
   }
 
   Offset _clampFieldPos(Offset p) {
@@ -643,7 +633,8 @@ class TaisenGame extends FlameGame {
     // Tutorial coaching: keep watch telegraph aligned with current gate (aura / spear).
     final coach = tutorial;
 
-    // Arcade drag-follow: walk toward finger at troop speed; facing follows move; aura from travel.
+    // UIUX lock (JL3Bgi0z4_4): drag = 1:1 follow position/facing (no troop-speed chase / teleport jump).
+    // Aura fills from continuous straight travel; sharp turn fades like stop.
     if (dragging && selectedIndex != null && dragTo != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       if (!isEnemyAt(i)) {
@@ -651,18 +642,35 @@ class TaisenGame extends FlameGame {
         final target = dragTo!;
         final delta = target - pos;
         final dist = delta.distance;
-        if (dist > 2) {
-          final speed = _troopSpeedPx(field[i].troop);
-          final step = math.min(dist, speed * dt);
+        if (dist > 0.5) {
           final dir = Offset(delta.dx / dist, delta.dy / dist);
-          final next = _clampFieldPos(pos + dir * step);
+          // Sharp turn (>~70°) breaks charge run-up — bleed travel like stop.
+          if (_lastDragDir != null) {
+            final dot = (_lastDragDir!.dx * dir.dx + _lastDragDir!.dy * dir.dy).clamp(-1.0, 1.0);
+            final ang = math.acos(dot);
+            if (ang > 1.22) {
+              // ~70° — reset run-up so aura does not survive zig-zag
+              _dragTravelDist = 0;
+              if (coach != null && coach.session == TutorialSession.session1) {
+                coach.auraReady = false;
+                if (coach.s1 == S1Phase.hitCharge || coach.s1 == S1Phase.waitAura) {
+                  coach.s1 = S1Phase.dragGuide;
+                }
+              } else if (coach == null) {
+                _matchChargeIndex = null;
+                _matchChargeC = 0;
+              }
+            }
+          }
+          _lastDragDir = dir;
+          final next = _clampFieldPos(target); // 1:1 with finger (clamped to field)
           final walked = (next - pos).distance;
           fieldPos[i] = next;
           _dragTravelDist += walked;
           ownFacing = _facingFromDelta(dir);
           castleBandHot = inCastleBand(next);
 
-          // Charge aura fills from continuous travel (teleport would skip this).
+          // Charge aura fills from continuous travel distance under the finger.
           final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
           if (field[i].troop == TroopType.cavalry) {
             if (coach != null && coach.session == TutorialSession.session1) {
@@ -2276,6 +2284,7 @@ class TaisenGame extends FlameGame {
       }
       dragging = true;
       _dragTravelDist = 0;
+      _lastDragDir = null;
       _matchChargeIndex = null;
       _matchChargeC = 0;
       dragFrom = tokenCenter(i);
@@ -2283,10 +2292,11 @@ class TaisenGame extends FlameGame {
       onTutorialChanged?.call();
       return;
     }
-    // Free match: steer with finger — unit walks at troop speed (no teleport).
+    // Free match: 1:1 finger follow (UIUX lock) — no troop-speed chase.
     selectedIndex = i;
     dragging = true;
     _dragTravelDist = 0;
+    _lastDragDir = null;
     _matchChargeIndex = null;
     _matchChargeC = 0;
     dragFrom = tokenCenter(i);
@@ -2295,7 +2305,7 @@ class TaisenGame extends FlameGame {
 
   void panUpdate(Offset local) {
     if (!dragging) return;
-    // Finger = steer target only; unit follows in update() at troop speed.
+    // Finger = unit position (1:1); update() applies clamp + aura travel.
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
   }
@@ -2303,10 +2313,11 @@ class TaisenGame extends FlameGame {
   void panEnd(Offset local) {
     if (!dragging) return;
     dragging = false;
+    _lastDragDir = null;
     final t = tutorial;
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
-    // Release = stop where the unit already is (arcade). Never snap/teleport to finger/drop.
+    // Release = stop where unit already is (1:1 so already under finger). No post-release snap.
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -2380,8 +2391,10 @@ class TaisenGame extends FlameGame {
   void flashHit(int index, String label) {
     _hitFlashIndex = index;
     _hitFlashLabel = label;
-    _hitFlashLeft = FxWindows.toSeconds(FxWindows.interceptHitFlashC);
-    _shakeLeft = FxWindows.toSeconds(FxWindows.interceptHitFlashC);
+    // Big board text: ~0.3C (~0.9s) and hard-cap ≤1.0s (UIUX lock, non-blocking).
+    final flashSec = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
+    _hitFlashLeft = flashSec;
+    _shakeLeft = flashSec;
   }
 
   /// Stratagem FX ≤1C on field; non-blocking (board stays tappable).
