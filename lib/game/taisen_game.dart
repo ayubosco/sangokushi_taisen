@@ -89,6 +89,23 @@ class TaisenGame extends FlameGame {
   }
   String get debugHitLabel => _hitFlashLabel;
 
+  /// Combat states (Research/UIUX/Design lock):
+  /// MARCH = not touching → zero hit FX; MELEE = contact w/o aura → light bump only;
+  /// CHARGE = auraActive && real contact → flash + 「突撃」.
+  /// Engagement = token overlap / enter melee — NOT loose proximity-near.
+  double get meleeContactDist {
+    final sz = tokenCardSize;
+    // Half-widths along short+long blended — visual card touch, tighter than old 58px near.
+    return (sz.width + sz.height) * 0.38;
+  }
+
+  bool inMeleeContact(Offset a, Offset b) => (a - b).distance <= meleeContactDist;
+
+  /// Edge-trigger: which enemy we are currently overlapping (null = MARCH).
+  int? _meleeEnemyIndex;
+  /// After CHARGE resolves, suppress repeat until leave contact.
+  bool _chargeResolvedThisContact = false;
+
   /// Session2 facing: radians; 0 = up (toward enemy).
   double ownFacing = 0;
   double enemyFacing = math.pi;
@@ -225,15 +242,15 @@ class TaisenGame extends FlameGame {
     );
   }
 
-  /// px/s toward finger while dragging — cavalry fastest (waypoint lag).
+  /// px/s toward finger while dragging — troop-specific waypoint lag (cav fast, spear slow).
   double _troopSpeedPx(TroopType troop) {
     final w = size.x > 0 ? size.x : 390.0;
     return switch (troop) {
-      TroopType.cavalry => w * 0.55,
-      TroopType.spear => w * 0.32,
+      TroopType.cavalry => w * 0.62, // fast charge line
+      TroopType.spear => w * 0.26, // slow march / tip hold
       TroopType.bow => w * 0.30,
       TroopType.infantry => w * 0.28,
-      TroopType.siege => w * 0.22,
+      TroopType.siege => w * 0.20,
     };
   }
 
@@ -452,29 +469,29 @@ class TaisenGame extends FlameGame {
     flashHit(tutorialOwnIndex ?? 0, '突撃');
   }
 
-  /// FEEL_SHOT=charge-no-aura-bump: collide near enemy WITHOUT aura — no 突撃 flytext.
+  /// FEEL_SHOT=charge-no-aura-bump: MELEE contact WITHOUT aura — light bump, NO 「突撃」.
   void setupChargeNoAuraBumpPose() {
     setupSession1Field();
     _dragTravelDist = 0;
     _matchChargeIndex = null;
     _matchChargeC = 0;
+    _chargeResolvedThisContact = false;
     dragging = false;
     dragFrom = null;
     dragTo = null;
     if (tutorialOwnIndex != null && tutorialEnemyIndex != null) {
       final enemy = tokenCenter(tutorialEnemyIndex!);
-      // Sit inside contact radius without travel/aura.
-      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - 36, enemy.dy + 20);
+      // True card overlap (melee), not proximity-near.
+      final d = meleeContactDist * 0.55;
+      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - d * 0.7, enemy.dy + d * 0.5);
       selectedIndex = tutorialOwnIndex;
+      _meleeEnemyIndex = tutorialEnemyIndex;
     }
     watchKind = AWindowKind.charge;
-    _hitFlashIndex = null;
-    _hitFlashLeft = 0;
-    _hitFlashLabel = '';
-    _shakeLeft = 0;
+    bumpMelee(tutorialOwnIndex ?? 0); // light bump only — empty label, no 突撃
   }
 
-  /// FEEL_SHOT=charge-aura-hit: contact WITH full aura — short flash + 「突撃」.
+  /// FEEL_SHOT=charge-aura-hit: CHARGE = auraActive && real contact — flash + 「突撃」.
   void setupChargeAuraHitPose() {
     setupSession1Field();
     _dragTravelDist = kChargeTravelNeed;
@@ -483,10 +500,13 @@ class TaisenGame extends FlameGame {
     dragTo = null;
     if (tutorialOwnIndex != null && tutorialEnemyIndex != null) {
       final enemy = tokenCenter(tutorialEnemyIndex!);
-      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - 36, enemy.dy + 20);
+      final d = meleeContactDist * 0.55;
+      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - d * 0.7, enemy.dy + d * 0.5);
       selectedIndex = tutorialOwnIndex;
       _matchChargeIndex = tutorialOwnIndex;
       _matchChargeC = 1.0;
+      _meleeEnemyIndex = tutorialEnemyIndex;
+      _chargeResolvedThisContact = true;
     }
     watchKind = AWindowKind.charge;
     flashHit(tutorialOwnIndex ?? 0, '突撃');
@@ -695,9 +715,10 @@ class TaisenGame extends FlameGame {
     // Tutorial coaching: keep watch telegraph aligned with current gate (aura / spear).
     final coach = tutorial;
 
-    // UIUX lock (JL3Bgi0z4_4): drag = WAYPOINT follow at troop speed (visible lag).
+    // UIUX lock (JL3Bgi0z4_4): drag = WAYPOINT follow at troop-specific speed (cav fast / spear slow).
     // Aura from continuous straight travel; stop / too-slow / sharp turn → fade.
-    // Charge ONLY when auraActive && contact — never fake 突撃 on near-enemy bump.
+    // Combat: MARCH (no touch)=0 FX; MELEE (touch w/o aura)=light bump; CHARGE (aura+touch)=突撃.
+    // Engagement = real melee overlap — proximity-near alone never hits.
     var unitMoving = false;
     if (dragging && selectedIndex != null && dragTo != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
@@ -754,24 +775,15 @@ class TaisenGame extends FlameGame {
             }
           }
 
-          // S1 collide while walking: auraActive at contact → auto 突撃 (else normal bump, no FX).
+          // Combat engagement on walk: MARCH / MELEE / CHARGE (real contact only).
           if (coach != null &&
               coach.session == TutorialSession.session1 &&
               tutorialOwnIndex == i &&
               tutorialEnemyIndex != null &&
-              auraActive &&
               !coach.shotPassMode) {
-            final enemyAt = tokenCenter(tutorialEnemyIndex!);
-            if ((next - enemyAt).distance <= 58) {
-              if (!coach.auraReady || !coach.didDragDrop) {
-                coach.auraReady = true;
-                coach.didDragDrop = true;
-                coach.s1 = S1Phase.hitCharge;
-              }
-              flashHit(i, '突撃');
-              coach.onAutoCharge();
-              onTutorialChanged?.call();
-            }
+            _resolveEngagement(i, next, coach: coach);
+          } else if (coach == null && field[i].troop == TroopType.cavalry) {
+            _resolveEngagement(i, next, coach: null);
           }
         } else {
           // Caught finger / too slow while drag held — treat as stop for aura.
@@ -823,28 +835,6 @@ class TaisenGame extends FlameGame {
         } else {
           _matchChargeIndex = null;
           _matchChargeC = 0;
-        }
-      }
-    }
-
-    // Free-match: collide with auraActive while walking → auto 突撃 (no button).
-    if (coach == null &&
-        dragging &&
-        unitMoving &&
-        selectedIndex != null &&
-        selectedIndex! < field.length &&
-        field[selectedIndex!].troop == TroopType.cavalry &&
-        auraActive) {
-      final i = selectedIndex!;
-      final at = fieldPos[i];
-      for (var e = 0; e < field.length; e++) {
-        if (!isEnemyAt(e)) continue;
-        if ((at - tokenCenter(e)).distance <= 58) {
-          flashHit(i, '突撃');
-          _matchChargeIndex = null;
-          _matchChargeC = 0;
-          _dragTravelDist = 0;
-          break;
         }
       }
     }
@@ -1138,15 +1128,28 @@ class TaisenGame extends FlameGame {
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
-      _drawFatFloatText(canvas, _hitFlashLabel, Offset(c.dx, c.dy - 78));
-      canvas.drawCircle(
-        c,
-        42,
-        Paint()
-          ..color = const Color(0xFF80DEEA).withValues(alpha: (_hitFlashLeft * 2).clamp(0, 0.55))
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.5,
-      );
+      if (_hitFlashLabel.isNotEmpty) {
+        // CHARGE / intercept / etc — big flytext
+        _drawFatFloatText(canvas, _hitFlashLabel, Offset(c.dx, c.dy - 78));
+        canvas.drawCircle(
+          c,
+          42,
+          Paint()
+            ..color = const Color(0xFF80DEEA).withValues(alpha: (_hitFlashLeft * 2).clamp(0, 0.55))
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3.5,
+        );
+      } else {
+        // MELEE light bump — soft ring only, never 「突撃」
+        canvas.drawCircle(
+          c,
+          30,
+          Paint()
+            ..color = const Color(0xFFFFFFFF).withValues(alpha: (_hitFlashLeft * 1.6).clamp(0, 0.28))
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.0,
+        );
+      }
     }
 
     if (_stratLeft > 0 && _stratAt != null) {
@@ -2353,6 +2356,8 @@ class TaisenGame extends FlameGame {
       dragging = true;
       _dragTravelDist = 0;
       _lastDragDir = null;
+      _meleeEnemyIndex = null;
+      _chargeResolvedThisContact = false;
       _matchChargeIndex = null;
       _matchChargeC = 0;
       dragFrom = tokenCenter(i);
@@ -2365,6 +2370,8 @@ class TaisenGame extends FlameGame {
     dragging = true;
     _dragTravelDist = 0;
     _lastDragDir = null;
+    _meleeEnemyIndex = null;
+    _chargeResolvedThisContact = false;
     _matchChargeIndex = null;
     _matchChargeC = 0;
     dragFrom = tokenCenter(i);
@@ -2393,16 +2400,8 @@ class TaisenGame extends FlameGame {
       castleBandHot = false;
 
       if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
-        final enemyAt = tutorialEnemyIndex != null ? tokenCenter(tutorialEnemyIndex!) : null;
-        final nearEnemy = enemyAt != null && (at - enemyAt).distance <= 58;
-        // Near-enemy without aura = normal bump only — never fake charge FX.
-        if (nearEnemy && auraActive && !t.shotPassMode) {
-          t.auraReady = true;
-          t.didDragDrop = true;
-          t.s1 = S1Phase.hitCharge;
-          flashHit(i, '突撃');
-          t.onAutoCharge();
-          onTutorialChanged?.call();
+        if (!t.shotPassMode) {
+          _resolveEngagement(i, at, coach: t);
         }
         // else: stay put; tip already teaches keep dragging to walk/collide
       } else if (t == null && !isEnemyAt(i)) {
@@ -2429,22 +2428,13 @@ class TaisenGame extends FlameGame {
           if (field[i].troop == TroopType.bow && _dragTravelDist > 8) {
             _cancelBowWindup();
           }
-          // Cavalry: aura from travel; charge ONLY if auraActive at contact.
+          // Cavalry: keep aura telegraph; engagement resolves MARCH/MELEE/CHARGE on contact.
           if (field[i].troop == TroopType.cavalry && _dragTravelDist > 0.08 * kChargeTravelNeed) {
             _matchChargeIndex = i;
             _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-            if (auraActive) {
-              for (var e = 0; e < field.length; e++) {
-                if (!isEnemyAt(e)) continue;
-                if ((at - tokenCenter(e)).distance <= 58) {
-                  flashHit(i, '突撃');
-                  _matchChargeIndex = null;
-                  _matchChargeC = 0;
-                  _dragTravelDist = 0;
-                  break;
-                }
-              }
-            }
+          }
+          if (field[i].troop == TroopType.cavalry) {
+            _resolveEngagement(i, at, coach: null);
           }
         }
       }
@@ -2460,6 +2450,70 @@ class TaisenGame extends FlameGame {
     final flashSec = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
     _hitFlashLeft = flashSec;
     _shakeLeft = flashSec;
+  }
+
+  /// MELEE: real contact without aura — light bump / micro-shake, NEVER big 「突撃」.
+  void bumpMelee(int index) {
+    _hitFlashIndex = index;
+    _hitFlashLabel = ''; // no big combat text
+    _hitFlashLeft = 0.22;
+    _shakeLeft = 0.14;
+  }
+
+  /// Resolve MARCH / MELEE / CHARGE for [ownIndex] at [at].
+  /// MARCH (not touching) = zero hit FX. Edge-enter only for MELEE/CHARGE.
+  void _resolveEngagement(int ownIndex, Offset at, {TutorialController? coach}) {
+    int? touching;
+    for (var e = 0; e < field.length; e++) {
+      if (!isEnemyAt(e)) continue;
+      if (inMeleeContact(at, tokenCenter(e))) {
+        touching = e;
+        break;
+      }
+    }
+
+    if (touching == null) {
+      // MARCH — left contact; clear edge state. Zero hit FX.
+      _meleeEnemyIndex = null;
+      _chargeResolvedThisContact = false;
+      return;
+    }
+
+    final entered = _meleeEnemyIndex != touching;
+    _meleeEnemyIndex = touching;
+
+    if (!entered && _chargeResolvedThisContact) {
+      return; // still overlapping after charge — no spam
+    }
+    if (!entered && _hitFlashLeft > 0) {
+      return; // already bumped this contact
+    }
+
+    if (auraActive) {
+      // CHARGE
+      _chargeResolvedThisContact = true;
+      if (coach != null && coach.session == TutorialSession.session1) {
+        if (!coach.auraReady || !coach.didDragDrop) {
+          coach.auraReady = true;
+          coach.didDragDrop = true;
+          coach.s1 = S1Phase.hitCharge;
+        }
+        flashHit(ownIndex, '突撃');
+        coach.onAutoCharge();
+        onTutorialChanged?.call();
+      } else {
+        flashHit(ownIndex, '突撃');
+        _matchChargeIndex = null;
+        _matchChargeC = 0;
+        _dragTravelDist = 0;
+      }
+      return;
+    }
+
+    // MELEE — contact without aura: light bump only (never 突撃 / never tutorial pass).
+    if (entered) {
+      bumpMelee(ownIndex);
+    }
   }
 
   /// Stratagem FX ≤1C on field; non-blocking (board stays tappable).
