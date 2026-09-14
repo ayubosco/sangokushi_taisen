@@ -526,6 +526,36 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Proof: near-enemy bump without cyan aura — no 突撃 success.
+  void forceChargeNoAuraBump() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.dragGuide;
+    phaseC = 0;
+    auraReady = false;
+    didDragDrop = false;
+    tipText = '未見光環撞敵 = 普通近戰 — 唔會突撃';
+    tipSkippable = false;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
+  /// Proof: contact with full aura — 突撃 flash.
+  void forceChargeAuraHit() {
+    shotPassMode = true;
+    session = TutorialSession.session1;
+    s1 = S1Phase.tipNext;
+    phaseC = 1.0;
+    auraReady = true;
+    didDragDrop = true;
+    tipText = '光環＋接觸 → 自動突撃';
+    tipSkippable = true;
+    failed = false;
+    failReason = null;
+    notifyListeners();
+  }
+
   /// Feel shot: intercept wait window — enemy aura visible, turn window not yet / just open, facing still wrong.
   void forceFeelInterceptWindow() {
     shotPassMode = true;

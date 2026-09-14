@@ -67,16 +67,26 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
-  /// Arcade: finger = steer target; unit walks at troop speed (never snap/teleport).
+  /// UIUX lock (JL3Bgi0z4_4): finger = WAYPOINT; unit walks toward finger at troop speed
+  /// with visible lag — NEVER sticky 1:1 teleport/glue to finger.
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
-  /// Continuous travel while steering — charge aura accumulates from this (not teleport).
+  /// Continuous walked distance while steering — charge aura accumulates from this.
   double _dragTravelDist = 0;
-  /// Last move dir while dragging — used to fade aura on sharp turn.
+  /// Last move dir while dragging — sharp turn fades aura like stop.
   Offset? _lastDragDir;
-  static const double kChargeTravelNeed = 120.0; // px of finger-travel to fill charge aura
+  static const double kChargeTravelNeed = 120.0; // px of walked travel to fill charge aura
   double get debugTravel01 => (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+  /// Cyan-white charge aura fully armed (travel ownership) — charge FX requires this at contact.
+  bool get auraActive {
+    final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+    if (travel01 >= 1.0) return true;
+    final t = tutorial;
+    if (t != null && t.session == TutorialSession.session1 && t.auraReady) return true;
+    if (t == null && _matchChargeIndex != null && _matchChargeC >= 1.0) return true;
+    return false;
+  }
   String get debugHitLabel => _hitFlashLabel;
 
   /// Session2 facing: radians; 0 = up (toward enemy).
@@ -213,6 +223,18 @@ class TaisenGame extends FlameGame {
       'tokenW=${tw.toStringAsFixed(1)} tokenW/fieldW=${(tw / size.x).toStringAsFixed(3)} '
       'tokenAspect=${kTokenAspectWH.toStringAsFixed(3)} castleBand/field=${kCastleBandFracOfField.toStringAsFixed(2)}',
     );
+  }
+
+  /// px/s toward finger while dragging — cavalry fastest (waypoint lag).
+  double _troopSpeedPx(TroopType troop) {
+    final w = size.x > 0 ? size.x : 390.0;
+    return switch (troop) {
+      TroopType.cavalry => w * 0.55,
+      TroopType.spear => w * 0.32,
+      TroopType.bow => w * 0.30,
+      TroopType.infantry => w * 0.28,
+      TroopType.siege => w * 0.22,
+    };
   }
 
   Offset _clampFieldPos(Offset p) {
@@ -430,6 +452,46 @@ class TaisenGame extends FlameGame {
     flashHit(tutorialOwnIndex ?? 0, '突撃');
   }
 
+  /// FEEL_SHOT=charge-no-aura-bump: collide near enemy WITHOUT aura — no 突撃 flytext.
+  void setupChargeNoAuraBumpPose() {
+    setupSession1Field();
+    _dragTravelDist = 0;
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    if (tutorialOwnIndex != null && tutorialEnemyIndex != null) {
+      final enemy = tokenCenter(tutorialEnemyIndex!);
+      // Sit inside contact radius without travel/aura.
+      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - 36, enemy.dy + 20);
+      selectedIndex = tutorialOwnIndex;
+    }
+    watchKind = AWindowKind.charge;
+    _hitFlashIndex = null;
+    _hitFlashLeft = 0;
+    _hitFlashLabel = '';
+    _shakeLeft = 0;
+  }
+
+  /// FEEL_SHOT=charge-aura-hit: contact WITH full aura — short flash + 「突撃」.
+  void setupChargeAuraHitPose() {
+    setupSession1Field();
+    _dragTravelDist = kChargeTravelNeed;
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    if (tutorialOwnIndex != null && tutorialEnemyIndex != null) {
+      final enemy = tokenCenter(tutorialEnemyIndex!);
+      fieldPos[tutorialOwnIndex!] = Offset(enemy.dx - 36, enemy.dy + 20);
+      selectedIndex = tutorialOwnIndex;
+      _matchChargeIndex = tutorialOwnIndex;
+      _matchChargeC = 1.0;
+    }
+    watchKind = AWindowKind.charge;
+    flashHit(tutorialOwnIndex ?? 0, '突撃');
+  }
+
   /// FEEL_SHOT=drag-samefaction: Wei cavalry vs Wei cavalry mid-drag (Design outline check).
   void setupFeelDragSameFactionPose() {
     field.clear();
@@ -633,8 +695,10 @@ class TaisenGame extends FlameGame {
     // Tutorial coaching: keep watch telegraph aligned with current gate (aura / spear).
     final coach = tutorial;
 
-    // UIUX lock (JL3Bgi0z4_4): drag = 1:1 follow position/facing (no troop-speed chase / teleport jump).
-    // Aura fills from continuous straight travel; sharp turn fades like stop.
+    // UIUX lock (JL3Bgi0z4_4): drag = WAYPOINT follow at troop speed (visible lag).
+    // Aura from continuous straight travel; stop / too-slow / sharp turn → fade.
+    // Charge ONLY when auraActive && contact — never fake 突撃 on near-enemy bump.
+    var unitMoving = false;
     if (dragging && selectedIndex != null && dragTo != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       if (!isEnemyAt(i)) {
@@ -642,14 +706,15 @@ class TaisenGame extends FlameGame {
         final target = dragTo!;
         final delta = target - pos;
         final dist = delta.distance;
-        if (dist > 0.5) {
+        if (dist > 2) {
+          final speed = _troopSpeedPx(field[i].troop);
+          final step = math.min(dist, speed * dt);
           final dir = Offset(delta.dx / dist, delta.dy / dist);
-          // Sharp turn (>~70°) breaks charge run-up — bleed travel like stop.
+          // Sharp turn (>~70°) breaks charge run-up — reset travel like stop.
           if (_lastDragDir != null) {
             final dot = (_lastDragDir!.dx * dir.dx + _lastDragDir!.dy * dir.dy).clamp(-1.0, 1.0);
             final ang = math.acos(dot);
             if (ang > 1.22) {
-              // ~70° — reset run-up so aura does not survive zig-zag
               _dragTravelDist = 0;
               if (coach != null && coach.session == TutorialSession.session1) {
                 coach.auraReady = false;
@@ -663,19 +728,19 @@ class TaisenGame extends FlameGame {
             }
           }
           _lastDragDir = dir;
-          final next = _clampFieldPos(target); // 1:1 with finger (clamped to field)
+          final next = _clampFieldPos(pos + dir * step);
           final walked = (next - pos).distance;
           fieldPos[i] = next;
           _dragTravelDist += walked;
           ownFacing = _facingFromDelta(dir);
           castleBandHot = inCastleBand(next);
+          unitMoving = walked > 0.5;
 
-          // Charge aura fills from continuous travel distance under the finger.
+          // Charge aura fills from continuous walked distance (1:1 teleport would fake-fill).
           final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
           if (field[i].troop == TroopType.cavalry) {
             if (coach != null && coach.session == TutorialSession.session1) {
               coach.onChargeTravelProgress(travel01);
-              // Controller notifyListeners drives UI; avoid per-frame setState spam.
             } else if (coach == null) {
               if (travel01 >= 1.0) {
                 _matchChargeIndex = i;
@@ -689,13 +754,12 @@ class TaisenGame extends FlameGame {
             }
           }
 
-          // S1 collide while walking: aura ready + near enemy → auto 突撃
+          // S1 collide while walking: auraActive at contact → auto 突撃 (else normal bump, no FX).
           if (coach != null &&
               coach.session == TutorialSession.session1 &&
               tutorialOwnIndex == i &&
               tutorialEnemyIndex != null &&
-              (coach.auraReady || travel01 >= 1.0) &&
-              (coach.didDragDrop || travel01 >= 1.0) &&
+              auraActive &&
               !coach.shotPassMode) {
             final enemyAt = tokenCenter(tutorialEnemyIndex!);
             if ((next - enemyAt).distance <= 58) {
@@ -709,12 +773,16 @@ class TaisenGame extends FlameGame {
               onTutorialChanged?.call();
             }
           }
+        } else {
+          // Caught finger / too slow while drag held — treat as stop for aura.
+          _lastDragDir = null;
         }
       }
     }
 
-    // Stop → aura fades from travel distance; move again rebuilds from 0 on panStart.
-    if (!dragging && _dragTravelDist > 0) {
+    // Stop / too-slow → aura fades from travel distance; move again rebuilds on panStart.
+    final fading = (!dragging || !unitMoving) && _dragTravelDist > 0;
+    if (fading) {
       _dragTravelDist = math.max(0.0, _dragTravelDist - 95.0 * dt);
       final fade01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
       if (coach != null && coach.session == TutorialSession.session1) {
@@ -739,7 +807,6 @@ class TaisenGame extends FlameGame {
         }
         if (fade01 <= 0.08 &&
             (coach.s1 == S1Phase.waitAura || coach.s1 == S1Phase.dragGuide)) {
-          // Rings gone — stay in dragGuide so player walks again.
           if (coach.s1 != S1Phase.dragGuide) {
             coach.s1 = S1Phase.dragGuide;
             coach.didDragDrop = false;
@@ -760,13 +827,14 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Free-match: collide with full aura while walking → auto 突撃 (no button).
+    // Free-match: collide with auraActive while walking → auto 突撃 (no button).
     if (coach == null &&
         dragging &&
+        unitMoving &&
         selectedIndex != null &&
         selectedIndex! < field.length &&
         field[selectedIndex!].troop == TroopType.cavalry &&
-        _dragTravelDist >= kChargeTravelNeed) {
+        auraActive) {
       final i = selectedIndex!;
       final at = fieldPos[i];
       for (var e = 0; e < field.length; e++) {
@@ -2292,7 +2360,7 @@ class TaisenGame extends FlameGame {
       onTutorialChanged?.call();
       return;
     }
-    // Free match: 1:1 finger follow (UIUX lock) — no troop-speed chase.
+    // Free match: waypoint steer — unit walks at troop speed (no 1:1 glue).
     selectedIndex = i;
     dragging = true;
     _dragTravelDist = 0;
@@ -2305,7 +2373,7 @@ class TaisenGame extends FlameGame {
 
   void panUpdate(Offset local) {
     if (!dragging) return;
-    // Finger = unit position (1:1); update() applies clamp + aura travel.
+    // Finger = waypoint only; update() walks at troop speed + aura travel.
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
   }
@@ -2317,7 +2385,7 @@ class TaisenGame extends FlameGame {
     final t = tutorial;
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     dragTo = Offset(local.dx, y);
-    // Release = stop where unit already is (1:1 so already under finger). No post-release snap.
+    // Release = stop where unit already is (waypoint lag). Never snap/teleport to finger.
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -2327,11 +2395,8 @@ class TaisenGame extends FlameGame {
       if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
         final enemyAt = tutorialEnemyIndex != null ? tokenCenter(tutorialEnemyIndex!) : null;
         final nearEnemy = enemyAt != null && (at - enemyAt).distance <= 58;
-        final travelFull = _dragTravelDist >= kChargeTravelNeed;
-        if (nearEnemy &&
-            (t.auraReady || travelFull) &&
-            (t.didDragDrop || travelFull) &&
-            !t.shotPassMode) {
+        // Near-enemy without aura = normal bump only — never fake charge FX.
+        if (nearEnemy && auraActive && !t.shotPassMode) {
           t.auraReady = true;
           t.didDragDrop = true;
           t.s1 = S1Phase.hitCharge;
@@ -2364,11 +2429,11 @@ class TaisenGame extends FlameGame {
           if (field[i].troop == TroopType.bow && _dragTravelDist > 8) {
             _cancelBowWindup();
           }
-          // Cavalry: aura from travel; collide = auto 突撃; else fade on stop (update).
+          // Cavalry: aura from travel; charge ONLY if auraActive at contact.
           if (field[i].troop == TroopType.cavalry && _dragTravelDist > 0.08 * kChargeTravelNeed) {
             _matchChargeIndex = i;
             _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-            if (_dragTravelDist >= kChargeTravelNeed) {
+            if (auraActive) {
               for (var e = 0; e < field.length; e++) {
                 if (!isEnemyAt(e)) continue;
                 if ((at - tokenCenter(e)).distance <= 58) {

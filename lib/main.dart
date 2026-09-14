@@ -15,7 +15,7 @@ const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValu
 /// dart-define: DEMO_SHOT=splash|bingfa|s1|match — Simulator readability captures.
 const String kDemoShot = String.fromEnvironment('DEMO_SHOT', defaultValue: '');
 
-/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|charge-aura-live|intercept|intercept-window|bow|bow-idle|bow-attack|cav-idle|cav-attack|stratagem|castle|spear-idle|spear-attack.
+/// dart-define: FEEL_SHOT=drag-live|drag-hit|drag-samefaction|drag-aura|charge-aura-live|charge-no-aura-bump|charge-aura-hit|intercept|intercept-window|bow|bow-idle|bow-attack|cav-idle|cav-attack|stratagem|castle|spear-idle|spear-attack.
 /// drag-live/mid-drag；drag-hit post-突撃；intercept-window = 敵オーラ≥1C 轉身窗；bow = 停~1C 蓄勢；cav/bow-*-sheet idle|attack.
 /// Title lock: on-screen art = branding PNG lockup (三國＋手指＋大戰). Oral/CFBundleDisplayName may stay「三國指大戰」; never Sega「三國志大戦」. Never draw「指」glyph in title art.
 const String kFeelShot = String.fromEnvironment('FEEL_SHOT', defaultValue: '');
@@ -416,6 +416,18 @@ class _TutorialShellState extends State<TutorialShell> {
         // Post-hit after select→drag→drop→aura≥1C→突撃.
         _game.setupFeelDragHitPose();
         _tutorial.forceFeelDragHit();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = false;
+      } else if (kFeelShot == 'charge-no-aura-bump') {
+        // Contact without aura — must NOT show big 「突撃」.
+        _game.setupChargeNoAuraBumpPose();
+        _tutorial.forceChargeNoAuraBump();
+        _bannerFor = TutorialSession.session1;
+        _showSessionBanner = false;
+      } else if (kFeelShot == 'charge-aura-hit') {
+        // Contact with full aura — short flash + 「突撃」.
+        _game.setupChargeAuraHitPose();
+        _tutorial.forceChargeAuraHit();
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = false;
       } else if (kFeelShot == 'charge-aura-live') {

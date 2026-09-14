@@ -38,4 +38,14 @@ void main() {
     expect(c.auraReady, isFalse);
     expect(c.s1, S1Phase.waitAura);
   });
+
+  test('onAutoCharge without aura fails — no fake charge success', () {
+    final c = TutorialController();
+    c.resetToSession1();
+    c.onSelectOwnCavalry();
+    c.onChargeTravelProgress(0.4);
+    expect(c.auraReady, isFalse);
+    c.onAutoCharge();
+    expect(c.s1, S1Phase.failRetry);
+  });
 }
