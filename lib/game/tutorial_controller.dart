@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart';
 
 /// W2 two-session tutorial state machine (C-tick driven externally via [tick]).
 enum TutorialSession { session1, session2, complete }
@@ -239,6 +240,20 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
+
+  /// Safe notify: Flame may call us from GameWidget layout/build.
+  void _notifyUi() {
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.idle ||
+        phase == SchedulerPhase.postFrameCallbacks) {
+      notifyListeners();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        notifyListeners();
+      });
+    }
+  }
+
   /// Arcade: charge aura fills from continuous walk distance (0..1). No teleport.
   void onChargeTravelProgress(double dist01) {
     if (session != TutorialSession.session1) return;
@@ -254,7 +269,7 @@ class TutorialController extends ChangeNotifier {
         s1 = S1Phase.hitCharge;
         tipText = '光環夠喇 — 繼續拖行去撞敵就自動突撃（唔使撳掣）';
         tipSkippable = false;
-        notifyListeners();
+        _notifyUi();
       }
       return;
     }
@@ -262,13 +277,13 @@ class TutorialController extends ChangeNotifier {
       s1 = S1Phase.waitAura;
       tipText = '跟住手指拖行累積氣勢… 鬆手就停，唔會瞬移';
       tipSkippable = false;
-      notifyListeners();
+      _notifyUi();
     } else if (s1 == S1Phase.waitAura) {
       final pct = (d * 10).floor() * 10; // 0/10/20… tip throttle
       final next = '繼續拖行… 氣勢 $pct% — 夠咗再撞敵';
       if (tipText != next) {
         tipText = next;
-        notifyListeners();
+        _notifyUi();
       }
     }
   }

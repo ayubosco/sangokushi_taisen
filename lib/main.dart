@@ -1,5 +1,6 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
@@ -362,21 +363,35 @@ class _TutorialShellState extends State<TutorialShell> {
     // Pause before first Flame tick so tutorial/shots never show drained C.
     _game.clock.pause();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
-    _game.onTutorialChanged = () {
+    void scheduleTutorialRebuild({required bool completeIfShotEmpty}) {
       if (!mounted) return;
-      _maybeShowSessionBanner();
-      setState(() {});
-      if (_tutorial.session == TutorialSession.complete && !kTutorialShot.startsWith('s')) {
-        widget.onComplete();
+      void go() {
+        if (!mounted) return;
+        _maybeShowSessionBanner();
+        setState(() {});
+        if (_tutorial.session != TutorialSession.complete) return;
+        if (completeIfShotEmpty) {
+          if (kTutorialShot.isEmpty) widget.onComplete();
+        } else {
+          if (!kTutorialShot.startsWith('s')) widget.onComplete();
+        }
       }
+      // Flame GameWidget can invoke game.update during LayoutBuilder build
+      // (charge aura travel → TutorialController.notifyListeners). Defer setState.
+      final phase = SchedulerBinding.instance.schedulerPhase;
+      if (phase == SchedulerPhase.idle ||
+          phase == SchedulerPhase.postFrameCallbacks) {
+        go();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) => go());
+      }
+    }
+
+    _game.onTutorialChanged = () {
+      scheduleTutorialRebuild(completeIfShotEmpty: false);
     };
     _tutorial.addListener(() {
-      if (!mounted) return;
-      _maybeShowSessionBanner();
-      setState(() {});
-      if (_tutorial.session == TutorialSession.complete && kTutorialShot.isEmpty) {
-        widget.onComplete();
-      }
+      scheduleTutorialRebuild(completeIfShotEmpty: true);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
