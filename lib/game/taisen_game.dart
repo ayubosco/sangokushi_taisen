@@ -1026,33 +1026,28 @@ class TaisenGame extends FlameGame {
                     t.s1 == S1Phase.waitAura ||
                     t.s1 == S1Phase.hitCharge)))) {
       final drop = dropGuidePoint;
+      // Soft gold landing disc + label — NEVER cyan concentric charge rings.
+      canvas.drawCircle(drop, 22, Paint()..color = FactionColors.gold.withValues(alpha: 0.16));
       canvas.drawCircle(
         drop,
-        24,
+        22,
         Paint()
-          ..color = FactionColors.gold.withValues(alpha: 0.28)
+          ..color = FactionColors.gold.withValues(alpha: 0.55)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.5,
+          ..strokeWidth = 2.0,
       );
-      canvas.drawCircle(drop, 7, Paint()..color = FactionColors.gold.withValues(alpha: 0.8));
+      canvas.drawCircle(drop, 6, Paint()..color = FactionColors.gold.withValues(alpha: 0.9));
       _drawText(canvas, '落點', Offset(drop.dx - 14, drop.dy + 28), FactionColors.gold.withValues(alpha: 0.85), 12);
       if (tutorialOwnIndex != null) {
         final from = tokenCenter(tutorialOwnIndex!);
-        _drawDashedLine(canvas, from, drop, FactionColors.gold.withValues(alpha: 0.65));
+        _drawGoldWaypointGuide(canvas, from, drop, drawLanding: false);
       }
     }
 
-    // Free-match drag guide when dragging own cavalry
+    // Free-match / live drag: gold dashed arrow + soft gold landing disc
+    // (≠ cyan charge rings — Design/UIUX soft-fail lock).
     if (dragging && dragFrom != null && dragTo != null) {
-      _drawDashedLine(canvas, dragFrom!, dragTo!, const Color(0xFF80DEEA));
-      canvas.drawCircle(
-        dragTo!,
-        16,
-        Paint()
-          ..color = const Color(0xFF80DEEA).withValues(alpha: 0.35)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2,
-      );
+      _drawGoldWaypointGuide(canvas, dragFrom!, dragTo!);
     }
 
     // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
@@ -1116,7 +1111,7 @@ class TaisenGame extends FlameGame {
     if (t != null && t.session == TutorialSession.session1) {
       final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
       final pct = (travel01 * 100).round();
-      final aura = t.auraReady || travel01 >= 1.0;
+      final aura = auraActive;
       _drawText(
         canvas,
         'DBG travel $pct%  aura ${aura ? "ON" : "off"}  drag ${dragging ? "Y" : "n"}  ${t.s1.name}',
@@ -1188,6 +1183,45 @@ class TaisenGame extends FlameGame {
       final s = a + dir * t;
       final e = a + dir * math.min(t + 5, len);
       canvas.drawLine(s, e, paint);
+    }
+  }
+
+  /// Gold dashed arrow + soft gold landing disc — waypoint / 落點 guide.
+  /// Distinct from cyan concentric charge rings (Design soft-fail lock).
+  void _drawGoldWaypointGuide(
+    Canvas canvas,
+    Offset from,
+    Offset to, {
+    bool drawLanding = true,
+  }) {
+    final gold = FactionColors.gold;
+    _drawDashedLine(canvas, from, to, gold.withValues(alpha: 0.75));
+    final d = to - from;
+    final len = d.distance;
+    if (len > 8) {
+      final dir = d / len;
+      final perp = Offset(-dir.dy, dir.dx);
+      final tip = to;
+      final left = tip - dir * 14 + perp * 7;
+      final right = tip - dir * 14 - perp * 7;
+      final arrow = Path()
+        ..moveTo(tip.dx, tip.dy)
+        ..lineTo(left.dx, left.dy)
+        ..lineTo(right.dx, right.dy)
+        ..close();
+      canvas.drawPath(arrow, Paint()..color = gold.withValues(alpha: 0.9));
+    }
+    if (drawLanding) {
+      canvas.drawCircle(to, 18, Paint()..color = gold.withValues(alpha: 0.14));
+      canvas.drawCircle(
+        to,
+        18,
+        Paint()
+          ..color = gold.withValues(alpha: 0.55)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+      canvas.drawCircle(to, 5, Paint()..color = gold.withValues(alpha: 0.85));
     }
   }
 
@@ -1366,20 +1400,17 @@ class TaisenGame extends FlameGame {
         final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
         final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
         final live01 = math.max(travel01, match01);
-        final s1Live = t != null &&
-            t.session == TutorialSession.session1 &&
-            (live01 > 0.08 ||
-                t.auraReady ||
-                t.s1 == S1Phase.waitAura ||
-                t.s1 == S1Phase.hitCharge ||
-                t.s1 == S1Phase.tipNext ||
-                t.shotPassMode);
+        // Cyan charge rings ONLY while travel/aura is filling or armed.
+        // aura off (travel≈0, !auraReady) → ZERO cyan rings on Watch (soft-fail lock).
+        // Never force via shotPassMode alone.
+        final fillLive = live01 > 0.08 || (t != null && t.auraReady) || auraActive;
         final freeLive = t == null && live01 > 0.08;
-        final showOwnCharge = s1Live || freeLive || (t == null && live01 <= 0.08); // demo cycle when idle
-        if (showOwnCharge) {
-          final readyBoost = (t != null && t.auraReady) || live01 >= 1.0
+        final idleDemo = t == null && live01 <= 0.08; // free-match idle A-window demo
+        final showOwnCharge = fillLive || idleDemo;
+        if (showOwnCharge && (fillLive || idleDemo)) {
+          final readyBoost = (t != null && t.auraReady) || live01 >= 1.0 || auraActive
               ? 1.0
-              : (freeLive || s1Live ? (0.5 + 0.5 * live01) : 0.85);
+              : (fillLive ? (0.5 + 0.5 * live01) : 0.85);
           final r = (40 + 10 * readyBoost) * ownScale;
           _drawChargeRings(
             canvas,
@@ -1390,11 +1421,10 @@ class TaisenGame extends FlameGame {
             facing: ownFacing,
           );
         }
+        // Enemy Watch charge: idle free-match demo, OR enemyAuraVisible,
+        // OR paired foreshadow while own fill is live — never blanket S1/shotPass when aura off.
         final showEnemyCharge = (t == null && !freeLive) ||
-            (t != null &&
-                (t.enemyAuraVisible ||
-                    t.session == TutorialSession.session1 ||
-                    t.shotPassMode));
+            (t != null && (t.enemyAuraVisible || fillLive));
         if (showEnemyCharge) {
           _drawChargeRings(
             canvas,
@@ -1408,7 +1438,7 @@ class TaisenGame extends FlameGame {
         break;
       case AWindowKind.intercept:
         _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
-        if (t == null || t.enemyAuraVisible || t.shotPassMode) {
+        if (t == null || t.enemyAuraVisible) {
           _drawChargeRings(canvas, enemyC, 26 * enemyScale, const Color(0xFF00E5FF).withValues(alpha: 0.8), whiteCore: true, facing: enemyFacing);
         }
         break;
@@ -1863,8 +1893,10 @@ class TaisenGame extends FlameGame {
           t.s1 == S1Phase.hitCharge ||
           t.s1 == S1Phase.tipNext ||
           dragging;
-      if (show && (travel01 > 0.08 || t.auraReady || t.shotPassMode)) {
-        final readyBoost = t.auraReady
+      // Cyan wind rings ONLY while travel fill / aura armed — NEVER shotPassMode alone.
+      // Melee (aura off) = no rings; optional faint select frame lives on the token chrome.
+      if (show && (travel01 > 0.08 || t.auraReady || auraActive)) {
+        final readyBoost = (t.auraReady || auraActive)
             ? 1.0
             : (0.5 + 0.5 * travel01);
         _drawChargeRings(
@@ -1884,7 +1916,7 @@ class TaisenGame extends FlameGame {
         _drawInterceptStance(canvas, c, 44, const Color(0xFFB2EBF2).withValues(alpha: 0.88), facing: ownFacing);
         return;
       }
-      if (isEnemy && (t.enemyAuraVisible || t.shotPassMode)) {
+      if (isEnemy && t.enemyAuraVisible) {
         _drawChargeRings(
           canvas,
           c,
