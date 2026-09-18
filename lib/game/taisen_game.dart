@@ -77,6 +77,13 @@ class TaisenGame extends FlameGame {
   /// Last move dir while dragging — sharp turn fades aura like stop.
   Offset? _lastDragDir;
   static const double kChargeTravelNeed = 120.0; // px of walked travel to fill charge aura
+  /// Travel fraction when cyan-white charge rings first show (field + Watch).
+  /// Lower = earlier readability during run-up (Qingchang1 PM).
+  static const double kChargeRingShowTravel01 = 0.04; // was 0.08
+  /// Min alpha floor for charge ring strokes (brighter mid-fill trail).
+  static const double kChargeRingBaseAlphaMin = 0.78; // was ~0.55 clamp in _drawChargeRings
+  /// 「突撃」 flash duration seconds (non-blocking, hard-cap ≤1.0s).
+  static const double kChargeFlashSec = 0.85;
   double get debugTravel01 => (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
   /// Cyan-white charge aura fully armed (travel ownership) — charge FX requires this at contact.
   bool get auraActive {
@@ -422,8 +429,8 @@ class TaisenGame extends FlameGame {
     if (tutorialOwnIndex != null) {
       final i = tutorialOwnIndex!;
       selectedIndex = i;
-      // Mid-fill (~70%) so cyan-white rings read before full 突撃 ready.
-      _dragTravelDist = kChargeTravelNeed * 0.70;
+      // Mid-fill (~45%) so cyan-white rings read earlier before full 突撃 ready.
+      _dragTravelDist = kChargeTravelNeed * 0.45;
       ownFacing = -0.35; // slight turn so Watch facing sync is obvious
       final from = tokenCenter(i);
       final drop = dropGuidePoint;
@@ -768,7 +775,7 @@ class TaisenGame extends FlameGame {
                 _matchChargeC = 1.0;
               } else if (_matchChargeIndex == i) {
                 _matchChargeC = travel01;
-              } else if (travel01 > 0.08) {
+              } else if (travel01 > kChargeRingShowTravel01) {
                 _matchChargeIndex = i;
                 _matchChargeC = travel01;
               }
@@ -817,7 +824,7 @@ class TaisenGame extends FlameGame {
             }
           }
         }
-        if (fade01 <= 0.08 &&
+        if (fade01 <= kChargeRingShowTravel01 &&
             (coach.s1 == S1Phase.waitAura || coach.s1 == S1Phase.dragGuide)) {
           if (coach.s1 != S1Phase.dragGuide) {
             coach.s1 = S1Phase.dragGuide;
@@ -829,7 +836,7 @@ class TaisenGame extends FlameGame {
           }
         }
       } else if (coach == null) {
-        if (fade01 > 0.08) {
+        if (fade01 > kChargeRingShowTravel01) {
           _matchChargeIndex = selectedIndex ?? _matchChargeIndex;
           _matchChargeC = fade01;
         } else {
@@ -841,14 +848,14 @@ class TaisenGame extends FlameGame {
 
     // Every frame: Watch telegraph follows live field charge facing + aura (not demo cycle alone).
     final liveCharge01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-    final liveChargeOn = liveCharge01 > 0.08 ||
+    final liveChargeOn = liveCharge01 > kChargeRingShowTravel01 ||
         (coach != null &&
             coach.session == TutorialSession.session1 &&
             (coach.auraReady ||
                 coach.s1 == S1Phase.waitAura ||
                 coach.s1 == S1Phase.hitCharge ||
                 coach.s1 == S1Phase.tipNext)) ||
-        (coach == null && _matchChargeIndex != null && _matchChargeC > 0.08);
+        (coach == null && _matchChargeIndex != null && _matchChargeC > kChargeRingShowTravel01);
     if (coach != null) {
       if (coach.session == TutorialSession.session1 &&
           (liveChargeOn ||
@@ -1124,15 +1131,27 @@ class TaisenGame extends FlameGame {
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
       if (_hitFlashLabel.isNotEmpty) {
-        // CHARGE / intercept / etc — big flytext
-        _drawFatFloatText(canvas, _hitFlashLabel, Offset(c.dx, c.dy - 78));
+        // CHARGE / intercept / etc — big flytext; 「突撃」 punchier scale/alpha
+        final isChargePunch = _hitFlashLabel == '突撃';
+        _drawFatFloatText(
+          canvas,
+          _hitFlashLabel,
+          Offset(c.dx, c.dy - (isChargePunch ? 92 : 78)),
+          alpha: 1,
+          fontSize: isChargePunch ? 36 : 22,
+        );
         canvas.drawCircle(
           c,
-          42,
+          isChargePunch ? 58 : 42,
           Paint()
-            ..color = const Color(0xFF80DEEA).withValues(alpha: (_hitFlashLeft * 2).clamp(0, 0.55))
+            ..color = const Color(0xFF80DEEA).withValues(
+              alpha: (isChargePunch
+                      ? (_hitFlashLeft / kChargeFlashSec) * 0.85
+                      : (_hitFlashLeft * 2))
+                  .clamp(0, isChargePunch ? 0.85 : 0.55),
+            )
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 3.5,
+            ..strokeWidth = isChargePunch ? 5.5 : 3.5,
         );
       } else {
         // MELEE light bump — soft ring only, never 「突撃」
@@ -1403,14 +1422,14 @@ class TaisenGame extends FlameGame {
         // Cyan charge rings ONLY while travel/aura is filling or armed.
         // aura off (travel≈0, !auraReady) → ZERO cyan rings on Watch (soft-fail lock).
         // Never force via shotPassMode alone.
-        final fillLive = live01 > 0.08 || (t != null && t.auraReady) || auraActive;
-        final freeLive = t == null && live01 > 0.08;
-        final idleDemo = t == null && live01 <= 0.08; // free-match idle A-window demo
+        final fillLive = live01 > kChargeRingShowTravel01 || (t != null && t.auraReady) || auraActive;
+        final freeLive = t == null && live01 > kChargeRingShowTravel01;
+        final idleDemo = t == null && live01 <= kChargeRingShowTravel01; // free-match idle A-window demo
         final showOwnCharge = fillLive || idleDemo;
         if (showOwnCharge && (fillLive || idleDemo)) {
           final readyBoost = (t != null && t.auraReady) || live01 >= 1.0 || auraActive
               ? 1.0
-              : (fillLive ? (0.5 + 0.5 * live01) : 0.85);
+              : (fillLive ? (0.72 + 0.28 * live01) : 0.9);
           final r = (40 + 10 * readyBoost) * ownScale;
           _drawChargeRings(
             canvas,
@@ -1855,10 +1874,10 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
-  void _drawFatFloatText(Canvas canvas, String text, Offset center, {double alpha = 1}) {
+  void _drawFatFloatText(Canvas canvas, String text, Offset center, {double alpha = 1, double fontSize = 22}) {
     final style = TextStyle(
       color: Colors.white.withValues(alpha: alpha),
-      fontSize: 22,
+      fontSize: fontSize,
       fontWeight: FontWeight.w900,
       letterSpacing: 1.2,
       shadows: [
@@ -1895,10 +1914,10 @@ class TaisenGame extends FlameGame {
           dragging;
       // Cyan wind rings ONLY while travel fill / aura armed — NEVER shotPassMode alone.
       // Melee (aura off) = no rings; optional faint select frame lives on the token chrome.
-      if (show && (travel01 > 0.08 || t.auraReady || auraActive)) {
+      if (show && (travel01 > kChargeRingShowTravel01 || t.auraReady || auraActive)) {
         final readyBoost = (t.auraReady || auraActive)
             ? 1.0
-            : (0.5 + 0.5 * travel01);
+            : (0.72 + 0.28 * travel01);
         _drawChargeRings(
           canvas,
           c,
@@ -1933,7 +1952,7 @@ class TaisenGame extends FlameGame {
       case TroopType.cavalry:
         // 「見環先撞」: bright aura only after drag-drop while waiting ≥1C.
         if (_matchChargeIndex == index) {
-          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.55 + 0.45 * (_matchChargeC.clamp(0, 1)));
+          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.72 + 0.28 * (_matchChargeC.clamp(0, 1)));
           _drawChargeRings(
             canvas,
             c,
@@ -1998,21 +2017,22 @@ class TaisenGame extends FlameGame {
     double facing = 0,
   }) {
     final t = (_pulse % 1.2) / 1.2;
-    // Bright cyan-white wind rings — readable on both field + Watch foreshadow.
-    final baseA = color.a.clamp(0.55, 1.0);
+    // Brighter cyan-white wind rings + longer trail (Qingchang1 PM readability).
+    // Gold waypoint/landing disc stays separate (_drawGoldWaypointGuide).
+    final baseA = color.a.clamp(kChargeRingBaseAlphaMin, 1.0);
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
     canvas.translate(-c.dx, -c.dy);
-    for (var i = 0; i < 3; i++) {
-      final r = baseR + i * 14 + t * 18;
+    for (var i = 0; i < 4; i++) {
+      final r = baseR + i * 13 + t * 20;
       canvas.drawCircle(
         c,
         r,
         Paint()
-          ..color = color.withValues(alpha: (baseA - i * 0.1).clamp(0.28, 1.0))
+          ..color = color.withValues(alpha: (baseA - i * 0.08).clamp(0.42, 1.0))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 4.2 - i * 0.4,
+          ..strokeWidth = 5.0 - i * 0.35,
       );
     }
     if (whiteCore) {
@@ -2020,30 +2040,30 @@ class TaisenGame extends FlameGame {
         c,
         baseR - 2 + t * 8,
         Paint()
-          ..color = Colors.white.withValues(alpha: 0.5 + 0.18 * math.sin(_pulse * 5))
+          ..color = Colors.white.withValues(alpha: 0.68 + 0.2 * math.sin(_pulse * 5))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.2,
+          ..strokeWidth = 3.8,
       );
     }
     // Directional charge wave ahead of facing (0 = up).
     final wave = Path()
       ..moveTo(c.dx - baseR * 0.95, c.dy - baseR * 0.05)
-      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.7, c.dx + baseR * 0.95, c.dy - baseR * 0.05);
+      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.85, c.dx + baseR * 0.95, c.dy - baseR * 0.05);
     canvas.drawPath(
       wave,
       Paint()
-        ..color = color.withValues(alpha: (baseA * 0.9).clamp(0.4, 1.0))
+        ..color = color.withValues(alpha: (baseA * 0.95).clamp(0.55, 1.0))
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.0,
+        ..strokeWidth = 4.6,
     );
     for (var i = 0; i < 8; i++) {
       final a = i * math.pi / 4 + _pulse * 0.35;
       canvas.drawLine(
         Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
-        Offset(c.dx + math.cos(a) * (baseR + 28), c.dy + math.sin(a) * (baseR + 28)),
+        Offset(c.dx + math.cos(a) * (baseR + 36), c.dy + math.sin(a) * (baseR + 36)),
         Paint()
-          ..color = color.withValues(alpha: (baseA * 0.7).clamp(0.28, 0.9))
-          ..strokeWidth = 2.2,
+          ..color = color.withValues(alpha: (baseA * 0.82).clamp(0.4, 0.95))
+          ..strokeWidth = 2.6,
       );
     }
     canvas.restore();
@@ -2461,7 +2481,7 @@ class TaisenGame extends FlameGame {
             _cancelBowWindup();
           }
           // Cavalry: keep aura telegraph; engagement resolves MARCH/MELEE/CHARGE on contact.
-          if (field[i].troop == TroopType.cavalry && _dragTravelDist > 0.08 * kChargeTravelNeed) {
+          if (field[i].troop == TroopType.cavalry && _dragTravelDist > kChargeRingShowTravel01 * kChargeTravelNeed) {
             _matchChargeIndex = i;
             _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
           }
@@ -2478,10 +2498,13 @@ class TaisenGame extends FlameGame {
   void flashHit(int index, String label) {
     _hitFlashIndex = index;
     _hitFlashLabel = label;
-    // Big board text: ~0.3C (~0.9s) and hard-cap ≤1.0s (UIUX lock, non-blocking).
-    final flashSec = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
+    // Big board text punch ≤1.0s, non-blocking (UIUX lock).
+    // 「突撃」 uses kChargeFlashSec (0.85s); others keep ~0.3C cap.
+    final flashSec = label == '突撃'
+        ? kChargeFlashSec
+        : math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
     _hitFlashLeft = flashSec;
-    _shakeLeft = flashSec;
+    _shakeLeft = label == '突撃' ? math.min(0.45, flashSec) : flashSec;
   }
 
   /// MELEE: real contact without aura — light bump / micro-shake, NEVER big 「突撃」.
