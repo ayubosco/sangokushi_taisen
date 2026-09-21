@@ -561,27 +561,58 @@ class _TutorialShellState extends State<TutorialShell> {
     // ignore: avoid_print
     print('CHARGE_AUTO_VERIFY start from=$from to=$to shotPass=${_tutorial.shotPassMode}');
     _game.panStart(from);
+    // Waypoint jumps ahead immediately — body must lag (not lerp-glue to finger).
+    _game.panUpdate(to);
     setState(() {});
-    for (var i = 1; i <= 60; i++) {
+    // ignore: avoid_print
+    print(
+      'CHARGE_AUTO_VERIFY WAYPOINT_PROOF body=${_game.tokenCenter(own)} '
+      'landing=${_game.dragTo} lag=${_game.debugWaypointLagPx.toStringAsFixed(1)} '
+      'feel=${_game.debugChargeFeel}',
+    );
+    var loggedMid = false;
+    var loggedLit = false;
+    for (var i = 1; i <= 90; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 40));
       if (!mounted || !_game.dragging) break;
-      final t = i / 60.0;
-      _game.panUpdate(Offset.lerp(from, to, t)!);
+      final travel = _game.debugTravel01;
+      final aura = _game.auraActive;
+      final lag = _game.debugWaypointLagPx;
+      if (!loggedMid && travel >= 0.28 && travel < 0.92 && !aura) {
+        loggedMid = true;
+        // ignore: avoid_print
+        print(
+          'CHARGE_AUTO_VERIFY MID_PROOF travel=${(travel * 100).round()}% '
+          'auraActive=false rings=${_game.showChargeCyanRings} '
+          'lag=${lag.toStringAsFixed(1)} flash=${_game.debugHitLabel} '
+          'feel=${_game.debugChargeFeel} s1=${_tutorial.s1}',
+        );
+      }
+      if (!loggedLit && aura) {
+        loggedLit = true;
+        // ignore: avoid_print
+        print(
+          'CHARGE_AUTO_VERIFY LIT_PROOF travel=${(travel * 100).round()}% '
+          'auraActive=true rings=${_game.showChargeCyanRings} '
+          'flash=${_game.debugHitLabel} feel=${_game.debugChargeFeel} s1=${_tutorial.s1}',
+        );
+      }
       if (i % 15 == 0) {
         // ignore: avoid_print
         print(
-          'CHARGE_AUTO_VERIFY tick travel=${(_game.debugTravel01 * 100).round()}% '
-          'aura=${_tutorial.auraReady} s1=${_tutorial.s1}',
+          'CHARGE_AUTO_VERIFY tick travel=${(travel * 100).round()}% '
+          'auraActive=$aura lag=${lag.toStringAsFixed(1)} s1=${_tutorial.s1}',
         );
       }
     }
     // Hold at target so unit finishes walk + collide.
-    await Future<void>.delayed(const Duration(milliseconds: 2800));
+    await Future<void>.delayed(const Duration(milliseconds: 1800));
     if (!mounted) return;
     // ignore: avoid_print
     print(
-      'CHARGE_AUTO_VERIFY mid travel=${(_game.debugTravel01 * 100).round()}% '
-      'aura=${_tutorial.auraReady} s1=${_tutorial.s1} drag=${_game.dragging}',
+      'CHARGE_AUTO_VERIFY hold travel=${(_game.debugTravel01 * 100).round()}% '
+      'auraActive=${_game.auraActive} flash=${_game.debugHitLabel} '
+      'lag=${_game.debugWaypointLagPx.toStringAsFixed(1)} drag=${_game.dragging}',
     );
     if (_game.dragging) {
       _game.panEnd(_game.dragTo ?? to);
@@ -590,7 +621,7 @@ class _TutorialShellState extends State<TutorialShell> {
     // ignore: avoid_print
     print(
       'CHARGE_AUTO_VERIFY end travel=${(_game.debugTravel01 * 100).round()}% '
-      'aura=${_tutorial.auraReady} s1=${_tutorial.s1} flash=${_game.debugHitLabel}',
+      'auraActive=${_game.auraActive} s1=${_tutorial.s1} flash=${_game.debugHitLabel}',
     );
     // Leave Bosco on clean 場1 gold 趙雲 after proof.
     await Future<void>.delayed(const Duration(milliseconds: 1200));
