@@ -80,8 +80,14 @@ class TaisenGame extends FlameGame {
   /// Travel fraction when cyan-white charge rings first show (field + Watch).
   /// Lower = earlier readability during run-up (Qingchang1 PM).
   static const double kChargeRingShowTravel01 = 0.04; // was 0.08
-  /// Min alpha floor for charge ring strokes (brighter mid-fill trail).
-  static const double kChargeRingBaseAlphaMin = 0.78; // was ~0.55 clamp in _drawChargeRings
+  /// Fully lit (auraActive): max cyan-white punch alpha floor.
+  /// Charging must NEVER reuse this floor — soft-fail: mid-drag looked "already lit".
+  static const double kChargeRingLitAlphaMin = 0.78;
+  /// Charging (!auraActive): faint progress alphas (fill01 scales min→min+span).
+  static const double kChargeRingChargingAlphaMin = 0.16;
+  static const double kChargeRingChargingAlphaSpan = 0.26; // ~0.42 at fill≈1 before snap to lit
+  static const double kChargeRingChargingStroke = 2.15;
+  static const double kChargeRingLitStroke = 5.0;
   /// 「突撃」 flash duration seconds (non-blocking, hard-cap ≤1.0s).
   static const double kChargeFlashSec = 0.85;
   double get debugTravel01 => (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
@@ -1119,9 +1125,13 @@ class TaisenGame extends FlameGame {
       final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
       final pct = (travel01 * 100).round();
       final aura = auraActive;
+      // Match field look: off / charging (travel fill) / ON (auraActive).
+      final auraDbg = aura
+          ? 'ON'
+          : (travel01 > kChargeRingShowTravel01 ? 'charging' : 'off');
       _drawText(
         canvas,
-        'DBG travel $pct%  aura ${aura ? "ON" : "off"}  drag ${dragging ? "Y" : "n"}  ${t.s1.name}',
+        'DBG travel $pct%  aura $auraDbg  drag ${dragging ? "Y" : "n"}  ${t.s1.name}',
         Offset(12, fieldTop + 36),
         const Color(0xFF00E5FF),
         11,
@@ -1427,17 +1437,23 @@ class TaisenGame extends FlameGame {
         final idleDemo = t == null && live01 <= kChargeRingShowTravel01; // free-match idle A-window demo
         final showOwnCharge = fillLive || idleDemo;
         if (showOwnCharge && (fillLive || idleDemo)) {
-          final readyBoost = (t != null && t.auraReady) || live01 >= 1.0 || auraActive
-              ? 1.0
-              : (fillLive ? (0.72 + 0.28 * live01) : 0.9);
+          // idleDemo = free-match A-window foreshadow (armed look OK).
+          // Live fill: charging = faint progress; auraActive = max punch.
+          final lit = idleDemo ||
+              auraActive ||
+              live01 >= 1.0 ||
+              (t != null && t.auraReady);
+          final readyBoost = lit ? 1.0 : (0.35 + 0.25 * live01);
           final r = (40 + 10 * readyBoost) * ownScale;
           _drawChargeRings(
             canvas,
             ownC,
             r,
-            const Color(0xFF00E5FF).withValues(alpha: (0.9 * readyBoost).clamp(0.45, 1.0)),
-            whiteCore: true,
+            const Color(0xFF00E5FF),
+            whiteCore: lit,
             facing: ownFacing,
+            fill01: live01 <= 0 ? 0.55 : live01,
+            fullyLit: lit,
           );
         }
         // Enemy Watch charge: idle free-match demo, OR enemyAuraVisible,
@@ -1915,16 +1931,16 @@ class TaisenGame extends FlameGame {
       // Cyan wind rings ONLY while travel fill / aura armed — NEVER shotPassMode alone.
       // Melee (aura off) = no rings; optional faint select frame lives on the token chrome.
       if (show && (travel01 > kChargeRingShowTravel01 || t.auraReady || auraActive)) {
-        final readyBoost = (t.auraReady || auraActive)
-            ? 1.0
-            : (0.72 + 0.28 * travel01);
+        final lit = t.auraReady || auraActive;
         _drawChargeRings(
           canvas,
           c,
-          56,
-          const Color(0xFF00E5FF).withValues(alpha: (0.95 * readyBoost).clamp(0.5, 1.0)),
-          whiteCore: true,
+          lit ? 56.0 : (48.0 + 6.0 * travel01),
+          const Color(0xFF00E5FF),
+          whiteCore: lit,
           facing: ownFacing,
+          fill01: travel01,
+          fullyLit: lit,
         );
       }
       return;
@@ -1952,26 +1968,32 @@ class TaisenGame extends FlameGame {
       case TroopType.cavalry:
         // 「見環先撞」: bright aura only after drag-drop while waiting ≥1C.
         if (_matchChargeIndex == index) {
-          final readyBoost = _matchChargeC >= 1.0 ? 1.0 : (0.72 + 0.28 * (_matchChargeC.clamp(0, 1)));
+          final fill = _matchChargeC.clamp(0.0, 1.0);
+          final lit = fill >= 1.0;
           _drawChargeRings(
             canvas,
             c,
-            54,
-            const Color(0xFF00E5FF).withValues(alpha: (0.95 * readyBoost).clamp(0.5, 1.0)),
-            whiteCore: true,
+            lit ? 54.0 : (46.0 + 6.0 * fill),
+            const Color(0xFF00E5FF),
+            whiteCore: lit,
             facing: ownFacing,
+            fill01: fill,
+            fullyLit: lit,
           );
         }
         // Enemy charge aura for intercept turn window (≥1C visible).
         if (isEnemy && _matchEnemyChargeIndex == index) {
-          final readyBoost = _matchEnemyChargeC >= 1.0 ? 1.0 : (0.55 + 0.4 * (_matchEnemyChargeC.clamp(0, 1)));
+          final fill = _matchEnemyChargeC.clamp(0.0, 1.0);
+          final lit = fill >= 1.0;
           _drawChargeRings(
             canvas,
             c,
-            42,
-            const Color(0xFF00E5FF).withValues(alpha: 0.85 * readyBoost),
-            whiteCore: true,
+            lit ? 42.0 : (36.0 + 5.0 * fill),
+            const Color(0xFF00E5FF),
+            whiteCore: lit,
             facing: enemyFacing,
+            fill01: fill,
+            fullyLit: lit,
           );
         }
         break;
@@ -2015,55 +2037,107 @@ class TaisenGame extends FlameGame {
     Color color, {
     bool whiteCore = false,
     double facing = 0,
+    /// Travel / charge fill 0..1 — drives charging partial arcs.
+    double fill01 = 1.0,
+    /// Research/UIUX lock: true = max cyan-white punch (auraActive / can 突撃).
+    /// false = charging faint/thin/gradual progress — NEVER lit-level rings.
+    bool fullyLit = true,
   }) {
     final t = (_pulse % 1.2) / 1.2;
-    // Brighter cyan-white wind rings + longer trail (Qingchang1 PM readability).
+    final fill = fill01.clamp(0.0, 1.0);
     // Gold waypoint/landing disc stays separate (_drawGoldWaypointGuide).
-    final baseA = color.a.clamp(kChargeRingBaseAlphaMin, 1.0);
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
     canvas.translate(-c.dx, -c.dy);
-    for (var i = 0; i < 4; i++) {
-      final r = baseR + i * 13 + t * 20;
-      canvas.drawCircle(
-        c,
-        r,
+
+    if (fullyLit) {
+      // Fully lit: bright thick cyan-white rings (Qingchang1 punch level).
+      final baseA = (color.a > 0.01 ? color.a : 1.0).clamp(kChargeRingLitAlphaMin, 1.0);
+      for (var i = 0; i < 4; i++) {
+        final r = baseR + i * 13 + t * 20;
+        canvas.drawCircle(
+          c,
+          r,
+          Paint()
+            ..color = color.withValues(alpha: (baseA - i * 0.08).clamp(0.42, 1.0))
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = kChargeRingLitStroke - i * 0.35,
+        );
+      }
+      if (whiteCore) {
+        canvas.drawCircle(
+          c,
+          baseR - 2 + t * 8,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.68 + 0.2 * math.sin(_pulse * 5))
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3.8,
+        );
+      }
+      final wave = Path()
+        ..moveTo(c.dx - baseR * 0.95, c.dy - baseR * 0.05)
+        ..quadraticBezierTo(c.dx, c.dy - baseR * 1.85, c.dx + baseR * 0.95, c.dy - baseR * 0.05);
+      canvas.drawPath(
+        wave,
         Paint()
-          ..color = color.withValues(alpha: (baseA - i * 0.08).clamp(0.42, 1.0))
+          ..color = color.withValues(alpha: (baseA * 0.95).clamp(0.55, 1.0))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 5.0 - i * 0.35,
+          ..strokeWidth = 4.6,
       );
-    }
-    if (whiteCore) {
-      canvas.drawCircle(
-        c,
-        baseR - 2 + t * 8,
+      for (var i = 0; i < 8; i++) {
+        final a = i * math.pi / 4 + _pulse * 0.35;
+        canvas.drawLine(
+          Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
+          Offset(c.dx + math.cos(a) * (baseR + 36), c.dy + math.sin(a) * (baseR + 36)),
+          Paint()
+            ..color = color.withValues(alpha: (baseA * 0.82).clamp(0.4, 0.95))
+            ..strokeWidth = 2.6,
+        );
+      }
+    } else {
+      // Charging: faint/thin incomplete arcs — readable progress, not full-ready punch.
+      final baseA = kChargeRingChargingAlphaMin + kChargeRingChargingAlphaSpan * fill;
+      final sweep = (math.pi * 2 * (0.18 + 0.82 * fill)).clamp(0.35, math.pi * 2);
+      final start = -math.pi / 2 + _pulse * 0.55;
+      final ringCount = fill < 0.35 ? 2 : 3;
+      for (var i = 0; i < ringCount; i++) {
+        final r = baseR + i * 11 + t * 10;
+        final a = (baseA - i * 0.05).clamp(0.10, 0.48);
+        canvas.drawArc(
+          Rect.fromCircle(center: c, radius: r),
+          start + i * 0.35,
+          sweep,
+          false,
+          Paint()
+            ..color = color.withValues(alpha: a)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = kChargeRingChargingStroke - i * 0.25
+            ..strokeCap = StrokeCap.round,
+        );
+      }
+      // Soft tip of progress — no thick white core until fully lit.
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: baseR - 2 + t * 4),
+        start,
+        sweep * 0.92,
+        false,
         Paint()
-          ..color = Colors.white.withValues(alpha: 0.68 + 0.2 * math.sin(_pulse * 5))
+          ..color = Colors.white.withValues(alpha: (0.12 + 0.22 * fill))
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.8,
+          ..strokeWidth = 1.6
+          ..strokeCap = StrokeCap.round,
       );
-    }
-    // Directional charge wave ahead of facing (0 = up).
-    final wave = Path()
-      ..moveTo(c.dx - baseR * 0.95, c.dy - baseR * 0.05)
-      ..quadraticBezierTo(c.dx, c.dy - baseR * 1.85, c.dx + baseR * 0.95, c.dy - baseR * 0.05);
-    canvas.drawPath(
-      wave,
-      Paint()
-        ..color = color.withValues(alpha: (baseA * 0.95).clamp(0.55, 1.0))
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.6,
-    );
-    for (var i = 0; i < 8; i++) {
-      final a = i * math.pi / 4 + _pulse * 0.35;
-      canvas.drawLine(
-        Offset(c.dx + math.cos(a) * (baseR - 6), c.dy + math.sin(a) * (baseR - 6)),
-        Offset(c.dx + math.cos(a) * (baseR + 36), c.dy + math.sin(a) * (baseR + 36)),
+      // Shorter, dimmer foreshadow wave (still ≠ gold waypoint).
+      final wave = Path()
+        ..moveTo(c.dx - baseR * 0.7, c.dy - baseR * 0.02)
+        ..quadraticBezierTo(c.dx, c.dy - baseR * (1.1 + 0.4 * fill), c.dx + baseR * 0.7, c.dy - baseR * 0.02);
+      canvas.drawPath(
+        wave,
         Paint()
-          ..color = color.withValues(alpha: (baseA * 0.82).clamp(0.4, 0.95))
-          ..strokeWidth = 2.6,
+          ..color = color.withValues(alpha: (baseA * 0.85).clamp(0.12, 0.4))
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
       );
     }
     canvas.restore();
