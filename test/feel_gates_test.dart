@@ -1,13 +1,20 @@
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 import 'package:sangokushi_taisen/game/tutorial_controller.dart';
 
+TaisenGame readyGame({TutorialController? tutorial}) {
+  final g = TaisenGame(tutorial: tutorial);
+  g.onGameResize(Vector2(390, 844));
+  return g;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('waypoint: panUpdate does not teleport body; pursuit lags gold landing', () {
-    final g = TaisenGame();
+    final g = readyGame();
     g.setupSession1Field();
     final start = g.tokenCenter(0);
     g.panStart(start);
@@ -29,7 +36,7 @@ void main() {
   });
 
   test('watch live-sync: mapped token moves when field body moves', () {
-    final g = TaisenGame();
+    final g = readyGame();
     g.setupSession1Field();
     const band = Rect.fromLTWH(0, 0, 390, 80);
     final before = g.mapFieldToWatch(g.tokenCenter(0), band);
@@ -42,14 +49,14 @@ void main() {
   });
 
   test('BINARY: mid charging has zero cyan; full travel is lit', () {
-    final mid = TaisenGame();
+    final mid = readyGame();
     mid.setupChargeAuraLivePose();
     expect(mid.debugTravel01, closeTo(0.45, 0.02));
     expect(mid.auraActive, isFalse);
     expect(mid.showChargeCyanRings, isFalse);
     expect(mid.debugChargeFeel, 'charging');
 
-    final lit = TaisenGame();
+    final lit = readyGame();
     lit.setupChargeAuraHitPose();
     expect(lit.auraActive, isTrue);
     expect(lit.showChargeCyanRings, isTrue);
@@ -59,13 +66,13 @@ void main() {
 
   test('BINARY: aura snap flashes 氣勢, not 突撃, when no contact', () {
     final coach = TutorialController()..resetToSession1();
-    final g = TaisenGame(tutorial: coach);
+    final g = readyGame(tutorial: coach);
     g.setupSession1Field();
     coach.onSelectOwnCavalry();
     final start = g.tokenCenter(0);
     g.panStart(start);
     // Walk away from the enemy so travel fills without melee contact.
-    g.panUpdate(Offset(40, start.dy + 90));
+    g.panUpdate(Offset(40, start.dy + 160));
     var flipped = false;
     for (var i = 0; i < 80; i++) {
       g.debugStepPursuit(0.05);
