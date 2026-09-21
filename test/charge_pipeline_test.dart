@@ -15,7 +15,8 @@ void main() {
     expect(c.auraReady, isFalse);
 
     c.onChargeTravelProgress(0.55);
-    expect(c.tipText!.contains('氣勢'), isTrue);
+    expect(c.tipText!.contains('蓄緊'), isTrue);
+    expect(c.tipText!.contains('突撃'), isFalse);
 
     c.onChargeTravelProgress(1.0);
     expect(c.auraReady, isTrue);

@@ -277,7 +277,7 @@ class TutorialController extends ChangeNotifier {
         auraReady = true;
         didDragDrop = true;
         s1 = S1Phase.hitCharge;
-        tipText = '光環夠喇 — 繼續拖行去撞敵就自動突撃（唔使撳掣）';
+        tipText = '氣勢 — 光環亮咗，繼續拖行撞敵就自動突撃';
         tipSkippable = false;
         _notifyUi();
       }
@@ -285,12 +285,12 @@ class TutorialController extends ChangeNotifier {
     }
     if (s1 == S1Phase.dragGuide && d > 0.12) {
       s1 = S1Phase.waitAura;
-      tipText = '跟住手指拖行累積氣勢… 鬆手就停，唔會瞬移';
+      tipText = '蓄緊 ${(d * 100).round()}% — 未亮唔好撞';
       tipSkippable = false;
       _notifyUi();
     } else if (s1 == S1Phase.waitAura) {
       final pct = (d * 10).floor() * 10; // 0/10/20… tip throttle
-      final next = '繼續拖行… 氣勢 $pct% — 夠咗再撞敵';
+      final next = '蓄緊 $pct%';
       if (tipText != next) {
         tipText = next;
         _notifyUi();
@@ -477,7 +477,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 0.7;
     auraReady = false;
     didDragDrop = true;
-    tipText = '行路中氣勢光環 — 場同 Watch 都要見青白環';
+    tipText = '蓄緊中 — 場同 Watch 都未見青白環';
     tipSkippable = false;
     failed = false;
     notifyListeners();
@@ -490,7 +490,7 @@ class TutorialController extends ChangeNotifier {
     phaseC = 0.7;
     auraReady = false;
     didDragDrop = true;
-    tipText = '連續拖行中 — 青白氣場環（未滿亦要見）';
+    tipText = '蓄緊中 — 未亮零青環；部隊跟落點行，唔會瞬移';
     tipSkippable = false;
     failed = false;
     notifyListeners();
