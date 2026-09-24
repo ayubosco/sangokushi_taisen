@@ -103,7 +103,7 @@ class _AppRootState extends State<AppRoot> {
     if (kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
-    } else if (kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+    } else if (kSpeedCompareVerify || kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       _selectedBingfa = '火計';
     }
   }
@@ -122,7 +122,7 @@ class _AppRootState extends State<AppRoot> {
         kDemoShot == 'match') {
       return _AppStage.match;
     }
-    if (kChargeAutoVerify || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
+    if (kSpeedCompareVerify || kChargeAutoVerify || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
       return _AppStage.tutorial;
     }
     // Simulator demo default: splash → 兵法 → tutorial
