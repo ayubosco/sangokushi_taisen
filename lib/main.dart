@@ -27,6 +27,11 @@ const String kLiveVerify = String.fromEnvironment('LIVE_VERIFY', defaultValue: '
 const bool kChargeAutoVerify =
     bool.fromEnvironment('CHARGE_AUTO_VERIFY', defaultValue: false);
 
+/// dart-define: SPEED_COMPARE_VERIFY=true — same-distance waypoint per troop type.
+/// Logs travel % over wall time. Not a shot mode (never sets shotPassMode / DEMO_SHOT).
+const bool kSpeedCompareVerify =
+    bool.fromEnvironment('SPEED_COMPARE_VERIFY', defaultValue: false);
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -538,10 +543,110 @@ class _TutorialShellState extends State<TutorialShell> {
         if (kDemoShot == 's1') return; // keep title visible for shot
         setState(() => _showSessionBanner = false);
       });
-      if (kChargeAutoVerify) {
+      if (kSpeedCompareVerify) {
+        Future<void>.delayed(const Duration(milliseconds: 900), _runSpeedCompareVerify);
+      } else if (kChargeAutoVerify) {
         Future<void>.delayed(const Duration(milliseconds: 900), _runChargeAutoVerify);
       }
     });
+  }
+
+  /// Same start, same 落點, one troop at a time. Prints travel % so cav vs spear
+  /// is measurable without a shot freeze.
+  Future<void> _runSpeedCompareVerify() async {
+    if (!mounted) return;
+    if (_tutorial.shotPassMode ||
+        kFeelShot.isNotEmpty ||
+        kDemoShot.isNotEmpty ||
+        kTutorialShot.isNotEmpty) {
+      // ignore: avoid_print
+      print('SPEED_COMPARE skip shotPass=${_tutorial.shotPassMode}');
+      return;
+    }
+    const troops = <TroopType>[
+      TroopType.cavalry,
+      TroopType.bow,
+      TroopType.spear,
+      TroopType.infantry,
+      TroopType.siege,
+    ];
+    final etaMs = <TroopType, int>{};
+    for (final troop in troops) {
+      if (!mounted) return;
+      final lag = _game.debugArmSpeedCompare(troop);
+      final rel = TaisenGame.pursuitRelToCavalry(troop);
+      // ignore: avoid_print
+      print(
+        'SPEED_COMPARE ARM troop=${troop.name} rel=${rel.toStringAsFixed(2)} '
+        'body=${_game.tokenCenter(0)} landing=${_game.dragTo} '
+        'lag=${lag.toStringAsFixed(1)} dragging=${_game.dragging} '
+        'shotPass=${_tutorial.shotPassMode}',
+      );
+      if (!_game.dragging || lag < 40) {
+        // ignore: avoid_print
+        print('SPEED_COMPARE ARM_FAIL troop=${troop.name}');
+        continue;
+      }
+      final initial = lag;
+      final started = DateTime.now();
+      var arrived = false;
+      var nextLogMs = 250;
+      while (DateTime.now().difference(started).inMilliseconds < 20000) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (!mounted || !_game.dragging) break;
+        final elapsed = DateTime.now().difference(started).inMilliseconds;
+        final remain = _game.debugWaypointLagPx;
+        if (elapsed >= nextLogMs) {
+          nextLogMs += 250;
+          final gonePct = ((1 - remain / initial) * 100).clamp(0.0, 100.0);
+          // ignore: avoid_print
+          print(
+            'SPEED_COMPARE troop=${troop.name} rel=${rel.toStringAsFixed(2)} '
+            't=${(elapsed / 1000).toStringAsFixed(2)}s gonePct=${gonePct.toStringAsFixed(0)} '
+            'lag=${remain.toStringAsFixed(1)} shotPass=${_tutorial.shotPassMode}',
+          );
+        }
+        if (remain <= 3) {
+          arrived = true;
+          etaMs[troop] = elapsed;
+          // ignore: avoid_print
+          print(
+            'SPEED_COMPARE ARRIVE troop=${troop.name} '
+            't=${(elapsed / 1000).toStringAsFixed(2)}s',
+          );
+          break;
+        }
+      }
+      if (!arrived) {
+        // ignore: avoid_print
+        print(
+          'SPEED_COMPARE TIMEOUT troop=${troop.name} '
+          'lag=${_game.debugWaypointLagPx.toStringAsFixed(1)}',
+        );
+      }
+      _game.dragging = false;
+      _game.dragTo = null;
+    }
+    final cav = etaMs[TroopType.cavalry];
+    final spear = etaMs[TroopType.spear];
+    final bow = etaMs[TroopType.bow];
+    final foot = etaMs[TroopType.infantry];
+    final siege = etaMs[TroopType.siege];
+    final ratio = (cav != null && spear != null && cav > 0) ? spear / cav : 0.0;
+    // ignore: avoid_print
+    print(
+      'SPEED_COMPARE SUMMARY cavMs=$cav bowMs=$bow spearMs=$spear '
+      'infantryMs=$foot siegeMs=$siege spearOverCav=${ratio.toStringAsFixed(2)} '
+      'shotPass=${_tutorial.shotPassMode}',
+    );
+    if (!mounted) return;
+    _tutorial.resetToSession1();
+    _game.setupSession1Field();
+    _bannerFor = TutorialSession.session1;
+    _showSessionBanner = true;
+    setState(() {});
+    // ignore: avoid_print
+    print('SPEED_COMPARE reset → clean 場1');
   }
 
   /// Temp: drive panStart→steer→hold so travel/aura/collide paint without OS mouse.

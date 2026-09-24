@@ -269,17 +269,28 @@ class TaisenGame extends FlameGame {
     );
   }
 
-  /// px/s toward gold landing — troop-specific. Cav fastest, but MUST lag a flick
-  /// (0.62·W glued to a normal drag; Bosco teleport Fail).
+  /// Cavalry waypoint speed in field-widths per second.
+  /// 0.62·W glued onto a normal drag (Bosco teleport Fail); 0.32·W still lags a flick.
+  static const double kCavalryPursuitWidthsPerSec = 0.32;
+
+  /// Fraction of [kCavalryPursuitWidthsPerSec].
+  /// Spear at 0.50× cavalry (HEAD 4b5147e) still read as one speed on a same-distance
+  /// drag. Foot is much slower so mid-frame the cavalry body is clearly ahead.
+  /// Order: cavalry > bow > spear > infantry > siege.
+  static double pursuitRelToCavalry(TroopType troop) {
+    return switch (troop) {
+      TroopType.cavalry => 1.0,
+      TroopType.bow => 0.55,
+      TroopType.spear => 0.22,
+      TroopType.infantry => 0.14,
+      TroopType.siege => 0.08,
+    };
+  }
+
+  /// px/s toward gold landing — troop-specific. Never a shared pursuit speed.
   double _troopSpeedPx(TroopType troop) {
     final w = size.x > 0 ? size.x : 390.0;
-    return switch (troop) {
-      TroopType.cavalry => w * 0.32,
-      TroopType.spear => w * 0.16,
-      TroopType.bow => w * 0.20,
-      TroopType.infantry => w * 0.18,
-      TroopType.siege => w * 0.12,
-    };
+    return w * kCavalryPursuitWidthsPerSec * pursuitRelToCavalry(troop);
   }
 
   /// Hard cap so a dt hitch cannot consume the whole waypoint in one frame.
@@ -390,6 +401,52 @@ class TaisenGame extends FlameGame {
     _pulse += dt;
     _pursueWaypoint(dt);
     _maybeSnapKiseiFlash();
+  }
+
+  /// Same-distance waypoint for every troop type (tests + SPEED_COMPARE_VERIFY).
+  /// Body stays put until [update] / [debugStepPursuit]. Does not teleport and
+  /// does not turn on shot pass.
+  /// Returns the gold-landing lag after the arm (0 if the drag did not start).
+  double debugArmSpeedCompare(TroopType troop) {
+    final card = Cost6Roster.all.firstWhere((c) => c.troop == troop);
+    field.clear();
+    fieldPos.clear();
+    fieldIsEnemy.clear();
+    fieldInCastle.clear();
+    final w = size.x > 0 ? size.x : 390.0;
+    final top = size.y > 0 ? watchH : 152.0;
+    final fh = size.y > 0 ? fieldH : 400.0;
+    final start = Offset(w * 0.16, top + fh * 0.48);
+    final landing = Offset(start.dx + w * 0.42, start.dy);
+    field.add(card);
+    fieldIsEnemy.add(false);
+    fieldInCastle.add(false);
+    fieldPos.add(start);
+    selectedIndex = 0;
+    tutorialOwnIndex = 0;
+    tutorialEnemyIndex = null;
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    _dragTravelDist = 0;
+    _lastDragDir = null;
+    _meleeEnemyIndex = null;
+    _chargeResolvedThisContact = false;
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
+
+    final coach = tutorial;
+    if (coach != null &&
+        coach.session == TutorialSession.session1 &&
+        coach.s1 != S1Phase.highlightSelect &&
+        coach.s1 != S1Phase.dragGuide &&
+        coach.s1 != S1Phase.waitAura &&
+        coach.s1 != S1Phase.hitCharge) {
+      coach.s1 = S1Phase.dragGuide;
+    }
+    panStart(start);
+    panUpdate(landing);
+    return debugWaypointLagPx;
   }
 
   /// Map a field-space point onto the Watch perspective lane (live, every frame).

@@ -1,6 +1,7 @@
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sangokushi_taisen/data/card_models.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 import 'package:sangokushi_taisen/game/tutorial_controller.dart';
 
@@ -84,5 +85,89 @@ void main() {
     expect(flipped, isTrue);
     expect(g.showChargeCyanRings, isTrue);
     expect(g.debugHitLabel, '氣勢');
+  });
+
+  test('waypoint speed: same distance, cavalry arrives well before spear', () {
+    const sampleFrames = 42; // 0.70s at 60fps — mid-frame, cavalry still short of 落點
+    const dt = 1 / 60;
+
+    ({double eta, double gone}) measure(TroopType troop) {
+      final g = readyGame();
+      final lag = g.debugArmSpeedCompare(troop);
+      expect(g.dragging, isTrue, reason: '${troop.name} drag must start');
+      expect(lag, greaterThan(100), reason: '${troop.name} landing must lead the body');
+      final start = g.tokenCenter(0);
+      expect(g.dragTo, isNotNull);
+      expect((g.dragTo! - start).distance, closeTo(lag, 0.5));
+
+      g.debugStepPursuit(dt);
+      final first = (g.tokenCenter(0) - start).distance;
+      expect(first, greaterThan(0.05), reason: '${troop.name} must step');
+      expect(first, lessThan(12), reason: '${troop.name} must not consume the waypoint in one frame');
+
+      var frames = 1;
+      while (frames < sampleFrames) {
+        g.debugStepPursuit(dt);
+        frames++;
+      }
+      final gone = (g.tokenCenter(0) - start).distance;
+      while (g.debugWaypointLagPx > 3 && frames < 60 * 25) {
+        g.debugStepPursuit(dt);
+        frames++;
+      }
+      expect(g.debugWaypointLagPx, lessThanOrEqualTo(3), reason: '${troop.name} reaches 落點');
+      return (eta: frames / 60.0, gone: gone);
+    }
+
+    final cav = measure(TroopType.cavalry);
+    final bow = measure(TroopType.bow);
+    final spear = measure(TroopType.spear);
+    final foot = measure(TroopType.infantry);
+    final siege = measure(TroopType.siege);
+
+    final gap = cav.gone - spear.gone;
+    // ignore: avoid_print
+    print(
+      'SPEED_COMPARE MID t=0.70s cavGone=${cav.gone.toStringAsFixed(1)} '
+      'bowGone=${bow.gone.toStringAsFixed(1)} spearGone=${spear.gone.toStringAsFixed(1)} '
+      'footGone=${foot.gone.toStringAsFixed(1)} siegeGone=${siege.gone.toStringAsFixed(1)} '
+      'cavAheadOfSpear=${gap.toStringAsFixed(1)}',
+    );
+    // ignore: avoid_print
+    print(
+      'SPEED_COMPARE SUMMARY cavEta=${cav.eta.toStringAsFixed(2)} '
+      'bowEta=${bow.eta.toStringAsFixed(2)} spearEta=${spear.eta.toStringAsFixed(2)} '
+      'infantryEta=${foot.eta.toStringAsFixed(2)} siegeEta=${siege.eta.toStringAsFixed(2)} '
+      'spearOverCav=${(spear.eta / cav.eta).toStringAsFixed(2)}',
+    );
+
+    expect(TaisenGame.pursuitRelToCavalry(TroopType.cavalry), 1.0);
+    expect(TaisenGame.pursuitRelToCavalry(TroopType.bow), lessThan(1.0));
+    expect(
+      TaisenGame.pursuitRelToCavalry(TroopType.spear),
+      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.bow)),
+    );
+    expect(
+      TaisenGame.pursuitRelToCavalry(TroopType.infantry),
+      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.spear)),
+    );
+    expect(
+      TaisenGame.pursuitRelToCavalry(TroopType.siege),
+      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.infantry)),
+    );
+
+    // Mid-frame: cavalry body is clearly ahead of spear (more than one token width).
+    expect(gap, greaterThan(55));
+    expect(spear.gone / cav.gone, lessThan(0.35));
+    expect(cav.gone, greaterThan(bow.gone));
+    expect(bow.gone, greaterThan(spear.gone));
+    expect(spear.gone, greaterThan(foot.gone));
+    expect(foot.gone, greaterThan(siege.gone));
+
+    expect(spear.eta / cav.eta, greaterThan(3.5));
+    expect(bow.eta, greaterThan(cav.eta * 1.5));
+    expect(bow.eta, lessThan(spear.eta));
+    expect(foot.eta, greaterThan(spear.eta * 1.3));
+    expect(siege.eta, greaterThan(foot.eta * 1.3));
   });
 }
