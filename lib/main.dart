@@ -803,7 +803,7 @@ class _TutorialShellState extends State<TutorialShell> {
                 children: [
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTapDown: (d) {
+                    onTapUp: (d) {
                       _game.selectOrDetailAt(d.localPosition);
                       setState(() {});
                     },
@@ -1141,7 +1141,7 @@ class _MatchShellState extends State<MatchShell> {
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTapDown: (d) {
+                onTapUp: (d) {
                   _game.selectOrDetailAt(d.localPosition);
                   setState(() {});
                 },

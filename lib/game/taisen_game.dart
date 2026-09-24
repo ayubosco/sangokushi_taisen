@@ -112,6 +112,8 @@ class TaisenGame extends FlameGame {
   double debugUnitHp(int i) =>
       (i >= 0 && i < _unitHp.length) ? _unitHp[i] : kRansenMaxHp;
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
+  /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
+  double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
   /// Live prove overlay. Null in normal play. Not a shot freeze.
   String? visualVerifyCaption;
 
@@ -157,8 +159,10 @@ class TaisenGame extends FlameGame {
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
   static const double kRansenTickPerSec = 6.0;
   static const double kRansenMaxHp = 100.0;
-  /// Still able to drag out. Slightly slower than a free march.
-  static const double kRansenSpeedScale = 0.75;
+  /// 亂戰 world speed as a fraction of open-field march.
+  /// Playtest band 0.55–0.65. 0.60 is the AC-mid default: obvious, still peelable.
+  /// Not a DPS number. 突破術／捕縛術 are out of scope.
+  static const double kRansenMul = 0.60;
 
   /// Session2 facing: radians; 0 = up (toward enemy).
   double ownFacing = 0;
@@ -349,6 +353,14 @@ class TaisenGame extends FlameGame {
     return w * kCavalryPursuitWidthsPerSec * (wiki / pursuitWikiBase(TroopType.cavalry));
   }
 
+  /// px/s for one body. 亂戰 multiplies both ally and enemy; leaving overlap restores open speed.
+  double _worldSpeedPx(int i) {
+    if (i < 0 || i >= field.length) return 0;
+    var speed = _troopSpeedPx(field[i].troop);
+    if (_ransenUnits.contains(i)) speed *= kRansenMul;
+    return speed;
+  }
+
   /// Hard cap so a dt hitch cannot consume the whole waypoint in one frame.
   static const double kPursuitMinFps = 24.0;
 
@@ -382,8 +394,8 @@ class TaisenGame extends FlameGame {
       return false;
     }
     final coach = tutorial;
-    var speed = _troopSpeedPx(field[i].troop);
-    if (_ransenUnits.contains(i)) speed *= kRansenSpeedScale;
+    // Never zero. Overlap only scales; a committed waypoint still walks out.
+    final speed = _worldSpeedPx(i);
     final dtCap = speed / kPursuitMinFps;
     final step = math.min(dist, math.min(speed * dt, dtCap));
     final dir = Offset(delta.dx / dist, delta.dy / dist);
@@ -448,9 +460,13 @@ class TaisenGame extends FlameGame {
   /// does not 歸城 — release still owns that.
   void _completeMarch(int i, Offset rest) {
     fieldPos[i] = rest;
-    final park = !dragging && tutorial == null && !isEnemyAt(i) && inCastleBand(rest);
+    // Finger still down: catching the pointer is not arrival. Dropping the
+    // waypoint here froze peels (next update had nothing to walk toward).
+    if (dragging) return;
+    final park = tutorial == null && !isEnemyAt(i) && inCastleBand(rest);
     dragTo = null;
     _lastDragDir = null;
+    _clearTravelMeterOnStop();
     if (park) _parkInCastle(i, rest);
   }
 
@@ -468,6 +484,7 @@ class TaisenGame extends FlameGame {
     fieldInCastle[i] = true;
     triggerReturnCityFx();
     _cancelBowWindup();
+    _clearTravelMeterOnStop();
     _matchChargeIndex = null;
     _matchChargeC = 0;
     dragTo = null;
@@ -1091,7 +1108,7 @@ class TaisenGame extends FlameGame {
     // UIUX lock: drag = WAYPOINT. Body walks at troop speed — never 1:1 glue / teleport.
     // Finger-up commits the waypoint; marching continues until arrival.
     // Aura from continuous straight travel. Waypoint retarget keeps the meter.
-    // Clear travel on arrived-stop, sharp turn (~70°), or after 突撃.
+    // Clear travel to 0 on arrive or stop. Sharp turn (~70°) and 突撃 still clear.
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
     _pursueWaypoint(dt);
     _tickRansen(dt);
@@ -2721,18 +2738,37 @@ class TaisenGame extends FlameGame {
   int? hitTokenAt(Offset local) {
     if (local.dy < watchH) return null; // watch band read-only
     final hitR = tokenHitR;
+    final hits = <int>[];
     for (var i = 0; i < field.length; i++) {
-      final c = tokenCenter(i);
+      if (_pointHitsToken(i, local, hitR)) hits.add(i);
+    }
+    if (hits.isEmpty) return null;
+    // Stacked 亂戰 draws the enemy on top. The ally under the finger is the drag.
+    for (final i in hits) {
+      if (!isEnemyAt(i)) return i;
+    }
+    return hits.first;
+  }
+
+  bool _pointHitsToken(int i, Offset local, double hitR) {
+    if (i < 0 || i >= fieldPos.length) return false;
+    bool within(Offset c) {
       final dx = local.dx - c.dx;
       final dy = local.dy - c.dy;
-      if (dx * dx + dy * dy <= hitR * hitR) return i;
-      // Pinned full-color card is the visible grab target while the shadow marches.
-      if (pinnedMarchAt(i)) {
-        final p = dragTo!;
-        final px = local.dx - p.dx;
-        final py = local.dy - p.dy;
-        if (px * px + py * py <= hitR * hitR) return i;
-      }
+      return dx * dx + dy * dy <= hitR * hitR;
+    }
+    if (within(tokenCenter(i))) return true;
+    // Pinned full-color card is the visible grab target while the shadow marches.
+    return pinnedMarchAt(i) && within(dragTo!);
+  }
+
+  /// Enemy card on top of a melee stack. Dragging it peels the overlapping ally.
+  int? _peelAllyFor(int enemyIndex) {
+    if (!isEnemyAt(enemyIndex)) return null;
+    final enemyAt = tokenCenter(enemyIndex);
+    for (var a = 0; a < field.length; a++) {
+      if (isEnemyAt(a)) continue;
+      if (inMeleeContact(tokenCenter(a), enemyAt)) return a;
     }
     return null;
   }
@@ -2831,9 +2867,14 @@ class TaisenGame extends FlameGame {
   void panStart(Offset local) {
     if (local.dy < watchH) return;
     final t = tutorial;
-    final i = hitTokenAt(local);
+    var i = hitTokenAt(local);
     if (i == null) return;
-    if (isEnemyAt(i)) return; // enemy tokens not draggable
+    if (isEnemyAt(i)) {
+      // 亂戰: the visible top card is often the enemy. That drag must still peel.
+      final ally = _peelAllyFor(i);
+      if (ally == null) return;
+      i = ally;
+    }
     if (t != null) {
       if (t.session != TutorialSession.session1) return;
       // Allow waitAura/hitCharge so stop→fade→drag-again rebuilds travel/aura.
@@ -2975,52 +3016,39 @@ class TaisenGame extends FlameGame {
     _shakeLeft = 0.14;
   }
 
-  /// Arrived / parked (waypoint gone). Sharp turns already zero travel in the walk.
-  void _decayChargeAfterStop(double dt) {
-    if (dragTo != null || _dragTravelDist <= 0) return;
+  /// Arrive at the waypoint, or a full stop (no committed march). Clears to 0.
+  /// A mid-march retarget does not call this — LOCK A keeps travel.
+  /// Rebuild starts only once the body is walking again.
+  void _clearTravelMeterOnStop() {
+    if (tutorial?.shotPassMode == true) return;
+    final had = _dragTravelDist > 0 || _matchChargeC > 0 || auraActive;
+    _dragTravelDist = 0;
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
+    _prevAuraActive = false;
     final coach = tutorial;
-    _dragTravelDist = math.max(0.0, _dragTravelDist - 95.0 * dt);
-    final fade01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-    if (coach != null && coach.session == TutorialSession.session1) {
-      if (fade01 < 1.0 &&
-          (coach.auraReady || coach.s1 == S1Phase.hitCharge) &&
-          coach.s1 != S1Phase.tipNext &&
-          coach.s1 != S1Phase.passed) {
-        final wasReady = coach.auraReady || coach.s1 == S1Phase.hitCharge;
-        coach.auraReady = false;
-        coach.didDragDrop = false;
-        if (coach.s1 == S1Phase.hitCharge || coach.s1 == S1Phase.waitAura) {
-          coach.s1 = S1Phase.waitAura;
-        }
-        if (wasReady) {
-          const next = '停低氣勢散咗 — 再拖行重新累積光環';
-          if (coach.tipText != next) {
-            coach.tipText = next;
-            coach.tipSkippable = false;
-            onTutorialChanged?.call();
-          }
-        }
-      }
-      if (fade01 <= kChargeRingShowTravel01 &&
-          (coach.s1 == S1Phase.waitAura || coach.s1 == S1Phase.dragGuide)) {
-        if (coach.s1 != S1Phase.dragGuide) {
-          coach.s1 = S1Phase.dragGuide;
-          coach.didDragDrop = false;
-          coach.auraReady = false;
-          coach.tipText = '蓄緊 — 跟住手指拖行，未亮唔好撞';
-          coach.tipSkippable = false;
-          onTutorialChanged?.call();
-        }
-      }
-    } else if (coach == null) {
-      if (fade01 > kChargeRingShowTravel01) {
-        _matchChargeIndex = selectedIndex ?? _matchChargeIndex;
-        _matchChargeC = fade01;
-      } else {
-        _matchChargeIndex = null;
-        _matchChargeC = 0;
+    if (!had || coach == null || coach.session != TutorialSession.session1) return;
+    if (coach.s1 == S1Phase.tipNext || coach.s1 == S1Phase.passed) return;
+    coach.auraReady = false;
+    coach.didDragDrop = false;
+    if (coach.s1 == S1Phase.hitCharge ||
+        coach.s1 == S1Phase.waitAura ||
+        coach.s1 == S1Phase.dragGuide) {
+      coach.s1 = S1Phase.dragGuide;
+      const next = '蓄緊 — 跟住手指拖行，未亮唔好撞';
+      if (coach.tipText != next) {
+        coach.tipText = next;
+        coach.tipSkippable = false;
+        onTutorialChanged?.call();
       }
     }
+  }
+
+  /// Stopped (waypoint gone, finger up). Arrival already clears inside [_completeMarch].
+  void _decayChargeAfterStop(double dt) {
+    if (dt < 0 || dragging || dragTo != null) return;
+    if (_dragTravelDist <= 0 && _matchChargeC <= 0 && !auraActive) return;
+    _clearTravelMeterOnStop();
   }
 
   void _ensureHpSlots() {

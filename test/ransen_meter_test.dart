@@ -94,14 +94,17 @@ void main() {
       guard++;
     }
     expect(stop.dragTo, isNull);
-    expect(stop.debugTravel01, greaterThan(0.2));
-    guard = 0;
-    while (stop.debugTravel01 > 0.001 && guard < 400) {
-      stop.debugDecayStoppedCharge(dt);
-      guard++;
-    }
-    expect(stop.debugTravel01, 0);
+    expect(stop.debugTravel01, 0, reason: 'arrive clears the meter to 0');
     expect(stop.auraActive, isFalse);
+    stop.debugDecayStoppedCharge(dt);
+    expect(stop.debugTravel01, 0);
+
+    stop.panStart(stop.tokenCenter(0));
+    stop.panEnd(Offset(stop.tokenCenter(0).dx + 160, stop.tokenCenter(0).dy));
+    stop.debugStepPursuit(dt);
+    expect(stop.dragTo, isNotNull);
+    expect(stop.debugTravel01, greaterThan(0),
+        reason: 'aura rebuilds only after he moves again');
   });
 
   test('no-aura overlap is 亂戰 with mutual damage and no 突撃', () {
@@ -265,24 +268,48 @@ void main() {
 
     final free = secondStep(scramble: false);
     final slow = secondStep(scramble: true);
+    expect(TaisenGame.kRansenMul, inInclusiveRange(0.55, 0.65));
     expect(free, greaterThan(1));
-    expect(slow / free, closeTo(TaisenGame.kRansenSpeedScale, 0.08));
+    expect(slow / free, closeTo(TaisenGame.kRansenMul, 0.05));
 
     final g = readyGame();
     final start = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.55);
     _placeOwn(g, start, TroopType.cavalry);
-    _addEnemy(g, start);
+    _addEnemy(g, start + const Offset(220, 0));
+    final openAlly = g.debugWorldSpeedPx(0);
+    final openEnemy = g.debugWorldSpeedPx(1);
+    expect(openAlly, greaterThan(1));
+    expect(openEnemy, greaterThan(1));
+    g.fieldPos[1] = g.fieldPos[0];
     g.debugStepPursuit(dt);
     expect(g.debugInRansen(0), isTrue);
-    g.panStart(g.tokenCenter(0));
-    g.panEnd(Offset(start.dx + 220, start.dy));
+    expect(g.debugInRansen(1), isTrue);
+    expect(g.debugWorldSpeedPx(0), closeTo(openAlly * TaisenGame.kRansenMul, 0.01));
+    expect(g.debugWorldSpeedPx(1), closeTo(openEnemy * TaisenGame.kRansenMul, 0.01));
+
+    // Grab the enemy card (drawn on top of the stack) and drag clear of the overlap.
+    final stacked = g.tokenCenter(1);
+    g.panStart(stacked);
+    expect(g.selectedIndex, 0, reason: 'enemy card in 亂戰 still steers the ally');
+    expect(g.dragTo, isNotNull);
+    final away = stacked + Offset(g.meleeContactDist + g.tokenCardSize.width + 24, 0);
+    g.panUpdate(away);
+    g.panEnd(away);
+    final before = g.tokenCenter(0);
+    g.debugStepPursuit(dt);
+    expect((g.tokenCenter(0) - before).distance, greaterThan(0.2),
+        reason: 'waypoint velocity is not frozen in 亂戰');
     var guard = 0;
-    while (g.debugInRansen(0) && guard < 400) {
+    while (g.debugInRansen(0) && guard < 120) {
       g.debugStepPursuit(dt);
       guard++;
     }
-    expect(g.debugInRansen(0), isFalse);
+    expect(g.debugInRansen(0), isFalse, reason: 'focused drag peels within 2s');
+    expect(g.debugInRansen(1), isFalse);
     expect(g.dragTo, isNotNull);
+    expect(g.debugWorldSpeedPx(0), closeTo(openAlly, 0.01),
+        reason: 'open speed returns once the bodies separate');
+    expect(g.debugWorldSpeedPx(1), closeTo(openEnemy, 0.01));
   });
 }
 
