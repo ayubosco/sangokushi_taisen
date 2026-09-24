@@ -574,10 +574,10 @@ class _TutorialShellState extends State<TutorialShell> {
     for (final troop in troops) {
       if (!mounted) return;
       final lag = _game.debugArmSpeedCompare(troop);
-      final rel = TaisenGame.pursuitRelToCavalry(troop);
+      final rel = TaisenGame.pursuitWikiBase(troop);
       // ignore: avoid_print
       print(
-        'SPEED_COMPARE ARM troop=${troop.name} rel=${rel.toStringAsFixed(2)} '
+        'SPEED_COMPARE ARM troop=${troop.name} wiki=${rel.toStringAsFixed(2)} '
         'body=${_game.tokenCenter(0)} landing=${_game.dragTo} '
         'lag=${lag.toStringAsFixed(1)} dragging=${_game.dragging} '
         'shotPass=${_tutorial.shotPassMode}',
@@ -601,7 +601,7 @@ class _TutorialShellState extends State<TutorialShell> {
           final gonePct = ((1 - remain / initial) * 100).clamp(0.0, 100.0);
           // ignore: avoid_print
           print(
-            'SPEED_COMPARE troop=${troop.name} rel=${rel.toStringAsFixed(2)} '
+            'SPEED_COMPARE troop=${troop.name} wiki=${rel.toStringAsFixed(2)} '
             't=${(elapsed / 1000).toStringAsFixed(2)}s gonePct=${gonePct.toStringAsFixed(0)} '
             'lag=${remain.toStringAsFixed(1)} shotPass=${_tutorial.shotPassMode}',
           );

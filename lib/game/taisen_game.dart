@@ -269,28 +269,47 @@ class TaisenGame extends FlameGame {
     );
   }
 
-  /// Cavalry waypoint speed in field-widths per second.
+  /// Cavalry base march in field-widths per second (wiki 騎 1.1).
   /// 0.62·W glued onto a normal drag (Bosco teleport Fail); 0.32·W still lags a flick.
   static const double kCavalryPursuitWidthsPerSec = 0.32;
 
-  /// Fraction of [kCavalryPursuitWidthsPerSec].
-  /// Spear at 0.50× cavalry (HEAD 4b5147e) still read as one speed on a same-distance
-  /// drag. Foot is much slower so mid-frame the cavalry body is clearly ahead.
-  /// Order: cavalry > bow > spear > infantry > siege.
-  static double pursuitRelToCavalry(TroopType troop) {
+  /// 天 wiki base speeds — https://w.atwiki.jp/taisendsten/pages/119.html
+  /// 騎 1.1, 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5. Not the oral order 騎>弓>歩＝槍.
+  /// Bow 走射 0.96 is not a waypoint state (stop-then-shot stays 0.8 while marching).
+  static double pursuitWikiBase(TroopType troop) {
     return switch (troop) {
-      TroopType.cavalry => 1.0,
-      TroopType.bow => 0.55,
-      TroopType.spear => 0.22,
-      TroopType.infantry => 0.14,
-      TroopType.siege => 0.08,
+      TroopType.cavalry => 1.1,
+      TroopType.infantry => 0.9,
+      TroopType.bow => 0.8,
+      TroopType.spear => 0.7,
+      TroopType.siege => 0.5,
     };
   }
 
-  /// px/s toward gold landing — troop-specific. Never a shared pursuit speed.
+  /// Wiki 限界速度. Base march and the cavalry aura 1.32 sit under these.
+  static double pursuitWikiCap(TroopType troop) {
+    return switch (troop) {
+      TroopType.cavalry => 3.3,
+      TroopType.infantry => 2.7,
+      TroopType.bow => 2.4,
+      TroopType.spear => 2.1,
+      TroopType.siege => 2.0,
+    };
+  }
+
+  /// 騎 base 1.1 × 1.2 while the charge aura is on. Locked value, not a derived guess.
+  static const double kCavalryAuraSpeed = 1.32;
+
+  /// px/s toward the gold landing. Wiki base, cavalry → 1.32 only while [auraActive].
   double _troopSpeedPx(TroopType troop) {
+    var wiki = pursuitWikiBase(troop);
+    if (troop == TroopType.cavalry && auraActive) {
+      wiki = kCavalryAuraSpeed;
+    }
+    final cap = pursuitWikiCap(troop);
+    if (wiki > cap) wiki = cap;
     final w = size.x > 0 ? size.x : 390.0;
-    return w * kCavalryPursuitWidthsPerSec * pursuitRelToCavalry(troop);
+    return w * kCavalryPursuitWidthsPerSec * (wiki / pursuitWikiBase(TroopType.cavalry));
   }
 
   /// Hard cap so a dt hitch cannot consume the whole waypoint in one frame.
@@ -403,11 +422,12 @@ class TaisenGame extends FlameGame {
     _maybeSnapKiseiFlash();
   }
 
-  /// Same-distance waypoint for every troop type (tests + SPEED_COMPARE_VERIFY).
-  /// Body stays put until [update] / [debugStepPursuit]. Does not teleport and
-  /// does not turn on shot pass.
+  /// Same-distance straight waypoint (tests + SPEED_COMPARE_VERIFY).
+  /// Default length stays under [kChargeTravelNeed] so the compare is wiki base
+  /// (騎 1.1 vs 歩 0.9), not the aura 1.32 boost.
+  /// Body stays put until [update] / [debugStepPursuit]. Does not teleport.
   /// Returns the gold-landing lag after the arm (0 if the drag did not start).
-  double debugArmSpeedCompare(TroopType troop) {
+  double debugArmSpeedCompare(TroopType troop, {double distancePx = 96}) {
     final card = Cost6Roster.all.firstWhere((c) => c.troop == troop);
     field.clear();
     fieldPos.clear();
@@ -417,7 +437,7 @@ class TaisenGame extends FlameGame {
     final top = size.y > 0 ? watchH : 152.0;
     final fh = size.y > 0 ? fieldH : 400.0;
     final start = Offset(w * 0.16, top + fh * 0.48);
-    final landing = Offset(start.dx + w * 0.42, start.dy);
+    final landing = Offset(start.dx + distancePx, start.dy);
     field.add(card);
     fieldIsEnemy.add(false);
     fieldInCastle.add(false);

@@ -87,15 +87,17 @@ void main() {
     expect(g.debugHitLabel, '氣勢');
   });
 
-  test('waypoint speed: same distance, cavalry arrives well before spear', () {
-    const sampleFrames = 42; // 0.70s at 60fps — mid-frame, cavalry still short of 落點
+  test('waypoint speed: same distance, cavalry arrives before foot', () {
+    const sampleFrames = 30; // 0.50s — both still short of a 96px 落點, aura still off
     const dt = 1 / 60;
+    const wikiCavOverFoot = 1.1 / 0.9;
 
-    ({double eta, double gone}) measure(TroopType troop) {
+    ({double eta, double gone, bool aura}) measure(TroopType troop) {
       final g = readyGame();
       final lag = g.debugArmSpeedCompare(troop);
       expect(g.dragging, isTrue, reason: '${troop.name} drag must start');
-      expect(lag, greaterThan(100), reason: '${troop.name} landing must lead the body');
+      expect(lag, greaterThan(80), reason: '${troop.name} landing must lead the body');
+      expect(lag, lessThan(TaisenGame.kChargeTravelNeed), reason: 'base compare stays under aura distance');
       final start = g.tokenCenter(0);
       expect(g.dragTo, isNotNull);
       expect((g.dragTo! - start).distance, closeTo(lag, 0.5));
@@ -104,6 +106,8 @@ void main() {
       final first = (g.tokenCenter(0) - start).distance;
       expect(first, greaterThan(0.05), reason: '${troop.name} must step');
       expect(first, lessThan(12), reason: '${troop.name} must not consume the waypoint in one frame');
+      expect(g.auraActive, isFalse);
+      expect(g.showChargeCyanRings, isFalse);
 
       var frames = 1;
       while (frames < sampleFrames) {
@@ -111,63 +115,98 @@ void main() {
         frames++;
       }
       final gone = (g.tokenCenter(0) - start).distance;
-      while (g.debugWaypointLagPx > 3 && frames < 60 * 25) {
+      expect(g.auraActive, isFalse, reason: '${troop.name} base march must not light aura');
+      while (g.debugWaypointLagPx > 3 && frames < 60 * 8) {
         g.debugStepPursuit(dt);
         frames++;
       }
       expect(g.debugWaypointLagPx, lessThanOrEqualTo(3), reason: '${troop.name} reaches 落點');
-      return (eta: frames / 60.0, gone: gone);
+      expect(g.auraActive, isFalse);
+      return (eta: frames / 60.0, gone: gone, aura: g.auraActive);
     }
 
+    expect(TaisenGame.pursuitWikiBase(TroopType.cavalry), 1.1);
+    expect(TaisenGame.pursuitWikiBase(TroopType.infantry), 0.9);
+    expect(TaisenGame.pursuitWikiBase(TroopType.bow), 0.8);
+    expect(TaisenGame.pursuitWikiBase(TroopType.spear), 0.7);
+    expect(TaisenGame.pursuitWikiBase(TroopType.siege), 0.5);
+    expect(TaisenGame.kCavalryAuraSpeed, 1.32);
+    expect(TaisenGame.pursuitWikiCap(TroopType.cavalry), 3.3);
+    expect(TaisenGame.pursuitWikiCap(TroopType.infantry), 2.7);
+    expect(TaisenGame.pursuitWikiCap(TroopType.bow), 2.4);
+    expect(TaisenGame.pursuitWikiCap(TroopType.spear), 2.1);
+    expect(TaisenGame.pursuitWikiCap(TroopType.siege), 2.0);
+
     final cav = measure(TroopType.cavalry);
+    final foot = measure(TroopType.infantry);
     final bow = measure(TroopType.bow);
     final spear = measure(TroopType.spear);
-    final foot = measure(TroopType.infantry);
     final siege = measure(TroopType.siege);
 
-    final gap = cav.gone - spear.gone;
     // ignore: avoid_print
     print(
-      'SPEED_COMPARE MID t=0.70s cavGone=${cav.gone.toStringAsFixed(1)} '
-      'bowGone=${bow.gone.toStringAsFixed(1)} spearGone=${spear.gone.toStringAsFixed(1)} '
-      'footGone=${foot.gone.toStringAsFixed(1)} siegeGone=${siege.gone.toStringAsFixed(1)} '
-      'cavAheadOfSpear=${gap.toStringAsFixed(1)}',
+      'SPEED_COMPARE MID t=0.50s cavGone=${cav.gone.toStringAsFixed(1)} '
+      'footGone=${foot.gone.toStringAsFixed(1)} bowGone=${bow.gone.toStringAsFixed(1)} '
+      'spearGone=${spear.gone.toStringAsFixed(1)} siegeGone=${siege.gone.toStringAsFixed(1)} '
+      'cavOverFoot=${(cav.gone / foot.gone).toStringAsFixed(3)}',
     );
     // ignore: avoid_print
     print(
       'SPEED_COMPARE SUMMARY cavEta=${cav.eta.toStringAsFixed(2)} '
-      'bowEta=${bow.eta.toStringAsFixed(2)} spearEta=${spear.eta.toStringAsFixed(2)} '
-      'infantryEta=${foot.eta.toStringAsFixed(2)} siegeEta=${siege.eta.toStringAsFixed(2)} '
-      'spearOverCav=${(spear.eta / cav.eta).toStringAsFixed(2)}',
+      'footEta=${foot.eta.toStringAsFixed(2)} bowEta=${bow.eta.toStringAsFixed(2)} '
+      'spearEta=${spear.eta.toStringAsFixed(2)} siegeEta=${siege.eta.toStringAsFixed(2)} '
+      'footOverCav=${(foot.eta / cav.eta).toStringAsFixed(3)}',
     );
 
-    expect(TaisenGame.pursuitRelToCavalry(TroopType.cavalry), 1.0);
-    expect(TaisenGame.pursuitRelToCavalry(TroopType.bow), lessThan(1.0));
-    expect(
-      TaisenGame.pursuitRelToCavalry(TroopType.spear),
-      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.bow)),
-    );
-    expect(
-      TaisenGame.pursuitRelToCavalry(TroopType.infantry),
-      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.spear)),
-    );
-    expect(
-      TaisenGame.pursuitRelToCavalry(TroopType.siege),
-      lessThan(TaisenGame.pursuitRelToCavalry(TroopType.infantry)),
-    );
-
-    // Mid-frame: cavalry body is clearly ahead of spear (more than one token width).
-    expect(gap, greaterThan(55));
-    expect(spear.gone / cav.gone, lessThan(0.35));
-    expect(cav.gone, greaterThan(bow.gone));
+    expect(cav.eta, lessThan(foot.eta));
+    expect(foot.eta / cav.eta, closeTo(wikiCavOverFoot, 0.04));
+    expect(cav.gone / foot.gone, closeTo(wikiCavOverFoot, 0.02));
+    // Wiki order: 騎 > 歩 > 弓 > 槍 > 攻城. Not 騎>弓>歩＝槍.
+    expect(cav.gone, greaterThan(foot.gone));
+    expect(foot.gone, greaterThan(bow.gone));
     expect(bow.gone, greaterThan(spear.gone));
-    expect(spear.gone, greaterThan(foot.gone));
-    expect(foot.gone, greaterThan(siege.gone));
+    expect(spear.gone, greaterThan(siege.gone));
+    expect(cav.aura, isFalse);
+    expect(foot.aura, isFalse);
+  });
 
-    expect(spear.eta / cav.eta, greaterThan(3.5));
-    expect(bow.eta, greaterThan(cav.eta * 1.5));
-    expect(bow.eta, lessThan(spear.eta));
-    expect(foot.eta, greaterThan(spear.eta * 1.3));
-    expect(siege.eta, greaterThan(foot.eta * 1.3));
+  test('cavalry aura speed is 1.32 only while auraActive', () {
+    const dt = 1 / 60;
+    final cav = readyGame();
+    cav.debugArmSpeedCompare(TroopType.cavalry, distancePx: 240);
+    final cavStart = cav.tokenCenter(0);
+    cav.debugStepPursuit(dt);
+    final baseStep = (cav.tokenCenter(0) - cavStart).distance;
+    expect(cav.auraActive, isFalse);
+    expect(cav.showChargeCyanRings, isFalse);
+
+    var guard = 0;
+    while (!cav.auraActive && guard < 400) {
+      cav.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(cav.auraActive, isTrue);
+    expect(cav.showChargeCyanRings, isTrue);
+    expect(cav.debugHitLabel, '氣勢');
+    final litAt = cav.tokenCenter(0);
+    cav.debugStepPursuit(dt);
+    final auraStep = (cav.tokenCenter(0) - litAt).distance;
+    expect(auraStep / baseStep, closeTo(1.32 / 1.1, 0.02));
+
+    final foot = readyGame();
+    foot.debugArmSpeedCompare(TroopType.infantry, distancePx: 240);
+    final footStart = foot.tokenCenter(0);
+    foot.debugStepPursuit(dt);
+    final footBase = (foot.tokenCenter(0) - footStart).distance;
+    guard = 0;
+    while (!foot.auraActive && guard < 400) {
+      foot.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(foot.auraActive, isTrue);
+    final footAt = foot.tokenCenter(0);
+    foot.debugStepPursuit(dt);
+    final footLater = (foot.tokenCenter(0) - footAt).distance;
+    expect(footLater, closeTo(footBase, 0.05), reason: 'foot has no aura speed boost');
   });
 }
