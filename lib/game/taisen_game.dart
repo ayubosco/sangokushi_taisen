@@ -112,6 +112,8 @@ class TaisenGame extends FlameGame {
   double debugUnitHp(int i) =>
       (i >= 0 && i < _unitHp.length) ? _unitHp[i] : kRansenMaxHp;
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
+  /// Live prove overlay. Null in normal play. Not a shot freeze.
+  String? visualVerifyCaption;
 
   /// Spear tip glow is on unless that spear is inside 亂戰 (tip retracts).
   bool spearTipExtendedAt(int i) {
@@ -486,6 +488,49 @@ class TaisenGame extends FlameGame {
       }
     }
     _prevAuraActive = nowAura;
+  }
+
+  /// Free-match layout for the visual prove. Clears travel, 亂戰, and hit text.
+  /// Does not set shotPassMode — [tutorial] is left untouched.
+  void debugRestageOwnEnemy({
+    required String ownId,
+    required Offset ownAt,
+    required Offset enemyAt,
+  }) {
+    final own = Cost6Roster.all.firstWhere((c) => c.id == ownId);
+    final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
+    field.clear();
+    fieldPos.clear();
+    fieldIsEnemy.clear();
+    fieldInCastle.clear();
+    field.add(own);
+    field.add(enemy);
+    fieldIsEnemy.addAll([false, true]);
+    fieldInCastle.addAll([false, false]);
+    fieldPos.add(ownAt);
+    fieldPos.add(enemyAt);
+    selectedIndex = 0;
+    tutorialOwnIndex = null;
+    tutorialEnemyIndex = null;
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    _dragTravelDist = 0;
+    _lastDragDir = null;
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
+    _meleeEnemyIndex = null;
+    _chargeResolvedThisContact = false;
+    _prevAuraActive = false;
+    _ransenUnits.clear();
+    _unitHp
+      ..clear()
+      ..add(kRansenMaxHp)
+      ..add(kRansenMaxHp);
+    _hitFlashIndex = null;
+    _hitFlashLeft = 0;
+    _hitFlashLabel = '';
+    _cancelBowWindup();
   }
 
   /// Test hook: pursuit + 亂戰 contact + 氣勢 snap without Flame's component tree.
@@ -1506,6 +1551,16 @@ class TaisenGame extends FlameGame {
 
     if (_shakeLeft > 0) {
       canvas.restore();
+    }
+
+    final prove = visualVerifyCaption;
+    if (prove != null && prove.isNotEmpty) {
+      _drawFatFloatText(
+        canvas,
+        prove,
+        Offset(w * 0.5, fieldTop + 22),
+        fontSize: 18,
+      );
     }
   }
 

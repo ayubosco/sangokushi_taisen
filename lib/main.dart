@@ -1,9 +1,14 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
+import 'game/ransen_visual_verify.dart';
 import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
@@ -31,6 +36,9 @@ const bool kChargeAutoVerify =
 /// Logs travel % over wall time. Not a shot mode (never sets shotPassMode / DEMO_SHOT).
 const bool kSpeedCompareVerify =
     bool.fromEnvironment('SPEED_COMPARE_VERIFY', defaultValue: false);
+
+// dart-define: RANSEN_VISUAL_VERIFY=true — free-match frames A–D.
+// Not DEMO_SHOT and not shotPassMode. See [kRansenVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -100,7 +108,7 @@ class _AppRootState extends State<AppRoot> {
         kFeelShot == 'bow-attack' ||
         kFeelShot == 'cav-idle' ||
         kFeelShot == 'cav-attack';
-    if (kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
+    if (kRansenVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kSpeedCompareVerify || kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -109,6 +117,7 @@ class _AppRootState extends State<AppRoot> {
   }
 
   _AppStage _initialStage() {
+    if (kRansenVisualVerify) return _AppStage.match;
     if (kLiveVerify == 'bow') return _AppStage.match;
     if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
@@ -988,12 +997,25 @@ class MatchShell extends StatefulWidget {
 
 class _MatchShellState extends State<MatchShell> {
   late final TaisenGame _game;
+  final GlobalKey _shotKey = GlobalKey();
   @override
   void initState() {
     super.initState();
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (kRansenVisualVerify) {
+        // Free match. Clock runs. No FEEL/DEMO freeze and no shotPassMode.
+        _game.setupMatchDemoField();
+        _game.clock.reset();
+        _game.clock.resume();
+        setState(() {});
+        Future<void>.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          _runRansenVisualVerify();
+        });
+        return;
+      }
       if (kFeelShot == 'castle') {
         _game.setupFeelCastleField();
         // 返城 float held for shot (no combat numbers).
@@ -1042,6 +1064,73 @@ class _MatchShellState extends State<MatchShell> {
     });
   }
 
+  /// Pauses on each prove frame, writes a PNG, and holds for simctl.
+  Future<void> _runRansenVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'RANSEN_VISUAL_VERIFY run '
+      'flutter run --dart-define=RANSEN_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'RANSEN_VISUAL_VERIFY capture '
+      'xcrun simctl io booted screenshot <name>.png '
+      'during each HOLD line (~4s). '
+      'PNGs also land in the app tmp/ransen-visual/ '
+      '(xcrun simctl get_app_container booted com.bosco.sangokushiTaisen data).',
+    );
+    final script = RansenVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdRansenFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdRansenFrame(RansenVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _writeRansenPng(shot.id);
+    // ignore: avoid_print
+    print(
+      'RANSEN_VISUAL_VERIFY HOLD ${shot.id} '
+      'screenshot now — paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
+  Future<void> _writeRansenPng(String id) async {
+    try {
+      final boundary = _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) {
+        // ignore: avoid_print
+        print('RANSEN_VISUAL_VERIFY PNG skip $id (no boundary)');
+        return;
+      }
+      final image = await boundary.toImage(pixelRatio: 2);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) return;
+      final dir = Directory('${Directory.systemTemp.path}/ransen-visual');
+      await dir.create(recursive: true);
+      final file = File('${dir.path}/$id.png');
+      await file.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      );
+      // ignore: avoid_print
+      print('RANSEN_VISUAL_VERIFY PNG ${file.path}');
+    } catch (e) {
+      // ignore: avoid_print
+      print('RANSEN_VISUAL_VERIFY PNG fail $id $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1068,7 +1157,10 @@ class _MatchShellState extends State<MatchShell> {
                   _game.panEnd(d.localPosition);
                   setState(() {});
                 },
-                child: GameWidget(game: _game),
+                child: RepaintBoundary(
+                  key: _shotKey,
+                  child: GameWidget(game: _game),
+                ),
               ),
             ),
             _BottomBar(
