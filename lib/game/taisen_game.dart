@@ -15,8 +15,8 @@ import 'tutorial_controller.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
-/// Offline 1v1 CPU stub — H0 Plan A: short watch (read-only) + large flat 2D field.
-/// Watch ≤18% of game band (~15–18% screen); draggable field is the hero (≥55% screen).
+/// Offline 1v1 CPU stub — short watch (read-only) + large flat 2D field.
+/// Design B: Watch ≤15% of the game band; draggable field is the hero.
 /// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
 class TaisenGame extends FlameGame {
   TaisenGame({this.tutorial});
@@ -67,8 +67,10 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
-  /// UIUX lock (JL3Bgi0z4_4): finger = WAYPOINT; unit walks toward finger at troop speed
-  /// with visible lag — NEVER sticky 1:1 teleport/glue to finger.
+  /// Finger-up COMMITS [dragTo]. The full-color card pins on that gold 落點.
+  /// [fieldPos] is the translucent shadow, which keeps marching until 合體.
+  /// [dragging] only means the finger is still moving the waypoint.
+  /// Never teleport the shadow onto the finger.
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
@@ -206,10 +208,13 @@ class TaisenGame extends FlameGame {
     return frame.image;
   }
 
-  /// H0 Plan A: watch fraction of [GameWidget] height (not old top-⅓).
-  /// GameWidget sits between slim HUD (~≤6% screen) and bottom bar (~8–10%),
-  /// so ~0.18 of game ≈ 15–17% of full screen; hard cap still ≤0.20 screen.
-  static const double kWatchFractionOfGame = 0.18;
+  /// Design B: watch fraction of [GameWidget] height.
+  /// HUD (~36px) + 計略 bar (~62px) sit outside this widget. At 0.15 of the
+  /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
+  static const double kWatchFractionOfGame = 0.15;
+
+  /// Field shadow while the full-color card is pinned on 落點. Not full opacity.
+  static const double kMarchShadowOpacity = 0.38;
 
   /// Castle strip height inside the game band (~3–4% screen after shell chrome).
   static const double kCastleStripPx = 22.0;
@@ -270,8 +275,15 @@ class TaisenGame extends FlameGame {
   }
 
   /// Cavalry base march in field-widths per second (wiki 騎 1.1).
-  /// 0.62·W glued onto a normal drag (Bosco teleport Fail); 0.32·W still lags a flick.
+  /// Half the operable field depth (fieldH/2) on the 390×844 reference is ~2.57s,
+  /// including the 1.32 aura after [kChargeTravelNeed] px (band 1.5–3.0s). Aura stays
+  /// travel-distance gated — this scale does not turn it into a wall clock.
+  /// 0.62·W glued onto a normal drag (Bosco teleport Fail); do not raise this
+  /// without re-measuring that half-field run.
   static const double kCavalryPursuitWidthsPerSec = 0.32;
+
+  /// Body rests on the waypoint once it is this close, then [dragTo] clears.
+  static const double kArrivalEpsilon = 2.0;
 
   /// 天 wiki base speeds — https://w.atwiki.jp/taisendsten/pages/119.html
   /// 騎 1.1, 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5. Not the oral order 騎>弓>歩＝槍.
@@ -329,17 +341,19 @@ class TaisenGame extends FlameGame {
   }
 
   /// Speed-limited walk toward [dragTo]. Never assigns body = finger.
+  /// Marches while a waypoint is committed ([dragTo] != null), including after
+  /// finger-up. [dragging] only means the finger is still moving that waypoint.
   /// Returns true if the unit actually stepped this tick.
   bool _pursueWaypoint(double dt) {
-    if (!dragging || selectedIndex == null || dragTo == null) return false;
+    if (selectedIndex == null || dragTo == null) return false;
     final i = selectedIndex!;
     if (i >= fieldPos.length || isEnemyAt(i)) return false;
     final pos = fieldPos[i];
     final target = dragTo!;
     final delta = target - pos;
     final dist = delta.distance;
-    if (dist <= 2) {
-      _lastDragDir = null;
+    if (dist <= kArrivalEpsilon) {
+      _completeMarch(i, _clampFieldPos(target));
       return false;
     }
     final coach = tutorial;
@@ -366,6 +380,11 @@ class TaisenGame extends FlameGame {
     _lastDragDir = dir;
     final next = _clampFieldPos(pos + dir * step);
     final walked = (next - pos).distance;
+    // Clamp ate the step (waypoint off the board): rest where the body already is.
+    if (dt > 0 && walked < 0.01) {
+      _completeMarch(i, pos);
+      return false;
+    }
     fieldPos[i] = next;
     _dragTravelDist += walked;
     ownFacing = _facingFromDelta(dir);
@@ -398,6 +417,38 @@ class TaisenGame extends FlameGame {
       _resolveEngagement(i, next, coach: null);
     }
     return walked > 0.5;
+  }
+
+  /// Arrival: body rests on the reachable target, then the waypoint is cleared.
+  /// A released march that ends inside 己城 parks there (歸城). Finger-down arrival
+  /// does not 歸城 — release still owns that.
+  void _completeMarch(int i, Offset rest) {
+    fieldPos[i] = rest;
+    final park = !dragging && tutorial == null && !isEnemyAt(i) && inCastleBand(rest);
+    dragTo = null;
+    _lastDragDir = null;
+    if (park) _parkInCastle(i, rest);
+  }
+
+  /// Intentional 歸城. Clears the march so the parked body does not walk back out.
+  void _parkInCastle(int i, Offset at) {
+    final band = castleBandRect;
+    final maxX = size.x > 48 ? size.x - 48 : 48.0;
+    fieldPos[i] = Offset(
+      at.dx.clamp(48.0, maxX),
+      band.top + band.height * 0.55,
+    );
+    while (fieldInCastle.length <= i) {
+      fieldInCastle.add(false);
+    }
+    fieldInCastle[i] = true;
+    triggerReturnCityFx();
+    _cancelBowWindup();
+    _matchChargeIndex = null;
+    _matchChargeC = 0;
+    dragTo = null;
+    _lastDragDir = null;
+    castleBandHot = false;
   }
 
   void _maybeSnapKiseiFlash() {
@@ -499,6 +550,18 @@ class TaisenGame extends FlameGame {
     const tokenR = 28.0;
     return Offset(48.0 + i * (tokenR * 2 + 20), watchH + 110);
   }
+
+  /// Waypoint is ahead of the body: card pins on [dragTo], shadow is [fieldPos].
+  bool pinnedMarchAt(int i) {
+    if (dragTo == null || selectedIndex != i || i < 0 || i >= fieldPos.length) return false;
+    return (fieldPos[i] - dragTo!).distance > kArrivalEpsilon;
+  }
+
+  /// Full-color field card. Pinned on the gold 落點 during a march; the card after 合體.
+  Offset pinnedCardAt(int i) => pinnedMarchAt(i) ? dragTo! : tokenCenter(i);
+
+  /// Translucent march body. Gameplay, aura rings, and the Watch solid unit use this.
+  Offset shadowAt(int i) => tokenCenter(i);
 
   void setupSession1Field() {
     field.clear();
@@ -943,12 +1006,14 @@ class TaisenGame extends FlameGame {
     final coach = tutorial;
 
     // UIUX lock: drag = WAYPOINT. Body walks at troop speed — never 1:1 glue / teleport.
-    // Aura from continuous straight travel; stop / too-slow / sharp turn → fade.
+    // Finger-up commits the waypoint; marching continues until arrival.
+    // Aura from continuous straight travel; arrived-stop / sharp turn → fade.
     // Combat: MARCH (no touch)=0 FX; MELEE (touch w/o aura)=light bump; CHARGE (aura+touch)=突撃.
     final unitMoving = _pursueWaypoint(dt);
 
-    // Stop / too-slow → aura fades from travel distance; move again rebuilds on panStart.
-    final fading = (!dragging || !unitMoving) && _dragTravelDist > 0;
+    // A committed march is not a stop. Fade only after the waypoint clears
+    // (arrived / parked). Sharp turns already zero travel inside the walk.
+    final fading = dragTo == null && !unitMoving && _dragTravelDist > 0;
     if (fading) {
       _dragTravelDist = math.max(0.0, _dragTravelDist - 95.0 * dt);
       final fade01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
@@ -964,7 +1029,7 @@ class TaisenGame extends FlameGame {
             coach.s1 = S1Phase.waitAura;
           }
           if (wasReady) {
-            final next = '鬆手氣勢散咗 — 再拖行重新累積光環';
+            const next = '停低氣勢散咗 — 再拖行重新累積光環';
             if (coach.tipText != next) {
               coach.tipText = next;
               coach.tipSkippable = false;
@@ -1201,10 +1266,15 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Live drag: gold dashed arrow + landing disc from CURRENT body → finger.
-    // Body ≠ landing is the waypoint-lag proof (never cyan; never start-point glue).
-    if (dragging && dragTo != null && selectedIndex != null && selectedIndex! < fieldPos.length) {
-      _drawGoldWaypointGuide(canvas, tokenCenter(selectedIndex!), dragTo!);
+    // Ghost path from the marching shadow to the pinned card. Low opacity.
+    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
+      _drawGoldWaypointGuide(
+        canvas,
+        shadowAt(selectedIndex!),
+        dragTo!,
+        ghostTrail: true,
+        labelLanding: true,
+      );
     }
 
     // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
@@ -1226,39 +1296,79 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.waitAura ||
               t.s1 == S1Phase.hitCharge);
 
+      // Aura rings bind to the shadow (march position), never the pinned card.
       _drawFieldTelegraph(canvas, center, card, i, isOwn: !isEnemy && tutorialOwnIndex == i, isEnemy: isEnemy);
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
+      final pinned = pinnedMarchAt(i);
+      if (pinned) {
+        _drawCardLikeToken(
+          canvas,
+          center,
+          card,
+          index: i,
+          cardW: tokenSize.width,
+          cardH: tokenSize.height,
+          selected: false,
+          isEnemy: false,
+          dim: false,
+          pulseOwn: false,
+          opacity: kMarchShadowOpacity,
+        );
+        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+      } else {
+        _drawCardLikeToken(
+          canvas,
+          center,
+          card,
+          index: i,
+          cardW: tokenSize.width,
+          cardH: tokenSize.height,
+          selected: selected || (tutorialOwnIndex == i && t != null),
+          isEnemy: isEnemy,
+          dim: dim || inCastle,
+          pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
+        );
+
+        // Facing follows travel direction every frame (own while selected; enemy always).
+        if (isEnemy) {
+          _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
+        } else if (selected || tutorialOwnIndex == i) {
+          _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+        }
+
+        final labelY = center.dy + tokenSize.height / 2 + 4;
+        _drawText(
+          canvas,
+          card.nameZh,
+          Offset(center.dx - 18, labelY),
+          dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
+          11,
+        );
+        _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+      }
+    }
+
+    // Full-color card pinned on the gold 落點. Shadow merges here on arrival (合體).
+    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
+      final i = selectedIndex!;
+      final card = field[i];
+      final cardAt = dragTo!;
       _drawCardLikeToken(
         canvas,
-        center,
+        cardAt,
         card,
         index: i,
         cardW: tokenSize.width,
         cardH: tokenSize.height,
-        selected: selected || (tutorialOwnIndex == i && t != null),
-        isEnemy: isEnemy,
-        dim: dim || inCastle,
+        selected: true,
+        isEnemy: false,
+        dim: false,
         pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
       );
-
-      // Facing follows travel direction every frame (own while selected/dragging; enemy always).
-      if (isEnemy) {
-        _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
-      } else if (selected || (dragging && selectedIndex == i) || tutorialOwnIndex == i) {
-        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
-      }
-
-      // Labels sit just under 5:8 card.
-      final labelY = center.dy + tokenSize.height / 2 + 4;
-      _drawText(
-        canvas,
-        card.nameZh,
-        Offset(center.dx - 18, labelY),
-        dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
-        11,
-      );
-      _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+      final labelY = cardAt.dy + tokenSize.height / 2 + 4;
+      _drawText(canvas, card.nameZh, Offset(cardAt.dx - 18, labelY), FactionColors.gold, 11);
+      _drawCostStars(canvas, Offset(cardAt.dx - 18, labelY + 16), card.cost);
     }
 
     // BINARY charging caption on field — gold only, never cyan rings/arcs.
@@ -1383,14 +1493,29 @@ class TaisenGame extends FlameGame {
 
   /// Gold dashed arrow + soft gold landing disc — waypoint / 落點 guide.
   /// Distinct from cyan concentric charge rings (Design soft-fail lock).
+  /// [ghostTrail]: in-transit path stays low-opacity so the body is not the destination.
   void _drawGoldWaypointGuide(
     Canvas canvas,
     Offset from,
     Offset to, {
     bool drawLanding = true,
+    bool ghostTrail = false,
+    bool labelLanding = false,
   }) {
-    final gold = FactionColors.gold;
-    _drawDashedLine(canvas, from, to, gold.withValues(alpha: 0.75));
+    const gold = FactionColors.gold;
+    final trailAlpha = ghostTrail ? 0.28 : 0.75;
+    final arrowAlpha = ghostTrail ? 0.36 : 0.90;
+    if (ghostTrail) {
+      canvas.drawLine(
+        from,
+        to,
+        Paint()
+          ..color = gold.withValues(alpha: 0.12)
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    _drawDashedLine(canvas, from, to, gold.withValues(alpha: trailAlpha));
     final d = to - from;
     final len = d.distance;
     if (len > 8) {
@@ -1404,7 +1529,7 @@ class TaisenGame extends FlameGame {
         ..lineTo(left.dx, left.dy)
         ..lineTo(right.dx, right.dy)
         ..close();
-      canvas.drawPath(arrow, Paint()..color = gold.withValues(alpha: 0.9));
+      canvas.drawPath(arrow, Paint()..color = gold.withValues(alpha: arrowAlpha));
     }
     if (drawLanding) {
       canvas.drawCircle(to, 18, Paint()..color = gold.withValues(alpha: 0.14));
@@ -1417,6 +1542,9 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 2.0,
       );
       canvas.drawCircle(to, 5, Paint()..color = gold.withValues(alpha: 0.85));
+      if (labelLanding) {
+        _drawText(canvas, '落點', Offset(to.dx - 14, to.dy + 22), gold.withValues(alpha: 0.75), 12);
+      }
     }
   }
 
@@ -1674,12 +1802,8 @@ class TaisenGame extends FlameGame {
       enemyTroop = field[enemySafe].troop;
     }
 
-    // Gold landing on Watch when dragging — same body≠landing lag as the field.
-    if (dragging && dragTo != null) {
-      final land = mapFieldToWatch(dragTo!, band);
-      _drawGoldWaypointGuide(canvas, ownC, land);
-    }
-
+    // Watch solid unit is march progress (shadow / fieldPos): position, facing, 氣勢.
+    // It is not pinned on the field 落點.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
@@ -1797,10 +1921,15 @@ class TaisenGame extends FlameGame {
     required bool isEnemy,
     required bool dim,
     required bool pulseOwn,
+    double opacity = 1,
   }) {
-    // Design 5:8 gold-border cards (real-card 54×86). Finger = card.
+    // Design 5:8 gold-border cards (real-card 54×86).
     final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
+    final ghost = opacity < 0.999;
+    if (ghost) {
+      canvas.saveLayer(dest.inflate(14), Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
+    }
 
     final hasAnim = troopSprites.has(card.troop);
     if (hasAnim) {
@@ -1925,6 +2054,7 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 1.8,
       );
     }
+    if (ghost) canvas.restore();
   }
 
   /// Single-card 5:8 gold-frame crops inside 1280×720 canvases (Design token-*-58).
@@ -2010,7 +2140,8 @@ class TaisenGame extends FlameGame {
     if (debugForcePose != null && debugForcePoseIndex == index) {
       return debugForcePose!;
     }
-    if (dragging && selectedIndex == index) return TroopAnimPose.move;
+    // March pose while a waypoint is committed, not only while the finger is down.
+    if (dragTo != null && selectedIndex == index) return TroopAnimPose.move;
     if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
     switch (card.troop) {
       case TroopType.spear:
@@ -2491,6 +2622,13 @@ class TaisenGame extends FlameGame {
       final dx = local.dx - c.dx;
       final dy = local.dy - c.dy;
       if (dx * dx + dy * dy <= hitR * hitR) return i;
+      // Pinned full-color card is the visible grab target while the shadow marches.
+      if (pinnedMarchAt(i)) {
+        final p = dragTo!;
+        final px = local.dx - p.dx;
+        final py = local.dy - p.dy;
+        if (px * px + py * py <= hitR * hitR) return i;
+      }
     }
     return null;
   }
@@ -2645,39 +2783,31 @@ class TaisenGame extends FlameGame {
   void panEnd(Offset local) {
     if (!dragging) return;
     dragging = false;
-    _lastDragDir = null;
     final t = tutorial;
     final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
+    // Release COMMITS the waypoint. Body keeps marching at troop speed.
+    // Never snap/teleport the body to the finger.
     dragTo = Offset(local.dx, y);
-    // Release = stop where unit already is (waypoint lag). Never snap/teleport to finger.
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
       final bandHot = inCastleBand(at);
-      castleBandHot = false;
 
       if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
         if (!t.shotPassMode) {
           _resolveEngagement(i, at, coach: t);
         }
-        // else: stay put; tip already teaches keep dragging to walk/collide
+        // else: shot freeze; waypoint cleared below. Playfeel never uses shotPassMode.
       } else if (t == null && !isEnemyAt(i)) {
         final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
         while (fieldInCastle.length <= i) {
           fieldInCastle.add(false);
         }
         if (bandHot) {
-          final band = castleBandRect;
-          fieldPos[i] = Offset(
-            at.dx.clamp(48.0, size.x - 48),
-            band.top + band.height * 0.55,
-          );
-          fieldInCastle[i] = true;
-          triggerReturnCityFx();
-          _cancelBowWindup();
-          _matchChargeIndex = null;
-          _matchChargeC = 0;
+          // Body is already in 己城: park and drop the waypoint. Do not keep marching.
+          _parkInCastle(i, at);
         } else {
+          castleBandHot = inCastleBand(dragTo!);
           if (wasInCastle) {
             fieldInCastle[i] = false;
             flashHit(i, '出陣');
@@ -2685,7 +2815,8 @@ class TaisenGame extends FlameGame {
           if (field[i].troop == TroopType.bow && _dragTravelDist > 8) {
             _cancelBowWindup();
           }
-          // Cavalry: keep aura telegraph; engagement resolves MARCH/MELEE/CHARGE on contact.
+          // Cavalry: keep aura telegraph; engagement resolves on contact.
+          // March target stays until arrival.
           if (field[i].troop == TroopType.cavalry && _dragTravelDist > kChargeRingShowTravel01 * kChargeTravelNeed) {
             _matchChargeIndex = i;
             _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
@@ -2697,7 +2828,11 @@ class TaisenGame extends FlameGame {
       }
     }
     dragFrom = null;
-    dragTo = null;
+    // Captures stay frozen. Playfeel marches on the committed dragTo.
+    if (t != null && t.shotPassMode) {
+      dragTo = null;
+      _lastDragDir = null;
+    }
   }
 
   void flashHit(int index, String label) {
