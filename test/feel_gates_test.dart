@@ -209,4 +209,139 @@ void main() {
     final footLater = (foot.tokenCenter(0) - footAt).distance;
     expect(footLater, closeTo(footBase, 0.05), reason: 'foot has no aura speed boost');
   });
+
+  test('release commits dragTo: body marches closer and does not freeze or teleport', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.62);
+    _placeOwn(g, start, TroopType.cavalry);
+    g.panStart(start);
+    final landing = Offset(start.dx + 180, start.dy - 30);
+    g.dragTo = landing;
+    expect((g.dragTo! - g.tokenCenter(0)).distance, greaterThan(140));
+
+    g.panEnd(landing);
+
+    expect(g.dragging, isFalse);
+    expect(g.dragTo, isNotNull);
+    expect(g.tokenCenter(0), start, reason: 'release must not teleport the body to the finger');
+    final committed = g.dragTo!;
+    final releasePos = g.tokenCenter(0);
+    expect((committed - releasePos).distance, greaterThan(140));
+
+    for (var i = 0; i < 24; i++) {
+      g.debugStepPursuit(1 / 60);
+    }
+    final after = g.tokenCenter(0);
+    expect((after - releasePos).distance, greaterThan(8), reason: 'not frozen at the release pose');
+    expect(
+      (committed - after).distance,
+      lessThan((committed - releasePos).distance - 8),
+      reason: 'closer to the committed target',
+    );
+    expect((after - landing).distance, greaterThan(40), reason: 'still in transit, body ≠ 落點');
+    expect(g.dragTo, isNotNull, reason: 'waypoint stays until arrival');
+  });
+
+  test('arrival rests the body on the target and clears the waypoint', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.62);
+    _placeOwn(g, start, TroopType.infantry);
+    final landing = Offset(start.dx + 70, start.dy);
+    g.panStart(start);
+    g.panEnd(landing);
+    expect(g.tokenCenter(0), start);
+
+    const dt = 1 / 60;
+    var frames = 0;
+    while (g.dragTo != null && frames < 60 * 8) {
+      g.debugStepPursuit(dt);
+      frames++;
+    }
+    expect(g.dragTo, isNull);
+    expect(g.dragging, isFalse);
+    expect((g.tokenCenter(0) - landing).distance, lessThanOrEqualTo(TaisenGame.kArrivalEpsilon));
+    expect(frames, greaterThan(5), reason: 'arrival is a march, not a release snap');
+  });
+
+  test('castle band parks only when the body is already inside it', () {
+    final g = readyGame();
+    final band = g.castleBandRect;
+    final outside = Offset(g.size.x * 0.42, band.top - 90);
+    final inBand = Offset(outside.dx, band.top + band.height * 0.45);
+    _placeOwn(g, outside, TroopType.cavalry);
+    g.panStart(outside);
+    g.panEnd(inBand);
+    expect(g.dragging, isFalse);
+    expect(g.dragTo, isNotNull, reason: 'destination in 己城 still commits the march');
+    expect(g.tokenCenter(0).dy, closeTo(outside.dy, 0.5));
+    expect(g.fieldInCastle[0], isFalse);
+
+    final parked = readyGame();
+    final parkedBand = parked.castleBandRect;
+    final alreadyIn = Offset(parked.size.x * 0.42, parkedBand.top + parkedBand.height * 0.4);
+    _placeOwn(parked, alreadyIn, TroopType.cavalry);
+    parked.panStart(alreadyIn);
+    parked.panEnd(Offset(alreadyIn.dx + 12, alreadyIn.dy));
+    expect(parked.dragTo, isNull);
+    expect(parked.fieldInCastle[0], isTrue);
+    expect(parked.tokenCenter(0).dy, greaterThan(parkedBand.top));
+  });
+
+  test('cavalry half-field straight run is 1.5–3.0s; aura stays distance-gated', () {
+    final g = readyGame();
+    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.18));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
+    final half = g.fieldH * 0.5;
+    final landing = Offset(g.size.x * 0.50, g.watchH + 40);
+    final start = Offset(landing.dx, landing.dy + half);
+    expect(start.dy, lessThan(g.castleBandRect.top));
+    _placeOwn(g, start, TroopType.cavalry);
+    g.panStart(start);
+    g.panUpdate(landing);
+    g.panEnd(landing);
+    expect(g.dragging, isFalse);
+    expect(g.auraActive, isFalse, reason: 'aura is not a release timer');
+    expect(g.debugTravel01, 0);
+    expect((g.tokenCenter(0) - landing).distance, closeTo(half, 1));
+
+    const dt = 1 / 60;
+    var frames = 0;
+    var auraFrame = -1;
+    while (g.dragTo != null && frames < 60 * 8) {
+      g.debugStepPursuit(dt);
+      frames++;
+      if (auraFrame < 0 && g.auraActive) auraFrame = frames;
+    }
+    final sec = frames / 60.0;
+    // ignore: avoid_print
+    print(
+      'HALF_FIELD cavSec=${sec.toStringAsFixed(3)} halfPx=${half.toStringAsFixed(1)} '
+      'auraAtSec=${auraFrame < 0 ? -1 : (auraFrame / 60).toStringAsFixed(3)} '
+      'watch=${TaisenGame.kWatchFractionOfGame} tokenW=${TaisenGame.kTokenWidthFracOfField}',
+    );
+    expect(g.dragTo, isNull);
+    expect((g.tokenCenter(0) - landing).distance, lessThanOrEqualTo(TaisenGame.kArrivalEpsilon));
+    expect(sec, inInclusiveRange(1.5, 3.0));
+    expect(auraFrame, greaterThan(0), reason: '120px travel still lights the aura on a long march');
+    expect(auraFrame / 60.0, greaterThan(0.4), reason: 'aura is not instant on finger-up');
+    expect(g.debugTravel01, 1.0);
+  });
+}
+
+void _placeOwn(TaisenGame g, Offset at, TroopType troop) {
+  final card = Cost6Roster.all.firstWhere((c) => c.troop == troop);
+  g.field.clear();
+  g.fieldPos.clear();
+  g.fieldIsEnemy.clear();
+  g.fieldInCastle.clear();
+  g.field.add(card);
+  g.fieldIsEnemy.add(false);
+  g.fieldInCastle.add(false);
+  g.fieldPos.add(at);
+  g.selectedIndex = 0;
+  g.tutorialOwnIndex = 0;
+  g.tutorialEnemyIndex = null;
+  g.dragging = false;
+  g.dragFrom = null;
+  g.dragTo = null;
 }
