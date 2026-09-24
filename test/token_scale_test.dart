@@ -7,8 +7,8 @@ void main() {
   test('field token width is 0.10 of field, 5:8, hit ≥48dp', () {
     expect(TaisenGame.kTokenWidthFracOfField, 0.10);
     expect(TaisenGame.kTokenAspectWH, 5 / 8);
-    // H0 watch / castle band stay locked (this change is token art only).
-    expect(TaisenGame.kWatchFractionOfGame, 0.18);
+    // Design B: Watch ≤15% of the game band. Token art stays 0.10.
+    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.15));
     expect(TaisenGame.kCastleBandFracOfField, 0.12);
 
     const fieldW = 390.0;
@@ -26,8 +26,8 @@ void main() {
     // Regression: enemy hard-outline used to inflate +20/+12 and read as bigger card.
     expect(TaisenGame.kTokenWidthFracOfField, 0.10);
     const fieldW = 402.0;
-    final ownW = fieldW * TaisenGame.kTokenWidthFracOfField;
-    final enemyW = fieldW * TaisenGame.kTokenWidthFracOfField; // same constant — no enemy multiplier
+    const ownW = fieldW * TaisenGame.kTokenWidthFracOfField;
+    const enemyW = fieldW * TaisenGame.kTokenWidthFracOfField;
     expect(ownW, enemyW);
     expect(ownW / fieldW, 0.10);
     expect(TaisenGame.kTokenAspectWH, 5 / 8);

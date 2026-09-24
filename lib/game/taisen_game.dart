@@ -15,8 +15,8 @@ import 'tutorial_controller.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
-/// Offline 1v1 CPU stub — H0 Plan A: short watch (read-only) + large flat 2D field.
-/// Watch ≤18% of game band (~15–18% screen); draggable field is the hero (≥55% screen).
+/// Offline 1v1 CPU stub — short watch (read-only) + large flat 2D field.
+/// Design B: Watch ≤15% of the game band; draggable field is the hero.
 /// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
 class TaisenGame extends FlameGame {
   TaisenGame({this.tutorial});
@@ -67,10 +67,10 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
-  /// UIUX lock (JL3Bgi0z4_4): finger = WAYPOINT; unit walks toward it at troop speed
-  /// with visible lag — NEVER sticky 1:1 teleport/glue to finger.
-  /// [dragging] is finger-down (waypoint follows the finger). Finger-up COMMITS
-  /// [dragTo]; the body keeps marching until it arrives, then the waypoint clears.
+  /// Finger-up COMMITS [dragTo]. The full-color card pins on that gold 落點.
+  /// [fieldPos] is the translucent shadow, which keeps marching until 合體.
+  /// [dragging] only means the finger is still moving the waypoint.
+  /// Never teleport the shadow onto the finger.
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
@@ -208,10 +208,13 @@ class TaisenGame extends FlameGame {
     return frame.image;
   }
 
-  /// H0 Plan A: watch fraction of [GameWidget] height (not old top-⅓).
-  /// GameWidget sits between slim HUD (~≤6% screen) and bottom bar (~8–10%),
-  /// so ~0.18 of game ≈ 15–17% of full screen; hard cap still ≤0.20 screen.
-  static const double kWatchFractionOfGame = 0.18;
+  /// Design B: watch fraction of [GameWidget] height.
+  /// HUD (~36px) + 計略 bar (~62px) sit outside this widget. At 0.15 of the
+  /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
+  static const double kWatchFractionOfGame = 0.15;
+
+  /// Field shadow while the full-color card is pinned on 落點. Not full opacity.
+  static const double kMarchShadowOpacity = 0.38;
 
   /// Castle strip height inside the game band (~3–4% screen after shell chrome).
   static const double kCastleStripPx = 22.0;
@@ -272,7 +275,7 @@ class TaisenGame extends FlameGame {
   }
 
   /// Cavalry base march in field-widths per second (wiki 騎 1.1).
-  /// Half the operable field depth (fieldH/2) on the 390×844 reference is ~2.48s,
+  /// Half the operable field depth (fieldH/2) on the 390×844 reference is ~2.57s,
   /// including the 1.32 aura after [kChargeTravelNeed] px (band 1.5–3.0s). Aura stays
   /// travel-distance gated — this scale does not turn it into a wall clock.
   /// 0.62·W glued onto a normal drag (Bosco teleport Fail); do not raise this
@@ -547,6 +550,18 @@ class TaisenGame extends FlameGame {
     const tokenR = 28.0;
     return Offset(48.0 + i * (tokenR * 2 + 20), watchH + 110);
   }
+
+  /// Waypoint is ahead of the body: card pins on [dragTo], shadow is [fieldPos].
+  bool pinnedMarchAt(int i) {
+    if (dragTo == null || selectedIndex != i || i < 0 || i >= fieldPos.length) return false;
+    return (fieldPos[i] - dragTo!).distance > kArrivalEpsilon;
+  }
+
+  /// Full-color field card. Pinned on the gold 落點 during a march; the card after 合體.
+  Offset pinnedCardAt(int i) => pinnedMarchAt(i) ? dragTo! : tokenCenter(i);
+
+  /// Translucent march body. Gameplay, aura rings, and the Watch solid unit use this.
+  Offset shadowAt(int i) => tokenCenter(i);
 
   void setupSession1Field() {
     field.clear();
@@ -1251,12 +1266,11 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Live march: ghost trail + gold 落點 from CURRENT body → committed waypoint.
-    // Shown while dragTo is set, including after finger-up. Body ≠ landing until arrival.
-    if (dragTo != null && selectedIndex != null && selectedIndex! < fieldPos.length) {
+    // Ghost path from the marching shadow to the pinned card. Low opacity.
+    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
       _drawGoldWaypointGuide(
         canvas,
-        tokenCenter(selectedIndex!),
+        shadowAt(selectedIndex!),
         dragTo!,
         ghostTrail: true,
         labelLanding: true,
@@ -1282,39 +1296,79 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.waitAura ||
               t.s1 == S1Phase.hitCharge);
 
+      // Aura rings bind to the shadow (march position), never the pinned card.
       _drawFieldTelegraph(canvas, center, card, i, isOwn: !isEnemy && tutorialOwnIndex == i, isEnemy: isEnemy);
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
+      final pinned = pinnedMarchAt(i);
+      if (pinned) {
+        _drawCardLikeToken(
+          canvas,
+          center,
+          card,
+          index: i,
+          cardW: tokenSize.width,
+          cardH: tokenSize.height,
+          selected: false,
+          isEnemy: false,
+          dim: false,
+          pulseOwn: false,
+          opacity: kMarchShadowOpacity,
+        );
+        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+      } else {
+        _drawCardLikeToken(
+          canvas,
+          center,
+          card,
+          index: i,
+          cardW: tokenSize.width,
+          cardH: tokenSize.height,
+          selected: selected || (tutorialOwnIndex == i && t != null),
+          isEnemy: isEnemy,
+          dim: dim || inCastle,
+          pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
+        );
+
+        // Facing follows travel direction every frame (own while selected; enemy always).
+        if (isEnemy) {
+          _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
+        } else if (selected || tutorialOwnIndex == i) {
+          _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+        }
+
+        final labelY = center.dy + tokenSize.height / 2 + 4;
+        _drawText(
+          canvas,
+          card.nameZh,
+          Offset(center.dx - 18, labelY),
+          dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
+          11,
+        );
+        _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+      }
+    }
+
+    // Full-color card pinned on the gold 落點. Shadow merges here on arrival (合體).
+    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
+      final i = selectedIndex!;
+      final card = field[i];
+      final cardAt = dragTo!;
       _drawCardLikeToken(
         canvas,
-        center,
+        cardAt,
         card,
         index: i,
         cardW: tokenSize.width,
         cardH: tokenSize.height,
-        selected: selected || (tutorialOwnIndex == i && t != null),
-        isEnemy: isEnemy,
-        dim: dim || inCastle,
+        selected: true,
+        isEnemy: false,
+        dim: false,
         pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
       );
-
-      // Facing follows travel direction every frame (own while selected/dragging; enemy always).
-      if (isEnemy) {
-        _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
-      } else if (selected || (dragTo != null && selectedIndex == i) || tutorialOwnIndex == i) {
-        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
-      }
-
-      // Labels sit just under 5:8 card.
-      final labelY = center.dy + tokenSize.height / 2 + 4;
-      _drawText(
-        canvas,
-        card.nameZh,
-        Offset(center.dx - 18, labelY),
-        dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
-        11,
-      );
-      _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+      final labelY = cardAt.dy + tokenSize.height / 2 + 4;
+      _drawText(canvas, card.nameZh, Offset(cardAt.dx - 18, labelY), FactionColors.gold, 11);
+      _drawCostStars(canvas, Offset(cardAt.dx - 18, labelY + 16), card.cost);
     }
 
     // BINARY charging caption on field — gold only, never cyan rings/arcs.
@@ -1748,12 +1802,8 @@ class TaisenGame extends FlameGame {
       enemyTroop = field[enemySafe].troop;
     }
 
-    // Gold landing on Watch while a waypoint is committed (finger down or marching).
-    if (dragTo != null) {
-      final land = mapFieldToWatch(dragTo!, band);
-      _drawGoldWaypointGuide(canvas, ownC, land, ghostTrail: true);
-    }
-
+    // Watch solid unit is march progress (shadow / fieldPos): position, facing, 氣勢.
+    // It is not pinned on the field 落點.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
@@ -1871,10 +1921,15 @@ class TaisenGame extends FlameGame {
     required bool isEnemy,
     required bool dim,
     required bool pulseOwn,
+    double opacity = 1,
   }) {
-    // Design 5:8 gold-border cards (real-card 54×86). Finger = card.
+    // Design 5:8 gold-border cards (real-card 54×86).
     final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
+    final ghost = opacity < 0.999;
+    if (ghost) {
+      canvas.saveLayer(dest.inflate(14), Paint()..color = Color.fromRGBO(255, 255, 255, opacity));
+    }
 
     final hasAnim = troopSprites.has(card.troop);
     if (hasAnim) {
@@ -1999,6 +2054,7 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 1.8,
       );
     }
+    if (ghost) canvas.restore();
   }
 
   /// Single-card 5:8 gold-frame crops inside 1280×720 canvases (Design token-*-58).
@@ -2566,6 +2622,13 @@ class TaisenGame extends FlameGame {
       final dx = local.dx - c.dx;
       final dy = local.dy - c.dy;
       if (dx * dx + dy * dy <= hitR * hitR) return i;
+      // Pinned full-color card is the visible grab target while the shadow marches.
+      if (pinnedMarchAt(i)) {
+        final p = dragTo!;
+        final px = local.dx - p.dx;
+        final py = local.dy - p.dy;
+        if (px * px + py * py <= hitR * hitR) return i;
+      }
     }
     return null;
   }

@@ -259,8 +259,61 @@ void main() {
     }
     expect(g.dragTo, isNull);
     expect(g.dragging, isFalse);
+    expect(g.pinnedMarchAt(0), isFalse);
+    expect(g.pinnedCardAt(0), g.shadowAt(0), reason: '合體: shadow and card are one');
     expect((g.tokenCenter(0) - landing).distance, lessThanOrEqualTo(TaisenGame.kArrivalEpsilon));
     expect(frames, greaterThan(5), reason: 'arrival is a march, not a release snap');
+  });
+
+  test('finger-up pins the card on 落點; shadow and Watch keep marching', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.62);
+    _placeOwn(g, start, TroopType.cavalry);
+    g.panStart(start);
+    final landing = Offset(start.dx + 180, start.dy - 30);
+    g.panEnd(landing);
+
+    expect(g.dragging, isFalse);
+    expect(g.pinnedMarchAt(0), isTrue);
+    expect(g.pinnedCardAt(0), g.dragTo);
+    expect(g.shadowAt(0), start, reason: 'shadow does not teleport onto the finger');
+    expect((g.pinnedCardAt(0) - g.shadowAt(0)).distance, greaterThan(140));
+    expect(TaisenGame.kMarchShadowOpacity, greaterThan(0.15));
+    expect(TaisenGame.kMarchShadowOpacity, lessThan(0.5));
+
+    const band = Rect.fromLTWH(0, 0, 390, 120);
+    final watchBefore = g.mapFieldToWatch(g.shadowAt(0), band);
+    final watchPin = g.mapFieldToWatch(g.pinnedCardAt(0), band);
+    expect((watchBefore - watchPin).distance, greaterThan(8), reason: 'Watch is not frozen on 落點');
+
+    for (var i = 0; i < 24; i++) {
+      g.debugStepPursuit(1 / 60);
+    }
+    expect(g.pinnedCardAt(0), landing, reason: 'full-color card stays pinned');
+    expect((g.shadowAt(0) - start).distance, greaterThan(8), reason: 'shadow marched after release');
+    expect(
+      (g.pinnedCardAt(0) - g.shadowAt(0)).distance,
+      lessThan((landing - start).distance - 8),
+    );
+    final watchAfter = g.mapFieldToWatch(g.shadowAt(0), band);
+    expect((watchAfter - watchBefore).distance, greaterThan(1), reason: 'Watch follows shadow progress');
+    expect((g.mapFieldToWatch(g.pinnedCardAt(0), band) - watchPin).distance, lessThan(0.5));
+  });
+
+  test('Design B: watch ≤15% of the game band, drag field ≥62% of a phone screen', () {
+    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.15));
+    expect(TaisenGame.kTokenWidthFracOfField, inInclusiveRange(0.10, 0.11));
+    final g = readyGame();
+    expect(g.watchH / g.size.y, lessThanOrEqualTo(0.15));
+    expect(g.fieldH / g.size.y, greaterThanOrEqualTo(0.85));
+    // Chrome outside GameWidget: HUD ~36px, 計略 bar ~62px. No safe-area in this budget.
+    const screenH = 844.0;
+    const chrome = 36.0 + 62.0;
+    const gameH = screenH - chrome;
+    const watchOfScreen = TaisenGame.kWatchFractionOfGame * gameH / screenH;
+    const dragOfScreen = (1 - TaisenGame.kWatchFractionOfGame) * gameH / screenH;
+    expect(watchOfScreen, lessThanOrEqualTo(0.15));
+    expect(dragOfScreen, greaterThanOrEqualTo(0.62));
   });
 
   test('castle band parks only when the body is already inside it', () {
@@ -289,7 +342,7 @@ void main() {
 
   test('cavalry half-field straight run is 1.5–3.0s; aura stays distance-gated', () {
     final g = readyGame();
-    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.18));
+    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.15));
     expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
     final half = g.fieldH * 0.5;
     final landing = Offset(g.size.x * 0.50, g.watchH + 40);
