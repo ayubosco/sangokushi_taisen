@@ -51,7 +51,6 @@ class TaisenGame extends FlameGame {
 
   /// Design assets: weapon corner atlas + lacquer field swatch + 5:8 token art.
   ui.Image? _weaponSheet;
-  ui.Image? _fieldLacquer;
   ui.Image? _tokenCards58;
   ui.Image? _tokenSpear58;
   ui.Image? _tokenDao58;
@@ -266,7 +265,6 @@ class TaisenGame extends FlameGame {
     clock.reset();
     if (!wasRunning) clock.pause();
     _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
-    _fieldLacquer = await _loadUiImage('assets/field/field-lacquer-swatch.png');
     _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
     _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
     _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
@@ -307,6 +305,12 @@ class TaisenGame extends FlameGame {
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
   static const double kTokenWidthFracOfField = 0.10; // Bosco eye: still too big at 0.12; try 0.10
+
+  /// Desktop table. Original parchment, not a copied cabinet photo and not the black vacuum.
+  static const Color kDesktopParchment = Color(0xFFD7C09A);
+  static const Color kDesktopParchmentDeep = Color(0xFFB08960);
+  static const Color kEnemyBand = Color(0xFF6E3B34);
+  static const Color kOwnBand = Color(0xFF3E5C40);
   static const double kTokenAspectWH = 5 / 8; // W/H
 
   double get castleBandH => fieldH * kCastleBandFracOfField;
@@ -1359,28 +1363,11 @@ class TaisenGame extends FlameGame {
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
 
-    // Bottom flat ortho playfield (H0 ≥55%): lacquer + ortho gold grid — NO perspective/vanishing.
+    // Flat ortho table (H0 ≥55%). Parchment map + 敵陣／自陣. Not the black + gold vacuum.
     final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
-    canvas.drawRect(fieldRect, Paint()..color = const Color(0xFF0A0A0A));
-    _drawFieldLacquer(canvas, fieldRect);
-    _drawOrthoFieldGrid(canvas, fieldRect);
-    _drawLacquerGrain(canvas, fieldRect, alpha: 0.04);
-    _drawOwnCastleBand(canvas, fieldRect);
+    _drawDesktopTable(canvas, fieldRect);
 
     final t = tutorial;
-    // Light vertical padding (tip is overlay; keep dragH ≥0.55).
-    _drawText(canvas, '雙方動向（可操作）', Offset(16, fieldTop + 14), FactionColors.gold, 16);
-    if (t == null) {
-      final ownN = fieldIsEnemy.where((e) => !e).length;
-      final enN = fieldIsEnemy.where((e) => e).length;
-      _drawText(
-        canvas,
-        'Cost $costCap · 場上 ${field.length}/$fieldMax（己$ownN／敵$enN）',
-        Offset(16, fieldTop + 34),
-        Colors.white54,
-        12,
-      );
-    }
 
     // Session1 / feel: drop guide + dashed path (not after tipNext / hit)
     if (t != null &&
@@ -1463,6 +1450,7 @@ class TaisenGame extends FlameGame {
           cardH: tokenSize.height,
           opacity: marchShadowOpacityAt(i),
           facing: ownFacing,
+          troop: card.troop,
         );
       } else if (_lifeAt(i) != UnitLife.alive) {
         _drawRetreatToken(canvas, center, tokenSize);
@@ -1582,35 +1570,18 @@ class TaisenGame extends FlameGame {
               : null);
       if (travel01 > kChargeRingShowTravel01 && captionIdx != null) {
         final oc = chargeRingAnchor(captionIdx);
-        _drawFatFloatText(
+        _drawText(
           canvas,
           '蓄緊 ${(travel01 * 100).round()}%',
-          Offset(oc.dx, oc.dy - tokenSize.height / 2 - 22),
-          fontSize: 18,
+          Offset(oc.dx - 18, oc.dy - tokenSize.height / 2 - 16),
+          FactionColors.gold.withValues(alpha: 0.9),
+          11,
         );
       }
     }
 
     // Design lock: NO floating「突撃」/「迎擊」buttons.
     // Charge = drag far → aura → collide (auto flash). Intercept = tip always on × enemy aura (auto).
-
-    // Temporary charge-pipeline debug (travel% / aura on) — Bosco fail triage.
-    if (t != null && t.session == TutorialSession.session1) {
-      final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-      final pct = (travel01 * 100).round();
-      final aura = auraActive;
-      // Match field look: off / charging (travel fill) / ON (auraActive).
-      final auraDbg = aura
-          ? 'ON'
-          : (travel01 > kChargeRingShowTravel01 ? 'charging' : 'off');
-      _drawText(
-        canvas,
-        'DBG travel $pct%  aura $auraDbg  lag ${debugWaypointLagPx.round()}  ${t.s1.name}',
-        Offset(12, fieldTop + 36),
-        const Color(0xFF00E5FF),
-        11,
-      );
-    }
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
@@ -1674,39 +1645,7 @@ class TaisenGame extends FlameGame {
       canvas.restore();
     }
 
-    final prove = visualVerifyCaption;
-    if (prove != null && prove.isNotEmpty) {
-      _drawFatFloatText(
-        canvas,
-        prove,
-        Offset(w * 0.5, fieldTop + 22),
-        fontSize: 18,
-      );
-      // Measurable H0 ruler for the verify frames. Not a stage skin.
-      _drawH0Ruler(canvas);
-    }
-  }
-
-  /// Watch / drag / token percents drawn on verify frames so a screenshot can be measured.
-  void _drawH0Ruler(Canvas canvas) {
-    if (size.y <= 0 || size.x <= 0) return;
-    final wh = watchH;
-    final watchPct = (wh / size.y * 100).round();
-    final dragPct = (fieldH / size.y * 100).round();
-    final tokenPct = (kTokenWidthFracOfField * 100).round();
-    final line = Paint()
-      ..color = const Color(0xFFFFF59D)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(0, wh), Offset(size.x, wh), line);
-    canvas.drawLine(Offset(0, size.y - 1), Offset(size.x, size.y - 1), line);
-    _drawText(canvas, 'H0 Watch $watchPct%', const Offset(8, 4), const Color(0xFFFFF59D), 11);
-    _drawText(
-      canvas,
-      '可拖 $dragPct%  token $tokenPct% 5:8',
-      Offset(8, wh + 2),
-      const Color(0xFFFFF59D),
-      11,
-    );
+    // Verify captions stay in the log. Painting them covers the table.
   }
 
   /// Removed: floating charge/intercept buttons (Design/UIUX lock).
@@ -1785,34 +1724,107 @@ class TaisenGame extends FlameGame {
   }
 
 
-  void _drawFieldLacquer(Canvas canvas, Rect rect) {
-    final img = _fieldLacquer;
-    if (img == null) return;
-    final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
-    // Cover-fit texture only (no baked perspective grid — ortho drawn in code).
-    final scale = math.max(rect.width / src.width, rect.height / src.height);
-    final dw = src.width * scale;
-    final dh = src.height * scale;
-    final dx = rect.left + (rect.width - dw) / 2;
-    final dy = rect.top + (rect.height - dh) / 2;
+  /// Sheepskin map + camp bands. Original marks only — not a cabinet screenshot.
+  void _drawDesktopTable(Canvas canvas, Rect fieldRect) {
     canvas.save();
-    canvas.clipRect(rect);
-    canvas.drawImageRect(
-      img,
-      src,
-      Rect.fromLTWH(dx, dy, dw, dh),
-      Paint()..filterQuality = FilterQuality.medium,
+    canvas.clipRect(fieldRect);
+    canvas.drawRect(
+      fieldRect,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          fieldRect.topCenter,
+          fieldRect.bottomCenter,
+          const [Color(0xFFE7D5B0), kDesktopParchment, kDesktopParchmentDeep],
+          const [0.0, 0.45, 1.0],
+        ),
     );
-    // Soft vignette so gold tokens separate from field.
-    canvas.drawRect(rect, Paint()..color = const Color(0xFF000000).withValues(alpha: 0.18));
+    final fiber = Paint()
+      ..color = const Color(0xFF8A6238).withValues(alpha: 0.10)
+      ..strokeWidth = 1;
+    for (var i = 0; i < 22; i++) {
+      final y = fieldRect.top + (i + 0.5) * fieldRect.height / 22;
+      canvas.drawLine(Offset(fieldRect.left, y), Offset(fieldRect.right, y), fiber);
+    }
+    _drawMapMarks(canvas, fieldRect);
+    _drawFaintMapGrid(canvas, fieldRect);
+    canvas.drawRect(
+      fieldRect,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          fieldRect.center,
+          fieldRect.shortestSide * 0.78,
+          const [Color(0x00000000), Color(0x33604428)],
+        ),
+    );
+    _drawEnemyCampBand(canvas, fieldRect);
+    _drawOwnCastleBand(canvas);
     canvas.restore();
   }
 
-  /// Flat orthographic gold grid on operable field — parallel lines, equal cells, no vanishing point.
-  void _drawOrthoFieldGrid(Canvas canvas, Rect rect) {
+  /// Roads and hill marks so the floor reads as a map, not an empty grid.
+  void _drawMapMarks(Canvas canvas, Rect field) {
+    final hill = Paint()..color = const Color(0xFF6E8A58).withValues(alpha: 0.22);
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(field.left + field.width * 0.22, field.top + field.height * 0.38),
+        width: field.width * 0.28,
+        height: field.height * 0.10,
+      ),
+      hill,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(field.left + field.width * 0.74, field.top + field.height * 0.46),
+        width: field.width * 0.22,
+        height: field.height * 0.08,
+      ),
+      hill,
+    );
+    final road = Paint()
+      ..color = const Color(0xFF8C6232).withValues(alpha: 0.45)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round;
+    final spine = Path()
+      ..moveTo(field.left + field.width * 0.48, field.top + field.height * 0.16)
+      ..quadraticBezierTo(
+        field.left + field.width * 0.62,
+        field.top + field.height * 0.42,
+        field.left + field.width * 0.46,
+        field.top + field.height * 0.78,
+      );
+    canvas.drawPath(spine, road);
+    final fork = Path()
+      ..moveTo(field.left + field.width * 0.18, field.top + field.height * 0.22)
+      ..quadraticBezierTo(
+        field.left + field.width * 0.30,
+        field.top + field.height * 0.50,
+        field.left + field.width * 0.46,
+        field.top + field.height * 0.62,
+      );
+    canvas.drawPath(fork, road..strokeWidth = 4);
+    final ink = Paint()
+      ..color = const Color(0xFF5C4030).withValues(alpha: 0.35)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(field.left + field.width * 0.70, field.top + field.height * 0.30),
+          width: 18,
+          height: 14,
+        ),
+        const Radius.circular(2),
+      ),
+      ink,
+    );
+  }
+
+  /// Thin guide on the parchment. Not the bright gold lattice on black.
+  void _drawFaintMapGrid(Canvas canvas, Rect rect) {
     const cols = 8;
     const rows = 10;
-    const inset = 10.0;
+    const inset = 8.0;
     final left = rect.left + inset;
     final right = rect.right - inset;
     final top = rect.top + inset;
@@ -1820,64 +1832,52 @@ class TaisenGame extends FlameGame {
     final cellW = (right - left) / cols;
     final cellH = (bottom - top) / rows;
     final line = Paint()
-      ..color = FactionColors.gold.withValues(alpha: 0.42)
-      ..strokeWidth = 1.15
-      ..isAntiAlias = true;
-    final soft = Paint()
-      ..color = FactionColors.gold.withValues(alpha: 0.16)
-      ..strokeWidth = 2.4
-      ..isAntiAlias = true;
+      ..color = const Color(0xFF6B4A28).withValues(alpha: 0.16)
+      ..strokeWidth = 0.7;
     for (var r = 0; r <= rows; r++) {
       final y = top + r * cellH;
-      canvas.drawLine(Offset(left, y), Offset(right, y), soft);
       canvas.drawLine(Offset(left, y), Offset(right, y), line);
     }
     for (var c = 0; c <= cols; c++) {
       final x = left + c * cellW;
-      canvas.drawLine(Offset(x, top), Offset(x, bottom), soft);
       canvas.drawLine(Offset(x, top), Offset(x, bottom), line);
-    }
-    final dot = Paint()..color = FactionColors.gold.withValues(alpha: 0.7);
-    for (var r = 0; r <= rows; r++) {
-      for (var c = 0; c <= cols; c++) {
-        canvas.drawCircle(Offset(left + c * cellW, top + r * cellH), 1.6, dot);
-      }
     }
   }
 
-  /// Bottom own-castle band (drag-in = 返城, drag-out = 出陣). Lacquer + pale gold.
-  void _drawOwnCastleBand(Canvas canvas, Rect fieldRect) {
+  void _drawEnemyCampBand(Canvas canvas, Rect fieldRect) {
+    final h = fieldRect.height * 0.16;
+    final band = Rect.fromLTWH(fieldRect.left, fieldRect.top, fieldRect.width, h);
+    canvas.drawRect(band, Paint()..color = kEnemyBand.withValues(alpha: 0.42));
+    canvas.drawLine(
+      Offset(band.left + 8, band.bottom),
+      Offset(band.right - 8, band.bottom),
+      Paint()
+        ..color = const Color(0xFF3A221C).withValues(alpha: 0.55)
+        ..strokeWidth = 1.4,
+    );
+    _drawText(canvas, '敵陣', Offset(14, band.top + 8), const Color(0xFFF3E6D0), 13);
+  }
+
+  /// Bottom own-castle band (drag-in = 返城, drag-out = 出陣).
+  void _drawOwnCastleBand(Canvas canvas) {
     final band = castleBandRect;
-    // Fill
-    canvas.drawRect(band, Paint()..color = const Color(0xFF0C0C0C));
-    // Top pale-gold edge
+    canvas.drawRect(band, Paint()..color = kOwnBand.withValues(alpha: castleBandHot ? 0.72 : 0.48));
     final edge = Paint()
-      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.45)
+      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.55)
       ..strokeWidth = castleBandHot ? 2.6 : 1.4;
     canvas.drawLine(Offset(band.left + 8, band.top), Offset(band.right - 8, band.top), edge);
-    // Soft inner wash when hot
     if (castleBandHot) {
-      canvas.drawRect(
-        band,
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.14),
-      );
       canvas.drawRect(
         Rect.fromLTWH(band.left, band.top, band.width, 3),
         Paint()..color = FactionColors.gold.withValues(alpha: 0.55),
       );
     }
-    // Corner ticks
-    final tick = Paint()
-      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.85 : 0.35)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(band.left + 10, band.top + 6), Offset(band.left + 10, band.top + 18), tick);
-    canvas.drawLine(Offset(band.right - 10, band.top + 6), Offset(band.right - 10, band.top + 18), tick);
     _drawText(
       canvas,
-      castleBandHot ? '歸城區' : '己城',
-      Offset(16, band.top + 10),
-      FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.55),
-      12,
+      castleBandHot ? '歸城區' : '自陣',
+      Offset(16, band.top + 8),
+      const Color(0xFFF3E6D0),
+      13,
     );
   }
 
@@ -2159,8 +2159,7 @@ class TaisenGame extends FlameGame {
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
-  /// 影子行軍. Ash silhouette — no sprite, gold border, faction fill, or name.
-  /// The full-color 落點釘 is drawn once on the drop until the troop body coincides with it.
+  /// 影子行軍. Translucent troop blob + weapon. Not a gray card and not a second full-color card.
   void _drawMarchShadow(
     Canvas canvas,
     Offset center, {
@@ -2168,42 +2167,62 @@ class TaisenGame extends FlameGame {
     required double cardH,
     required double opacity,
     required double facing,
+    required TroopType troop,
   }) {
     if (opacity <= 0.02) return;
-    final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
-    final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
+    final blob = Rect.fromCenter(
+      center: center,
+      width: cardW * 0.96,
+      height: cardH * 0.70,
+    );
     canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + cardH * 0.06),
-        width: cardW * 1.2,
-        height: cardH * 0.42,
-      ),
-      Paint()..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.16),
+      blob,
+      Paint()..color = const Color(0xFF1A140C).withValues(alpha: opacity * 0.78),
     );
-    canvas.drawRRect(
-      rrect,
-      Paint()..color = const Color(0xFFD7D2CB).withValues(alpha: opacity),
-    );
-    canvas.drawRRect(
-      rrect,
+    canvas.drawOval(
+      blob,
       Paint()
-        ..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.55)
+        ..color = FactionColors.gold.withValues(alpha: opacity * 0.9)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.15,
+        ..strokeWidth = 1.5,
+    );
+    _drawWeapon(
+      canvas,
+      center,
+      troop,
+      const Color(0xFFFFF3D0).withValues(alpha: opacity.clamp(0.0, 1.0)),
+      scale: (cardW / 40.0).clamp(0.7, 1.4),
+    );
+    _drawText(
+      canvas,
+      _troopMark(troop),
+      Offset(center.dx - 8, center.dy + cardH * 0.22),
+      FactionColors.gold.withValues(alpha: opacity.clamp(0.0, 1.0)),
+      11,
     );
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(facing);
     final chevron = Path()
-      ..moveTo(0, -cardH * 0.46)
-      ..lineTo(-cardW * 0.14, -cardH * 0.28)
-      ..lineTo(cardW * 0.14, -cardH * 0.28)
+      ..moveTo(0, -cardH * 0.40)
+      ..lineTo(-cardW * 0.12, -cardH * 0.24)
+      ..lineTo(cardW * 0.12, -cardH * 0.24)
       ..close();
     canvas.drawPath(
       chevron,
-      Paint()..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.8),
+      Paint()..color = FactionColors.gold.withValues(alpha: opacity * 0.85),
     );
     canvas.restore();
+  }
+
+  String _troopMark(TroopType troop) {
+    return switch (troop) {
+      TroopType.cavalry => '騎',
+      TroopType.spear => '槍',
+      TroopType.bow => '弓',
+      TroopType.infantry => '步',
+      TroopType.siege => '城',
+    };
   }
 
   void _drawCardLikeToken(

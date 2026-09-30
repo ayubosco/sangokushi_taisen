@@ -1326,24 +1326,33 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const minTap = 48.0;
+    // 12mm at Material density is about 64dp. 48dp is under that.
+    const stratH = 64.0;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       color: FactionColors.lacquer,
       child: Row(
         children: [
+          const Text(
+            'Cost 6',
+            style: TextStyle(
+              color: FactionColors.gold,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
           const Spacer(),
           SizedBox(
-            width: minTap * 1.8,
-            height: minTap,
+            width: stratH * 1.6,
+            height: stratH,
             child: ElevatedButton(
               onPressed: onStrategy,
               style: ElevatedButton.styleFrom(
                 backgroundColor: FactionColors.gold,
                 foregroundColor: FactionColors.lacquer,
-                minimumSize: const Size(minTap * 1.8, minTap),
+                minimumSize: const Size(stratH * 1.6, stratH),
               ),
-              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
             ),
           ),
         ],
