@@ -117,6 +117,17 @@ class TaisenGame extends FlameGame {
       (i >= 0 && i < _reviveLeft.length) ? _reviveLeft[i] : 0;
   bool debugShowsSkull(int i) => _lifeAt(i) != UnitLife.alive;
   String debugLifeTipAt(int i) => _lifeTipAt(i);
+  /// Playtest source of the hit that retreated this body.
+  /// Stays up through the castle countdown. Empty once the body is ready to leave.
+  String debugRetreatCause(int i) {
+    final life = _lifeAt(i);
+    if (life != UnitLife.retreating && life != UnitLife.inCastleReviving) return '';
+    if (i < 0 || i >= _hpCause.length) return '';
+    return _hpCause[i];
+  }
+
+  /// True when this siege is taking the castle-band stub this tick.
+  bool debugCastleChipAt(int i) => _castleChip.contains(i);
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
@@ -173,6 +184,11 @@ class TaisenGame extends FlameGame {
   final Set<String> _tipResolved = {};
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
+  /// Playtest name of the last stub hit. Shown on the skull when that hit retreats the body.
+  /// 突撃 / 迎擊 / 射 / 亂戰 / 城傷. Not a new DPS table.
+  final List<String> _hpCause = [];
+  /// Siege bodies taking the castle-band stub this tick. Draws 「城傷」. Not a new DPS table.
+  final Set<int> _castleChip = {};
   final List<UnitLife> _unitLife = [];
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
@@ -604,6 +620,11 @@ class TaisenGame extends FlameGame {
       ..clear()
       ..add(kRansenMaxHp)
       ..add(kRansenMaxHp);
+    _hpCause
+      ..clear()
+      ..add('')
+      ..add('');
+    _castleChip.clear();
     _unitLife
       ..clear()
       ..add(UnitLife.alive)
@@ -1468,6 +1489,16 @@ class TaisenGame extends FlameGame {
         if (_lifeAt(i) == UnitLife.inCastleReviving) {
           _drawReviveBar(canvas, center, i, tokenSize);
         }
+        final cause = debugRetreatCause(i);
+        if (cause.isNotEmpty) {
+          _drawText(
+            canvas,
+            cause,
+            Offset(center.dx - 14, center.dy + tokenSize.height / 2 + 2),
+            const Color(0xFFFFF59D),
+            12,
+          );
+        }
       } else {
         _drawCardLikeToken(
           canvas,
@@ -1498,6 +1529,15 @@ class TaisenGame extends FlameGame {
           11,
         );
         _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+        if (debugCastleChipAt(i)) {
+          _drawText(
+            canvas,
+            '城傷',
+            Offset(center.dx - 14, center.dy - tokenSize.height / 2 - 18),
+            const Color(0xFFFFF59D),
+            12,
+          );
+        }
       }
     }
 
@@ -3370,8 +3410,14 @@ class TaisenGame extends FlameGame {
     while (_unitHp.length < field.length) {
       _unitHp.add(kRansenMaxHp);
     }
+    while (_hpCause.length < _unitHp.length) {
+      _hpCause.add('');
+    }
     if (_unitHp.length > field.length) {
       _unitHp.removeRange(field.length, _unitHp.length);
+      if (_hpCause.length > field.length) {
+        _hpCause.removeRange(field.length, _hpCause.length);
+      }
       _ransenUnits.removeWhere((i) => i >= field.length);
     }
   }
@@ -3414,6 +3460,12 @@ class TaisenGame extends FlameGame {
 
     if (chargeAlly != null && chargeEnemy != null) {
       _fireChargeHit(chargeAlly, chargeEnemy);
+      pairs.removeWhere((p) => _lifeAt(p.$1) != UnitLife.alive || _lifeAt(p.$2) != UnitLife.alive);
+      overlapping.clear();
+      for (final p in pairs) {
+        overlapping.add(p.$1);
+        overlapping.add(p.$2);
+      }
     }
 
     if (overlapping.isEmpty) {
@@ -3438,8 +3490,10 @@ class TaisenGame extends FlameGame {
       dealt[enemy] = (dealt[enemy] ?? 0) + _ransenOutgoingPerSec(ally) * dt;
     }
     for (final entry in dealt.entries) {
-      _applyHpLoss(entry.key, entry.value);
+      _applyHpLoss(entry.key, entry.value, cause: '亂戰');
     }
+    _ransenUnits.removeWhere((i) => i < 0 || i >= field.length || _lifeAt(i) != UnitLife.alive);
+    if (_ransenUnits.length < 2) _ransenUnits.clear();
   }
 
   /// Playtest outgoing 亂戰 rate. 攻城 is a fraction of the shared stub. Not wiki DPS.
@@ -3451,12 +3505,13 @@ class TaisenGame extends FlameGame {
     return kRansenTickPerSec;
   }
 
-  void _applyHpLoss(int i, double amount) {
+  void _applyHpLoss(int i, double amount, {required String cause}) {
     _ensureHpSlots();
     _ensureLifeSlots();
     if (amount <= 0 || i < 0 || i >= _unitHp.length) return;
     if (_lifeAt(i) != UnitLife.alive) return;
     _unitHp[i] = math.max(0.0, _unitHp[i] - amount);
+    if (i < _hpCause.length) _hpCause[i] = cause;
     if (_unitHp[i] <= 0) _enterRetreat(i);
   }
 
@@ -3477,7 +3532,7 @@ class TaisenGame extends FlameGame {
         _tipResolved.add(key);
         final heavy = field[o].troop == TroopType.cavalry;
         flashHit(s, '迎擊');
-        _applyHpLoss(o, heavy ? kRansenMaxHp : kRansenTickPerSec);
+        _applyHpLoss(o, heavy ? kRansenMaxHp : kRansenTickPerSec, cause: '迎擊');
       }
     }
     _tipResolved.removeWhere((key) => !still.contains(key));
@@ -3486,6 +3541,7 @@ class TaisenGame extends FlameGame {
   /// 攻城 standing in 己城 loses the shared stub while an enemy is in that band
   /// and the bodies are not already in 亂戰. Not a second DPS table.
   void _tickCastleSiegeChip(double dt) {
+    _castleChip.clear();
     if (dt <= 0) return;
     for (var i = 0; i < field.length; i++) {
       if (_lifeAt(i) != UnitLife.alive || field[i].troop != TroopType.siege) continue;
@@ -3499,7 +3555,8 @@ class TaisenGame extends FlameGame {
         if (inMeleeContact(tokenCenter(i), tokenCenter(e))) overlapping = true;
       }
       if (enemyInBand && !overlapping) {
-        _applyHpLoss(i, kRansenTickPerSec * dt);
+        _castleChip.add(i);
+        _applyHpLoss(i, kRansenTickPerSec * dt, cause: '城傷');
       }
     }
   }
@@ -3534,7 +3591,7 @@ class TaisenGame extends FlameGame {
     final target = _nearestBowTarget(i);
     flashHit(i, '射');
     if (target == null) return;
-    _applyHpLoss(target, kBowShotBurstSec * kRansenTickPerSec);
+    _applyHpLoss(target, kBowShotBurstSec * kRansenTickPerSec, cause: '射');
   }
 
   int? _nearestBowTarget(int i) {
@@ -3578,7 +3635,7 @@ class TaisenGame extends FlameGame {
     _dragTravelDist = 0;
     _prevAuraActive = false;
     // One 突撃 is several seconds of the overlap stub. The pair then stays in 亂戰.
-    _applyHpLoss(enemy, kChargeBurstSec * kRansenTickPerSec);
+    _applyHpLoss(enemy, kChargeBurstSec * kRansenTickPerSec, cause: '突撃');
   }
 
   /// Bow stops shooting, spear tip is a draw-time retract, cavalry drops a live aura.

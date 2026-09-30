@@ -50,6 +50,7 @@ void main() {
     expect(g.debugInRansen(0), isFalse);
     expect(g.debugInRansen(1), isFalse);
     expect(g.debugHitLabel, '撤退');
+    expect(g.debugRetreatCause(1), '迎擊');
     expect(g.debugUnitHp(1), 0);
     expect(g.debugUnitLife(1), UnitLife.retreating);
     expect(g.debugUnitLife(0), UnitLife.alive);
@@ -141,6 +142,7 @@ void main() {
     expect(castle.inCastleBand(enemyAt), isTrue);
     expect(castle.inMeleeContact(siegeAt, enemyAt), isFalse);
     castle.debugStepPursuit(1);
+    expect(castle.debugCastleChipAt(0), isTrue);
     expect(castle.debugUnitHp(0), closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.05));
     expect(castle.debugUnitHp(1), TaisenGame.kRansenMaxHp);
     expect(castle.debugInRansen(0), isFalse);
