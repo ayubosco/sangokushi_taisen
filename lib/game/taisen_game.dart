@@ -124,6 +124,16 @@ class TaisenGame extends FlameGame {
   /// Live prove overlay. Null in normal play. Not a shot freeze.
   String? visualVerifyCaption;
 
+  /// World point of the drawn 槍尖. Facing 0 is up. Not the body center.
+  Offset spearTipAt(int i) {
+    final c = tokenCenter(i);
+    final facing = isEnemyAt(i) ? enemyFacing : ownFacing;
+    return Offset(
+      c.dx + math.sin(facing) * kSpearTipReach,
+      c.dy - math.cos(facing) * kSpearTipReach,
+    );
+  }
+
   /// Spear tip glow is on unless that spear is inside 亂戰 (tip retracts).
   bool spearTipExtendedAt(int i) {
     if (i < 0 || i >= field.length) return false;
@@ -160,6 +170,8 @@ class TaisenGame extends FlameGame {
 
   /// Bodies currently in 亂戰 (ally↔enemy hitbox overlap). Exits when overlap ends.
   final Set<int> _ransenUnits = {};
+  /// Spear-tip contacts already resolved. Cleared when the tip leaves that body.
+  final Set<String> _tipResolved = {};
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
   final List<UnitLife> _unitLife = [];
@@ -180,6 +192,17 @@ class TaisenGame extends FlameGame {
   static const double kReviveSkillMul = 2 / 3;
   /// Retreat does not spend morale.
   static const int kRetreatMoraleCost = 0;
+
+  /// Playtest bursts, counted in seconds of [kRansenTickPerSec]. Not wiki DPS.
+  /// 突撃 is a sharp drop and still leaves a full bar in 亂戰.
+  static const double kChargeBurstSec = 8.0;
+  /// One stopped bow shot. Shooter HP does not scale it.
+  static const double kBowShotBurstSec = 6.0;
+  /// 攻城 outgoing 亂戰 fraction. Incoming castle damage stays on the full stub.
+  static const double kSiegeRansenMul = 0.25;
+  /// Drawn 槍尖 reach (48 × field tip scale). The hit core is smaller than body overlap.
+  static const double kSpearTipReach = 48 * 1.28;
+  static const double kSpearTipHitR = 18.0;
   /// 亂戰 world speed as a fraction of open-field march.
   /// Playtest band 0.55–0.65. 0.60 is the AC-mid default: obvious, still peelable.
   /// Not a DPS number. 突破術／捕縛術 are out of scope.
@@ -595,6 +618,9 @@ class TaisenGame extends FlameGame {
     _pulse += dt;
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickSpearTips();
+    _tickCastleSiegeChip(dt);
+    _tickBowWindup(dt);
     _tickUnitLife(dt);
     _maybeSnapKiseiFlash();
   }
@@ -1183,6 +1209,8 @@ class TaisenGame extends FlameGame {
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickSpearTips();
+    _tickCastleSiegeChip(dt);
     _tickUnitLife(dt);
     _decayChargeAfterStop(dt);
 
@@ -1287,21 +1315,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Free-match bow: accumulate still time toward ~1C; first shot only when ready.
-    // 亂戰 stops the shot — windup does not advance while the bow is overlapping.
-    if (tutorial == null && _bowWindupIndex != null && _ransenUnits.contains(_bowWindupIndex)) {
-      _cancelBowWindup();
-    } else if (tutorial == null && _bowWindupIndex != null && !_bowDidShoot) {
-      _bowWindupC += dt / CClock.secondsPerC;
-      if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
-        if (!_bowShotReady && !_verifyLoggedBowReady) {
-          _verifyLoggedBowReady = true;
-          // ignore: avoid_print
-          print('VERIFY_BOW readyC=${clock.remainingC} windupC=${_bowWindupC.toStringAsFixed(2)}');
-        }
-        _bowShotReady = true;
-      }
-    }
+    _tickBowWindup(dt);
 
     // Session2 / match: facing drives spear tip — player sets facingCorrect / _matchFacingCorrect.
     final t = tutorial;
@@ -3000,9 +3014,7 @@ class TaisenGame extends FlameGame {
         return;
       }
       if (selectedIndex == i && _bowShotReady && !_bowDidShoot && _bowWindupIndex == i) {
-        flashHit(i, '射');
-        _bowDidShoot = true;
-        _bowShotReady = false;
+        _releaseBowShot(i);
         return;
       }
       selectedIndex = i;
@@ -3247,7 +3259,8 @@ class TaisenGame extends FlameGame {
       case UnitLife.retreating:
         return '散咗拖返城先復活';
       case UnitLife.alive:
-        if (_bodyInOwnCastle(i) && debugUnitHp(i) < kRansenMaxHp) return '返城回血';
+        final parked = i < fieldInCastle.length && fieldInCastle[i];
+        if (parked && debugUnitHp(i) < kRansenMaxHp) return '返城回血';
         return '';
       case UnitLife.inCastleReviving:
       case UnitLife.readyRedeploy:
@@ -3332,7 +3345,9 @@ class TaisenGame extends FlameGame {
       final inCastle = _bodyInOwnCastle(i);
       switch (_unitLife[i]) {
         case UnitLife.alive:
-          if (inCastle && dt > 0 && _unitHp[i] < kRansenMaxHp) {
+          // 歸城 heal is the parked path. Standing in the band while fighting does not heal.
+          final parked = i < fieldInCastle.length && fieldInCastle[i];
+          if (parked && dt > 0 && _unitHp[i] < kRansenMaxHp) {
             _unitHp[i] = math.min(kRansenMaxHp, _unitHp[i] + kRansenTickPerSec * dt);
           }
           break;
@@ -3423,6 +3438,7 @@ class TaisenGame extends FlameGame {
     _ensureHpSlots();
 
     final overlapping = <int>{};
+    final pairs = <(int, int)>[];
     int? chargeAlly;
     int? chargeEnemy;
     for (var a = 0; a < field.length; a++) {
@@ -3432,6 +3448,7 @@ class TaisenGame extends FlameGame {
         if (!inMeleeContact(tokenCenter(a), tokenCenter(e))) continue;
         overlapping.add(a);
         overlapping.add(e);
+        pairs.add((a, e));
         final repeat = _chargeResolvedThisContact && _meleeEnemyIndex == e;
         if (chargeAlly == null && !repeat && _ownsLiveCharge(a) && auraActive) {
           chargeAlly = a;
@@ -3457,12 +3474,127 @@ class TaisenGame extends FlameGame {
     _suppressRansenActions();
 
     if (dt <= 0) return;
-    for (final i in _ransenUnits) {
-      if (i < 0 || i >= _unitHp.length) continue;
-      if (_lifeAt(i) != UnitLife.alive) continue;
-      _unitHp[i] = math.max(0.0, _unitHp[i] - kRansenTickPerSec * dt);
-      if (_unitHp[i] <= 0) _enterRetreat(i);
+    final dealt = <int, double>{};
+    for (final pair in pairs) {
+      final ally = pair.$1;
+      final enemy = pair.$2;
+      if (_lifeAt(ally) != UnitLife.alive || _lifeAt(enemy) != UnitLife.alive) continue;
+      dealt[ally] = (dealt[ally] ?? 0) + _ransenOutgoingPerSec(enemy) * dt;
+      dealt[enemy] = (dealt[enemy] ?? 0) + _ransenOutgoingPerSec(ally) * dt;
     }
+    for (final entry in dealt.entries) {
+      _applyHpLoss(entry.key, entry.value);
+    }
+  }
+
+  /// Playtest outgoing 亂戰 rate. 攻城 is a fraction of the shared stub. Not wiki DPS.
+  double _ransenOutgoingPerSec(int i) {
+    if (i < 0 || i >= field.length) return 0;
+    if (field[i].troop == TroopType.siege) {
+      return kRansenTickPerSec * kSiegeRansenMul;
+    }
+    return kRansenTickPerSec;
+  }
+
+  void _applyHpLoss(int i, double amount) {
+    _ensureHpSlots();
+    _ensureLifeSlots();
+    if (amount <= 0 || i < 0 || i >= _unitHp.length) return;
+    if (_lifeAt(i) != UnitLife.alive) return;
+    _unitHp[i] = math.max(0.0, _unitHp[i] - amount);
+    if (_unitHp[i] <= 0) _enterRetreat(i);
+  }
+
+  /// 槍尖 contact is not body 亂戰. A cavalry on the tip takes the full HP bar.
+  void _tickSpearTips() {
+    _ensureLifeSlots();
+    final still = <String>{};
+    for (var s = 0; s < field.length; s++) {
+      if (_lifeAt(s) != UnitLife.alive || !spearTipExtendedAt(s)) continue;
+      for (var o = 0; o < field.length; o++) {
+        if (o == s || isEnemyAt(s) == isEnemyAt(o)) continue;
+        if (_lifeAt(o) != UnitLife.alive) continue;
+        if (inMeleeContact(tokenCenter(s), tokenCenter(o))) continue;
+        if ((spearTipAt(s) - tokenCenter(o)).distance > kSpearTipHitR) continue;
+        final key = '$s:$o';
+        still.add(key);
+        if (_tipResolved.contains(key)) continue;
+        _tipResolved.add(key);
+        final heavy = field[o].troop == TroopType.cavalry;
+        flashHit(s, '迎擊');
+        _applyHpLoss(o, heavy ? kRansenMaxHp : kRansenTickPerSec);
+      }
+    }
+    _tipResolved.removeWhere((key) => !still.contains(key));
+  }
+
+  /// 攻城 standing in 己城 loses the shared stub while an enemy is in that band
+  /// and the bodies are not already in 亂戰. Not a second DPS table.
+  void _tickCastleSiegeChip(double dt) {
+    if (dt <= 0) return;
+    for (var i = 0; i < field.length; i++) {
+      if (_lifeAt(i) != UnitLife.alive || field[i].troop != TroopType.siege) continue;
+      if (!inCastleBand(fieldPos[i])) continue;
+      var enemyInBand = false;
+      var overlapping = false;
+      for (var e = 0; e < field.length; e++) {
+        if (e == i || isEnemyAt(e) == isEnemyAt(i) || _lifeAt(e) != UnitLife.alive) continue;
+        if (!inCastleBand(fieldPos[e])) continue;
+        enemyInBand = true;
+        if (inMeleeContact(tokenCenter(i), tokenCenter(e))) overlapping = true;
+      }
+      if (enemyInBand && !overlapping) {
+        _applyHpLoss(i, kRansenTickPerSec * dt);
+      }
+    }
+  }
+
+  /// Still time only. A committed march or 亂戰 drops the windup, so a moving bow has no arrow.
+  void _tickBowWindup(double dt) {
+    if (tutorial != null || _bowWindupIndex == null || dt < 0) return;
+    final i = _bowWindupIndex!;
+    final moving = dragTo != null && selectedIndex == i;
+    if (_ransenUnits.contains(i) || moving) {
+      _cancelBowWindup();
+      return;
+    }
+    if (_bowDidShoot) return;
+    _bowWindupC += dt / CClock.secondsPerC;
+    if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
+      if (!_bowShotReady && !_verifyLoggedBowReady) {
+        _verifyLoggedBowReady = true;
+        // ignore: avoid_print
+        print('VERIFY_BOW readyC=${clock.remainingC} windupC=${_bowWindupC.toStringAsFixed(2)}');
+      }
+      _bowShotReady = true;
+    }
+  }
+
+  /// Stopped bow only. Marching or 亂戰 releases nothing. Low HP does not weaken it.
+  void _releaseBowShot(int i) {
+    _bowDidShoot = true;
+    _bowShotReady = false;
+    final moving = dragTo != null && selectedIndex == i;
+    if (_ransenUnits.contains(i) || moving) return;
+    final target = _nearestBowTarget(i);
+    flashHit(i, '射');
+    if (target == null) return;
+    _applyHpLoss(target, kBowShotBurstSec * kRansenTickPerSec);
+  }
+
+  int? _nearestBowTarget(int i) {
+    int? best;
+    var bestD = double.infinity;
+    for (var o = 0; o < field.length; o++) {
+      if (o == i || isEnemyAt(o) == isEnemyAt(i) || _lifeAt(o) != UnitLife.alive) continue;
+      if (inMeleeContact(tokenCenter(i), tokenCenter(o))) continue;
+      final d = (tokenCenter(o) - tokenCenter(i)).distance;
+      if (d < bestD) {
+        bestD = d;
+        best = o;
+      }
+    }
+    return best;
   }
 
   /// 突撃 once, then the caller keeps the pair in 亂戰 if they still overlap.
@@ -3490,6 +3622,8 @@ class TaisenGame extends FlameGame {
     _matchChargeC = 0;
     _dragTravelDist = 0;
     _prevAuraActive = false;
+    // One 突撃 is several seconds of the overlap stub. The pair then stays in 亂戰.
+    _applyHpLoss(enemy, kChargeBurstSec * kRansenTickPerSec);
   }
 
   /// Bow stops shooting, spear tip is a draw-time retract, cavalry drops a live aura.
