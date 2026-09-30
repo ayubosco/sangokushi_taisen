@@ -12,6 +12,7 @@ import 'faction_colors.dart';
 import 'fx_windows.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
+import 'unit_life.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
@@ -112,6 +113,11 @@ class TaisenGame extends FlameGame {
   bool debugInRansen(int i) => _ransenUnits.contains(i);
   double debugUnitHp(int i) =>
       (i >= 0 && i < _unitHp.length) ? _unitHp[i] : kRansenMaxHp;
+  UnitLife debugUnitLife(int i) => _lifeAt(i);
+  double debugReviveLeft(int i) =>
+      (i >= 0 && i < _reviveLeft.length) ? _reviveLeft[i] : 0;
+  bool debugShowsSkull(int i) => _lifeAt(i) != UnitLife.alive;
+  String debugLifeTipAt(int i) => _lifeTipAt(i);
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
@@ -156,10 +162,24 @@ class TaisenGame extends FlameGame {
   final Set<int> _ransenUnits = {};
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
+  final List<UnitLife> _unitLife = [];
+  /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
+  final List<double> _reviveLeft = [];
+  /// Match morale stub. Retreat subtracts [kRetreatMoraleCost] only.
+  int matchMorale = 0;
 
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
   static const double kRansenTickPerSec = 6.0;
   static const double kRansenMaxHp = 100.0;
+
+  /// Retreat splash ceiling from the Research delta (≤~1s). Not a DPS number.
+  static const double kRetreatSplashSec = 1.0;
+  /// Slice base [adapted]. 天 has no official second. Do not substitute wiki ~35s.
+  static const double kReviveBaseSec = 15.0;
+  /// 特技「復活／活」only. 15 × 2/3 = 10.
+  static const double kReviveSkillMul = 2 / 3;
+  /// Retreat does not spend morale.
+  static const int kRetreatMoraleCost = 0;
   /// 亂戰 world speed as a fraction of open-field march.
   /// Playtest band 0.55–0.65. 0.60 is the AC-mid default: obvious, still peelable.
   /// Not a DPS number. 突破術／捕縛術 are out of scope.
@@ -432,6 +452,7 @@ class TaisenGame extends FlameGame {
       return false;
     }
     fieldPos[i] = next;
+    _noteCastleExit(i, next);
     // 亂戰: cavalry must not build or keep filling aura while bodies overlap.
     // Contact resolution itself runs in [_tickRansen], once per frame.
     final scrambled = _ransenUnits.contains(i);
@@ -489,7 +510,10 @@ class TaisenGame extends FlameGame {
       fieldInCastle.add(false);
     }
     fieldInCastle[i] = true;
-    triggerReturnCityFx();
+    // Alive 歸城 is the heal path. A retreated body only starts the countdown.
+    if (_lifeAt(i) == UnitLife.alive) {
+      triggerReturnCityFx();
+    }
     _cancelBowWindup();
     _clearTravelMeterOnStop();
     _matchChargeIndex = null;
@@ -551,6 +575,14 @@ class TaisenGame extends FlameGame {
       ..clear()
       ..add(kRansenMaxHp)
       ..add(kRansenMaxHp);
+    _unitLife
+      ..clear()
+      ..add(UnitLife.alive)
+      ..add(UnitLife.alive);
+    _reviveLeft
+      ..clear()
+      ..add(0)
+      ..add(0);
     _hitFlashIndex = null;
     _hitFlashLeft = 0;
     _hitFlashLabel = '';
@@ -563,6 +595,7 @@ class TaisenGame extends FlameGame {
     _pulse += dt;
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickUnitLife(dt);
     _maybeSnapKiseiFlash();
   }
 
@@ -1150,6 +1183,7 @@ class TaisenGame extends FlameGame {
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickUnitLife(dt);
     _decayChargeAfterStop(dt);
 
     // Every frame: Watch telegraph follows live field charge facing + aura (not demo cycle alone).
@@ -1416,6 +1450,21 @@ class TaisenGame extends FlameGame {
           opacity: marchShadowOpacityAt(i),
           facing: ownFacing,
         );
+      } else if (_lifeAt(i) != UnitLife.alive) {
+        _drawRetreatToken(canvas, center, tokenSize);
+        final tip = _lifeTipAt(i);
+        if (tip.isNotEmpty) {
+          _drawText(
+            canvas,
+            tip,
+            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
+            const Color(0xFFFFF59D),
+            11,
+          );
+        }
+        if (_lifeAt(i) == UnitLife.inCastleReviving) {
+          _drawReviveBar(canvas, center, i, tokenSize);
+        }
       } else {
         _drawCardLikeToken(
           canvas,
@@ -1983,6 +2032,14 @@ class TaisenGame extends FlameGame {
     // Watch solid unit is the troop body (影子行軍 / fieldPos): position, facing, 氣勢.
     // It is not stuck on the 落點釘. When 部隊追上, card and body are the same spot.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
+    if (ownSafe != null && _lifeAt(ownSafe) != UnitLife.alive) {
+      canvas.drawCircle(ownC, 7, Paint()..color = const Color(0xFFB0A8A0));
+      _drawText(canvas, '撤', ownC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
+    }
+    if (enemySafe != null && _lifeAt(enemySafe) != UnitLife.alive) {
+      canvas.drawCircle(enemyC, 7, Paint()..color = const Color(0xFFB0A8A0));
+      _drawText(canvas, '撤', enemyC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
+    }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
     _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
@@ -3069,7 +3126,9 @@ class TaisenGame extends FlameGame {
         while (fieldInCastle.length <= i) {
           fieldInCastle.add(false);
         }
-        if (bandHot) {
+        final leavingCastle = _lifeAt(i) == UnitLife.readyRedeploy ||
+            _lifeAt(i) == UnitLife.inCastleReviving;
+        if (bandHot && !leavingCastle) {
           // Body is already in 己城: park and drop the waypoint. Do not keep marching.
           _parkInCastle(i, at);
         } else {
@@ -3111,6 +3170,7 @@ class TaisenGame extends FlameGame {
     final flashSec = switch (label) {
       '突撃' => kChargeFlashSec,
       '氣勢' => kKiseiFlashSec,
+      '撤退' => kRetreatSplashSec,
       _ => math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC)),
     };
     _hitFlashLeft = flashSec;
@@ -3162,6 +3222,180 @@ class TaisenGame extends FlameGame {
     _clearTravelMeterOnStop();
   }
 
+  UnitLife _lifeAt(int i) {
+    if (i < 0 || i >= _unitLife.length) return UnitLife.alive;
+    return _unitLife[i];
+  }
+
+  bool _bodyInOwnCastle(int i) {
+    if (i < 0 || i >= fieldPos.length || isEnemyAt(i)) return false;
+    if (i < fieldInCastle.length && fieldInCastle[i]) return true;
+    return inCastleBand(fieldPos[i]);
+  }
+
+  double _reviveSecondsFor(int i) {
+    if (i < 0 || i >= field.length) return kReviveBaseSec;
+    return reviveSeconds(
+      skilled: skillHasRevive(field[i].skills),
+      baseSec: kReviveBaseSec,
+      skillMul: kReviveSkillMul,
+    );
+  }
+
+  String _lifeTipAt(int i) {
+    switch (_lifeAt(i)) {
+      case UnitLife.retreating:
+        return '散咗拖返城先復活';
+      case UnitLife.alive:
+        if (_bodyInOwnCastle(i) && debugUnitHp(i) < kRansenMaxHp) return '返城回血';
+        return '';
+      case UnitLife.inCastleReviving:
+      case UnitLife.readyRedeploy:
+        return '';
+    }
+  }
+
+  void _ensureLifeSlots() {
+    while (_unitLife.length < field.length) {
+      _unitLife.add(UnitLife.alive);
+      _reviveLeft.add(0);
+    }
+    if (_unitLife.length > field.length) {
+      _unitLife.removeRange(field.length, _unitLife.length);
+      _reviveLeft.removeRange(field.length, _reviveLeft.length);
+    }
+  }
+
+  /// HP ≤ 0. Clears the march, the aura, and 亂戰. Morale is unchanged.
+  void _enterRetreat(int i) {
+    _ensureLifeSlots();
+    _ensureHpSlots();
+    if (i < 0 || i >= field.length) return;
+    if (_unitLife[i] != UnitLife.alive) return;
+    _unitHp[i] = 0;
+    _unitLife[i] = UnitLife.retreating;
+    _reviveLeft[i] = _reviveSecondsFor(i);
+    _ransenUnits.remove(i);
+    matchMorale -= kRetreatMoraleCost;
+    if (selectedIndex == i) {
+      dragTo = null;
+      dragging = false;
+      _lastDragDir = null;
+      _clearTravelMeterOnStop();
+    }
+    if (_matchChargeIndex == i) {
+      _matchChargeIndex = null;
+      _matchChargeC = 0;
+    }
+    flashHit(i, '撤退');
+  }
+
+  /// Test hook: set playtest HP without starting retreat. 0 still needs [debugForceHpZero].
+  void debugSetUnitHp(int i, double hp) {
+    _ensureHpSlots();
+    if (i < 0 || i >= _unitHp.length) return;
+    _unitHp[i] = hp.clamp(0.0, kRansenMaxHp);
+  }
+
+  /// Test hook: HP → 0 starts retreat. Does not invent a damage source.
+  void debugForceHpZero(int i) {
+    _ensureHpSlots();
+    _ensureLifeSlots();
+    if (i < 0 || i >= _unitHp.length) return;
+    _unitHp[i] = 0;
+    _enterRetreat(i);
+  }
+
+  void _finishRevive(int i) {
+    _reviveLeft[i] = 0;
+    _unitHp[i] = kRansenMaxHp;
+    _unitLife[i] = UnitLife.readyRedeploy;
+  }
+
+  void _noteCastleExit(int i, Offset pos) {
+    if (i < 0 || i >= fieldInCastle.length || !fieldInCastle[i]) return;
+    if (inCastleBand(pos)) return;
+    fieldInCastle[i] = false;
+    if (i < _unitLife.length && _unitLife[i] == UnitLife.readyRedeploy) {
+      _unitLife[i] = UnitLife.alive;
+    }
+  }
+
+  /// Countdown runs only inside 己城. Outside, [reviveLeft] stays put.
+  /// Alive bodies in the castle heal. That path is not the revive bell.
+  void _tickUnitLife(double dt) {
+    _ensureLifeSlots();
+    _ensureHpSlots();
+    if (dt < 0) return;
+    for (var i = 0; i < field.length; i++) {
+      if (isEnemyAt(i)) continue;
+      final inCastle = _bodyInOwnCastle(i);
+      switch (_unitLife[i]) {
+        case UnitLife.alive:
+          if (inCastle && dt > 0 && _unitHp[i] < kRansenMaxHp) {
+            _unitHp[i] = math.min(kRansenMaxHp, _unitHp[i] + kRansenTickPerSec * dt);
+          }
+          break;
+        case UnitLife.retreating:
+          if (!inCastle) break;
+          _unitLife[i] = UnitLife.inCastleReviving;
+          _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
+          if (_reviveLeft[i] <= 0) _finishRevive(i);
+          break;
+        case UnitLife.inCastleReviving:
+          if (!inCastle) break;
+          _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
+          if (_reviveLeft[i] <= 0) _finishRevive(i);
+          break;
+        case UnitLife.readyRedeploy:
+          if (!inCastle) {
+            _unitLife[i] = UnitLife.alive;
+            if (i < fieldInCastle.length) fieldInCastle[i] = false;
+          }
+          break;
+      }
+    }
+  }
+
+  void _drawRetreatToken(Canvas canvas, Offset c, Size tokenSize) {
+    final rect = Rect.fromCenter(center: c, width: tokenSize.width, height: tokenSize.height);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+      Paint()..color = const Color(0xFFB0A8A0),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+      Paint()
+        ..color = const Color(0xFF5D534C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    _drawText(canvas, '骷', Offset(c.dx - 8, c.dy - 10), const Color(0xFF3E2723), 16);
+  }
+
+  void _drawReviveBar(Canvas canvas, Offset c, int i, Size tokenSize) {
+    final total = _reviveSecondsFor(i);
+    if (total <= 0) return;
+    final left = i < _reviveLeft.length ? _reviveLeft[i] : 0.0;
+    final frac = (left / total).clamp(0.0, 1.0);
+    final bar = Rect.fromCenter(
+      center: Offset(c.dx, c.dy - tokenSize.height / 2 - 6),
+      width: tokenSize.width,
+      height: 4,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+      Paint()..color = const Color(0xFF3E2723),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * frac, bar.height),
+        const Radius.circular(2),
+      ),
+      Paint()..color = const Color(0xFFFFF59D),
+    );
+  }
+
   void _ensureHpSlots() {
     while (_unitHp.length < field.length) {
       _unitHp.add(kRansenMaxHp);
@@ -3192,9 +3426,9 @@ class TaisenGame extends FlameGame {
     int? chargeAlly;
     int? chargeEnemy;
     for (var a = 0; a < field.length; a++) {
-      if (isEnemyAt(a)) continue;
+      if (isEnemyAt(a) || _lifeAt(a) != UnitLife.alive) continue;
       for (var e = 0; e < field.length; e++) {
-        if (!isEnemyAt(e)) continue;
+        if (!isEnemyAt(e) || _lifeAt(e) != UnitLife.alive) continue;
         if (!inMeleeContact(tokenCenter(a), tokenCenter(e))) continue;
         overlapping.add(a);
         overlapping.add(e);
@@ -3225,7 +3459,9 @@ class TaisenGame extends FlameGame {
     if (dt <= 0) return;
     for (final i in _ransenUnits) {
       if (i < 0 || i >= _unitHp.length) continue;
+      if (_lifeAt(i) != UnitLife.alive) continue;
       _unitHp[i] = math.max(0.0, _unitHp[i] - kRansenTickPerSec * dt);
+      if (_unitHp[i] <= 0) _enterRetreat(i);
     }
   }
 
