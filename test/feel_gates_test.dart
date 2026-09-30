@@ -377,7 +377,8 @@ void main() {
     expect(sec, inInclusiveRange(1.5, 3.0));
     expect(auraFrame, greaterThan(0), reason: '120px travel still lights the aura on a long march');
     expect(auraFrame / 60.0, greaterThan(0.4), reason: 'aura is not instant on finger-up');
-    expect(g.debugTravel01, 1.0);
+    expect(g.debugTravel01, 0, reason: 'arrive clears travel and aura to 0');
+    expect(g.auraActive, isFalse);
   });
 }
 
