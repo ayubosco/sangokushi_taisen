@@ -242,8 +242,12 @@ class TaisenGame extends FlameGame {
   /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
   static const double kWatchFractionOfGame = 0.15;
 
-  /// Field shadow while the full-color card is pinned on 落點. Not full opacity.
+  /// Field shadow while the full-color card is pinned on 落點.
+  /// A second full-color card is a Fail — the march body is this silhouette only.
+  static const bool kMarchShadowFullColor = false;
   static const double kMarchShadowOpacity = 0.38;
+  /// Last stretch where the shadow sinks into the pinned card (合體).
+  static const double kMergeSinkPx = 36.0;
 
   /// Castle strip height inside the game band (~3–4% screen after shell chrome).
   static const double kCastleStripPx = 22.0;
@@ -314,9 +318,10 @@ class TaisenGame extends FlameGame {
   /// Body rests on the waypoint once it is this close, then [dragTo] clears.
   static const double kArrivalEpsilon = 2.0;
 
-  /// 天 wiki base speeds — https://w.atwiki.jp/taisendsten/pages/119.html
-  /// 騎 1.1, 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5. Not the oral order 騎>弓>歩＝槍.
+  /// 天 wiki / troop-move-speed-relative.md. Not the oral order 騎>弓>歩＝槍.
+  /// 騎 1.1 (aura 1.32), 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5.
   /// Bow 走射 0.96 is not a waypoint state (stop-then-shot stays 0.8 while marching).
+  /// https://w.atwiki.jp/taisendsten/pages/119.html
   static double pursuitWikiBase(TroopType troop) {
     return switch (troop) {
       TroopType.cavalry => 1.1,
@@ -662,6 +667,37 @@ class TaisenGame extends FlameGame {
 
   /// Translucent march body. Gameplay, aura rings, and the Watch solid unit use this.
   Offset shadowAt(int i) => tokenCenter(i);
+
+  /// Cyan rings and the 蓄緊 caption sit on the marching shadow, never the pin.
+  Offset chargeRingAnchor(int i) => shadowAt(i);
+
+  /// Own unit the top Watch paints. A live selection wins so the band follows
+  /// the body you placed, not whoever was spawned first.
+  int? get watchOwnIndex {
+    final sel = selectedIndex;
+    if (sel != null && sel >= 0 && sel < fieldPos.length && !isEnemyAt(sel)) {
+      return sel;
+    }
+    final tut = tutorialOwnIndex;
+    if (tut != null && tut >= 0 && tut < fieldPos.length && !isEnemyAt(tut)) {
+      return tut;
+    }
+    if (fieldIsEnemy.isEmpty) return fieldPos.isEmpty ? null : 0;
+    final i = fieldIsEnemy.indexWhere((e) => !e);
+    if (i >= 0 && i < fieldPos.length) return i;
+    return null;
+  }
+
+  /// Battlefield point Watch paints. Physical march, never the pinned 落點.
+  Offset watchBodyAt(int i) => shadowAt(i);
+
+  /// Shadow strength. Full while the gap is open; it sinks to 0 as it enters the card.
+  double marchShadowOpacityAt(int i) {
+    if (!pinnedMarchAt(i) || dragTo == null) return 0;
+    final gap = (fieldPos[i] - dragTo!).distance;
+    final fade = (gap / kMergeSinkPx).clamp(0.0, 1.0);
+    return kMarchShadowOpacity * fade;
+  }
 
   void setupSession1Field() {
     field.clear();
@@ -1356,25 +1392,28 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.hitCharge);
 
       // Aura rings bind to the shadow (march position), never the pinned card.
-      _drawFieldTelegraph(canvas, center, card, i, isOwn: !isEnemy && tutorialOwnIndex == i, isEnemy: isEnemy);
+      _drawFieldTelegraph(
+        canvas,
+        chargeRingAnchor(i),
+        card,
+        i,
+        isOwn: !isEnemy && tutorialOwnIndex == i,
+        isEnemy: isEnemy,
+      );
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
       if (pinned) {
-        _drawCardLikeToken(
+        // Silhouette only. kMarchShadowFullColor stays false — a second
+        // full-color card on the path is a Fail.
+        _drawMarchShadow(
           canvas,
-          center,
-          card,
-          index: i,
+          shadowAt(i),
           cardW: tokenSize.width,
           cardH: tokenSize.height,
-          selected: false,
-          isEnemy: false,
-          dim: false,
-          pulseOwn: false,
-          opacity: kMarchShadowOpacity,
+          opacity: marchShadowOpacityAt(i),
+          facing: ownFacing,
         );
-        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
       } else {
         _drawCardLikeToken(
           canvas,
@@ -1477,7 +1516,7 @@ class TaisenGame extends FlameGame {
               ? selectedIndex
               : null);
       if (travel01 > kChargeRingShowTravel01 && captionIdx != null) {
-        final oc = tokenCenter(captionIdx);
+        final oc = chargeRingAnchor(captionIdx);
         _drawFatFloatText(
           canvas,
           '蓄緊 ${(travel01 * 100).round()}%',
@@ -1810,8 +1849,7 @@ class TaisenGame extends FlameGame {
     final t = tutorial;
     _drawWatchPerspectiveLane(canvas, band);
 
-    final ownIdx = tutorialOwnIndex ??
-        (fieldIsEnemy.isEmpty ? null : fieldIsEnemy.indexWhere((e) => !e));
+    final ownIdx = watchOwnIndex;
     final enemyIdx = tutorialEnemyIndex ??
         (fieldIsEnemy.isEmpty ? null : fieldIsEnemy.indexWhere((e) => e));
     final ownSafe = (ownIdx != null && ownIdx >= 0 && ownIdx < fieldPos.length) ? ownIdx : null;
@@ -1820,7 +1858,7 @@ class TaisenGame extends FlameGame {
 
     final ownFallback = Offset(band.width * 0.34, band.top + band.height * 0.72);
     final enemyFallback = Offset(band.width * 0.62, band.top + band.height * 0.38);
-    final ownField = ownSafe != null ? fieldPos[ownSafe] : ownFallback;
+    final ownField = ownSafe != null ? watchBodyAt(ownSafe) : ownFallback;
     final enemyField = enemySafe != null ? fieldPos[enemySafe] : enemyFallback;
     final ownC = ownSafe != null ? mapFieldToWatch(ownField, band) : ownFallback;
     final enemyC = enemySafe != null ? mapFieldToWatch(enemyField, band) : enemyFallback;
@@ -1916,8 +1954,8 @@ class TaisenGame extends FlameGame {
       enemyTroop = field[enemySafe].troop;
     }
 
-    // Watch solid unit is march progress (shadow / fieldPos): position, facing, 氣勢.
-    // It is not pinned on the field 落點.
+    // Watch solid unit is the physical march (shadow / fieldPos): position, facing, 氣勢.
+    // It is not pinned on the field 落點. On 合體, that point is the one card.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
@@ -2022,6 +2060,53 @@ class TaisenGame extends FlameGame {
     }
     // Weapons-only glyph
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
+  }
+
+  /// Marching body. Ash silhouette — no sprite, gold border, faction fill, or name.
+  /// The full-color card is drawn once, pinned on the 落點, until this sinks into it.
+  void _drawMarchShadow(
+    Canvas canvas,
+    Offset center, {
+    required double cardW,
+    required double cardH,
+    required double opacity,
+    required double facing,
+  }) {
+    if (opacity <= 0.02) return;
+    final dest = Rect.fromCenter(center: center, width: cardW, height: cardH);
+    final rrect = RRect.fromRectAndRadius(dest, Radius.circular(cardW * 0.08));
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(center.dx, center.dy + cardH * 0.06),
+        width: cardW * 1.2,
+        height: cardH * 0.42,
+      ),
+      Paint()..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.16),
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()..color = const Color(0xFFD7D2CB).withValues(alpha: opacity),
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.15,
+    );
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(facing);
+    final chevron = Path()
+      ..moveTo(0, -cardH * 0.46)
+      ..lineTo(-cardW * 0.14, -cardH * 0.28)
+      ..lineTo(cardW * 0.14, -cardH * 0.28)
+      ..close();
+    canvas.drawPath(
+      chevron,
+      Paint()..color = const Color(0xFFFFFFFF).withValues(alpha: opacity * 0.8),
+    );
+    canvas.restore();
   }
 
   void _drawCardLikeToken(
