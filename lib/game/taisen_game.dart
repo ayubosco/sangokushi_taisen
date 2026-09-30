@@ -1463,8 +1463,8 @@ class TaisenGame extends FlameGame {
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
       if (pinned) {
-        // 影子行軍 silhouette only. kMarchShadowFullColor stays false — a second
-        // full-color card on the path is a Fail.
+        // 影子行軍: ash outline + weapon corner. kMarchShadowFullColor stays false —
+        // a second full-color card on the path is a Fail.
         _drawMarchShadow(
           canvas,
           shadowAt(i),
@@ -2135,7 +2135,10 @@ class TaisenGame extends FlameGame {
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
-  /// 影子行軍. Translucent troop blob + weapon. Not a gray card and not a second full-color card.
+  /// 影子行軍. Ash 5:8 outline and a weapon-corner silhouette.
+  /// The wash stays faint so it is not a gray brick. The weapon stays bright
+  /// enough to read the troop, then fades with [opacity] as 部隊追上.
+  /// Not a human figure and not a second full-color card.
   void _drawMarchShadow(
     Canvas canvas,
     Offset center, {
@@ -2146,49 +2149,126 @@ class TaisenGame extends FlameGame {
     required TroopType troop,
   }) {
     if (opacity <= 0.02) return;
-    final blob = Rect.fromCenter(
-      center: center,
-      width: cardW * 0.96,
-      height: cardH * 0.70,
+    final presence = (opacity / kMarchShadowOpacity).clamp(0.0, 1.0);
+    final rect = Rect.fromCenter(center: center, width: cardW, height: cardH);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cardW * 0.1));
+    canvas.drawRRect(
+      rrect,
+      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.42),
     );
-    canvas.drawOval(
-      blob,
-      Paint()..color = const Color(0xFF1A140C).withValues(alpha: opacity * 0.78),
-    );
-    canvas.drawOval(
-      blob,
+    canvas.drawRRect(
+      rrect,
       Paint()
-        ..color = FactionColors.gold.withValues(alpha: opacity * 0.9)
+        ..color = FactionColors.gold.withValues(alpha: presence * 0.8)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );
-    _drawWeapon(
+    _drawMarchWeapon(
       canvas,
-      center,
+      Offset(center.dx, rect.top + cardH * 0.38),
       troop,
-      const Color(0xFFFFF3D0).withValues(alpha: opacity.clamp(0.0, 1.0)),
-      scale: (cardW / 40.0).clamp(0.7, 1.4),
+      scale: (cardW / 34.0).clamp(0.85, 1.5),
+      alpha: presence * 0.95,
     );
     _drawText(
       canvas,
       _troopMark(troop),
-      Offset(center.dx - 8, center.dy + cardH * 0.22),
-      FactionColors.gold.withValues(alpha: opacity.clamp(0.0, 1.0)),
-      11,
+      Offset(rect.center.dx - cardW * 0.16, rect.bottom - cardH * 0.26),
+      FactionColors.gold.withValues(alpha: presence * 0.95),
+      (cardW * 0.30).clamp(10.0, 14.0),
     );
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(facing);
     final chevron = Path()
-      ..moveTo(0, -cardH * 0.40)
-      ..lineTo(-cardW * 0.12, -cardH * 0.24)
-      ..lineTo(cardW * 0.12, -cardH * 0.24)
+      ..moveTo(0, -cardH * 0.62)
+      ..lineTo(-cardW * 0.10, -cardH * 0.50)
+      ..lineTo(cardW * 0.10, -cardH * 0.50)
       ..close();
     canvas.drawPath(
       chevron,
-      Paint()..color = FactionColors.gold.withValues(alpha: opacity * 0.85),
+      Paint()..color = FactionColors.gold.withValues(alpha: presence * 0.7),
     );
     canvas.restore();
+  }
+
+  /// Upright weapon only. Facing stays on the chevron so the glyph does not spin.
+  void _drawMarchWeapon(
+    Canvas canvas,
+    Offset c,
+    TroopType troop, {
+    required double scale,
+    required double alpha,
+  }) {
+    if (alpha <= 0.02) return;
+    final s = scale;
+    final ash = const Color(0xFFF4EBD4).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final stroke = Paint()
+      ..color = ash
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6 * s
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()..color = gold;
+    switch (troop) {
+      case TroopType.cavalry:
+        canvas.drawArc(
+          Rect.fromCenter(center: c, width: 22 * s, height: 26 * s),
+          -0.5,
+          2.5,
+          false,
+          stroke,
+        );
+        canvas.drawCircle(Offset(c.dx - 8 * s, c.dy + 8 * s), 3.2 * s, stroke);
+      case TroopType.spear:
+        canvas.drawLine(Offset(c.dx, c.dy + 16 * s), Offset(c.dx, c.dy - 6 * s), stroke);
+        final tip = Path()
+          ..moveTo(c.dx, c.dy - 18 * s)
+          ..lineTo(c.dx - 6.5 * s, c.dy - 5 * s)
+          ..lineTo(c.dx + 6.5 * s, c.dy - 5 * s)
+          ..close();
+        canvas.drawPath(tip, fill);
+        canvas.drawPath(tip, stroke);
+      case TroopType.bow:
+        final arc = Path()
+          ..moveTo(c.dx - 8 * s, c.dy - 15 * s)
+          ..quadraticBezierTo(c.dx + 16 * s, c.dy, c.dx - 8 * s, c.dy + 15 * s);
+        canvas.drawPath(arc, stroke);
+        canvas.drawLine(
+          Offset(c.dx - 8 * s, c.dy - 15 * s),
+          Offset(c.dx - 8 * s, c.dy + 15 * s),
+          stroke,
+        );
+        canvas.drawLine(
+          Offset(c.dx - 6 * s, c.dy),
+          Offset(c.dx + 10 * s, c.dy),
+          Paint()
+            ..color = ash
+            ..strokeWidth = 1.6 * s
+            ..strokeCap = StrokeCap.round,
+        );
+      case TroopType.infantry:
+        canvas.drawLine(
+          Offset(c.dx - 11 * s, c.dy + 12 * s),
+          Offset(c.dx + 11 * s, c.dy - 12 * s),
+          stroke,
+        );
+        canvas.drawLine(
+          Offset(c.dx - 1 * s, c.dy),
+          Offset(c.dx - 10 * s, c.dy + 4 * s),
+          stroke,
+        );
+      case TroopType.siege:
+        canvas.drawLine(
+          Offset(c.dx - 13 * s, c.dy - 2 * s),
+          Offset(c.dx + 13 * s, c.dy - 2 * s),
+          stroke,
+        );
+        canvas.drawCircle(Offset(c.dx - 7 * s, c.dy + 8 * s), 5 * s, stroke);
+        canvas.drawCircle(Offset(c.dx + 7 * s, c.dy + 8 * s), 5 * s, stroke);
+        canvas.drawLine(Offset(c.dx, c.dy - 2 * s), Offset(c.dx, c.dy - 12 * s), stroke);
+    }
   }
 
   String _troopMark(TroopType troop) {
