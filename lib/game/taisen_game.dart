@@ -1619,7 +1619,31 @@ class TaisenGame extends FlameGame {
         Offset(w * 0.5, fieldTop + 22),
         fontSize: 18,
       );
+      // Measurable H0 ruler for the verify frames. Not a stage skin.
+      _drawH0Ruler(canvas);
     }
+  }
+
+  /// Watch / drag / token percents drawn on verify frames so a screenshot can be measured.
+  void _drawH0Ruler(Canvas canvas) {
+    if (size.y <= 0 || size.x <= 0) return;
+    final wh = watchH;
+    final watchPct = (wh / size.y * 100).round();
+    final dragPct = (fieldH / size.y * 100).round();
+    final tokenPct = (kTokenWidthFracOfField * 100).round();
+    final line = Paint()
+      ..color = const Color(0xFFFFF59D)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(Offset(0, wh), Offset(size.x, wh), line);
+    canvas.drawLine(Offset(0, size.y - 1), Offset(size.x, size.y - 1), line);
+    _drawText(canvas, 'H0 Watch $watchPct%', const Offset(8, 4), const Color(0xFFFFF59D), 11);
+    _drawText(
+      canvas,
+      '可拖 $dragPct%  token $tokenPct% 5:8',
+      Offset(8, wh + 2),
+      const Color(0xFFFFF59D),
+      11,
+    );
   }
 
   /// Removed: floating charge/intercept buttons (Design/UIUX lock).

@@ -33,6 +33,9 @@ class SoftPinVisualShot {
     required this.shadowOpacity,
     required this.pinGap,
     required this.ringOnShadow,
+    required this.watchOfGame,
+    required this.fieldOfGame,
+    required this.tokenOfField,
   });
 
   final String id;
@@ -47,8 +50,22 @@ class SoftPinVisualShot {
   final double shadowOpacity;
   final double pinGap;
   final bool ringOnShadow;
+  /// Watch height ÷ game band. Gate is ≤0.18, and ≤0.20 of a phone screen.
+  final double watchOfGame;
+  /// Drag field ÷ game band. Fail when this would put 可拖／屏 under 0.55.
+  final double fieldOfGame;
+  final double tokenOfField;
+
+  /// H0 ruler: Watch stays in the 0.15–0.18 game band, drag field stays ≥0.55, token is 0.10.
+  bool get h0Pass =>
+      watchOfGame > 0 &&
+      watchOfGame <= 0.18 &&
+      fieldOfGame >= 0.55 &&
+      (tokenOfField - TaisenGame.kTokenWidthFracOfField).abs() < 0.001 &&
+      (TaisenGame.kTokenAspectWH - 5 / 8).abs() < 0.001;
 
   bool get pass {
+    if (!h0Pass) return false;
     switch (id) {
       case '1-mid':
         // ① Released march: 落點釘 ahead, 影子行軍 still catching up.
@@ -235,6 +252,9 @@ class SoftPinVisualVerify {
       shadowOpacity: game.marchShadowOpacityAt(0),
       pinGap: (game.pinnedCardAt(0) - game.shadowAt(0)).distance,
       ringOnShadow: (game.chargeRingAnchor(0) - game.shadowAt(0)).distance < 0.5,
+      watchOfGame: game.size.y > 0 ? game.watchH / game.size.y : 0,
+      fieldOfGame: game.size.y > 0 ? game.fieldH / game.size.y : 0,
+      tokenOfField: TaisenGame.kTokenWidthFracOfField,
     );
     // ignore: avoid_print
     print(
@@ -245,6 +265,9 @@ class SoftPinVisualVerify {
       'shadow=${shot.shadowOpacity.toStringAsFixed(2)} '
       'pinGap=${shot.pinGap.toStringAsFixed(1)} '
       'ringOnShadow=${shot.ringOnShadow} '
+      'H0 watch=${(shot.watchOfGame * 100).round()}% '
+      'drag=${(shot.fieldOfGame * 100).round()}% '
+      'token=${(shot.tokenOfField * 100).round()}% '
       'holdSec=${holdFor.inMilliseconds / 1000}',
     );
     await hold(shot);

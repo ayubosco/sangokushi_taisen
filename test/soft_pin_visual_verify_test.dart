@@ -35,6 +35,10 @@ void main() {
     for (final shot in shots) {
       expect(shot.pass, isTrue, reason: '${shot.id} ${shot.caption}');
       expect(shot.dragging, isFalse, reason: '${shot.id} is a release, not a hold-drag');
+      expect(shot.h0Pass, isTrue, reason: '${shot.id} H0 ruler');
+      expect(shot.watchOfGame, lessThanOrEqualTo(0.18));
+      expect(shot.fieldOfGame, greaterThanOrEqualTo(0.55));
+      expect(shot.tokenOfField, closeTo(0.10, 0.001));
     }
 
     final mid = shots[0];
