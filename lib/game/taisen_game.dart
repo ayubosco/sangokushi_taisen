@@ -1359,7 +1359,6 @@ class TaisenGame extends FlameGame {
     // Top short watch (H0 ≤18% game): full battlefield — BOTH sides, READ-ONLY. 3D/perspective OK here.
     canvas.drawRect(Rect.fromLTWH(0, 0, w, wh), Paint()..color = const Color(0xFF141414));
     _drawLacquerGrain(canvas, Rect.fromLTWH(0, 0, w, wh), alpha: 0.08);
-    _drawText(canvas, '全戰場（只睇）', const Offset(12, 8), FactionColors.gold, 13);
     _drawWatchFullField(canvas, Rect.fromLTWH(0, 0, w, wh));
 
     // Mid divider: thicker dual castle bars + 99C zone edge.
@@ -1843,45 +1842,31 @@ class TaisenGame extends FlameGame {
   }
 
   void _drawCastleRaceBars(Canvas canvas, double w, double fieldTop) {
-    // Thicker dual castle bars sitting on the mid divider (does not block drag).
+    // Dual castle bars on the watch/field seam. Height stays inside the watch band.
     final band = Rect.fromLTWH(0, fieldTop - 22, w, 22);
-    canvas.drawRect(band, Paint()..color = const Color(0xFF0C0C0C));
-    canvas.drawLine(
-      Offset(0, fieldTop),
-      Offset(w, fieldTop),
-      Paint()
-        ..color = FactionColors.gold
-        ..strokeWidth = 2.2,
-    );
-    const barH = 10.0;
-    final left = Rect.fromLTWH(16, fieldTop - 16, (w * 0.38), barH);
-    final right = Rect.fromLTWH(w - 16 - (w * 0.38), fieldTop - 16, (w * 0.38), barH);
-    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(3)), Paint()..color = const Color(0xFF2A2A2A));
-    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(3)), Paint()..color = const Color(0xFF2A2A2A));
+    canvas.drawRect(band, Paint()..color = FactionColors.lacquer);
+    const barH = 14.0;
+    final left = Rect.fromLTWH(10, fieldTop - 18, w * 0.34, barH);
+    final right = Rect.fromLTWH(w - 10 - w * 0.34, fieldTop - 18, w * 0.34, barH);
+    final track = Paint()..color = const Color(0xFF2A241C);
+    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(2)), track);
+    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(2)), track);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH), const Radius.circular(3)),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH),
+        const Radius.circular(2),
+      ),
       Paint()..color = FactionColors.shu,
     );
     canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH), const Radius.circular(3)),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH),
+        const Radius.circular(2),
+      ),
       Paint()..color = FactionColors.wei,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(left, const Radius.circular(3)),
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(right, const Radius.circular(3)),
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4,
-    );
-    _drawText(canvas, '己城', Offset(left.left, left.top - 14), FactionColors.gold, 11);
-    _drawText(canvas, '敵城', Offset(right.left, right.top - 14), FactionColors.gold, 11);
+    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFFF3E6D0), 11);
+    _drawText(canvas, '敵', Offset(right.right - 16, right.top - 1), const Color(0xFFF3E6D0), 11);
   }
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
