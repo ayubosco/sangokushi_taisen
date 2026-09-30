@@ -22,13 +22,15 @@ void main() {
     expect(hitR, greaterThanOrEqualTo(24.0));
   });
 
-  test('desktop table is parchment with two camp colors, not a black vacuum', () {
+  test('JL3 table is aged paper plus a red rail, not a black vacuum', () {
     expect(TaisenGame.kDesktopParchment.computeLuminance(), greaterThan(0.35));
     expect(TaisenGame.kDesktopParchmentDeep.computeLuminance(), greaterThan(0.2));
+    expect(TaisenGame.kOwnBand.computeLuminance(), lessThan(0.25));
     expect(TaisenGame.kEnemyBand, isNot(TaisenGame.kOwnBand));
-    expect(TaisenGame.kEnemyBand.computeLuminance(), lessThan(0.2));
+    expect(TaisenGame.kEnemyBand, isNot(TaisenGame.kDesktopParchment));
     expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.18));
     expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.55));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
   });
 
   test('own and enemy field tokens share identical card size (no enemy scale)', () {

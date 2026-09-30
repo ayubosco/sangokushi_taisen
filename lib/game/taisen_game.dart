@@ -306,11 +306,13 @@ class TaisenGame extends FlameGame {
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
   static const double kTokenWidthFracOfField = 0.10; // Bosco eye: still too big at 0.12; try 0.10
 
-  /// Desktop table. Original parchment, not a copied cabinet photo and not the black vacuum.
-  static const Color kDesktopParchment = Color(0xFFD7C09A);
-  static const Color kDesktopParchmentDeep = Color(0xFFB08960);
-  static const Color kEnemyBand = Color(0xFF6E3B34);
-  static const Color kOwnBand = Color(0xFF3E5C40);
+  /// JL3 card table, redrawn. Aged paper, ink camps, red near-edge. Not a photo and not a gold grid.
+  static const Color kDesktopParchment = Color(0xFFC4A882);
+  static const Color kDesktopParchmentDeep = Color(0xFFB09068);
+  /// Faded ink for 敵陣 / 自陣.
+  static const Color kEnemyBand = Color(0xFF3A2A1E);
+  /// Near-edge rail on the JL3 table. Same rect as the own-castle band.
+  static const Color kOwnBand = Color(0xFF8E2E2A);
   static const double kTokenAspectWH = 5 / 8; // W/H
 
   double get castleBandH => fieldH * kCastleBandFracOfField;
@@ -1724,161 +1726,110 @@ class TaisenGame extends FlameGame {
   }
 
 
-  /// Sheepskin map + camp bands. Original marks only — not a cabinet screenshot.
-  void _drawDesktopTable(Canvas canvas, Rect fieldRect) {
+  /// JL3 table: worn paper, 敵陣 above the line, 自陣 below, red rail at the near edge.
+  void _drawDesktopTable(Canvas canvas, Rect field) {
     canvas.save();
-    canvas.clipRect(fieldRect);
+    canvas.clipRect(field);
     canvas.drawRect(
-      fieldRect,
+      field,
       Paint()
         ..shader = ui.Gradient.linear(
-          fieldRect.topCenter,
-          fieldRect.bottomCenter,
-          const [Color(0xFFE7D5B0), kDesktopParchment, kDesktopParchmentDeep],
-          const [0.0, 0.45, 1.0],
+          field.topCenter,
+          field.bottomCenter,
+          const [Color(0xFFD8C4A0), kDesktopParchment, kDesktopParchmentDeep],
+          const [0.0, 0.42, 1.0],
         ),
     );
     final fiber = Paint()
-      ..color = const Color(0xFF8A6238).withValues(alpha: 0.10)
+      ..color = const Color(0xFF6E5030).withValues(alpha: 0.09)
       ..strokeWidth = 1;
-    for (var i = 0; i < 22; i++) {
-      final y = fieldRect.top + (i + 0.5) * fieldRect.height / 22;
-      canvas.drawLine(Offset(fieldRect.left, y), Offset(fieldRect.right, y), fiber);
+    for (var i = 0; i < 28; i++) {
+      final y = field.top + (i + 0.5) * field.height / 28;
+      canvas.drawLine(Offset(field.left, y), Offset(field.right, y), fiber);
     }
-    _drawMapMarks(canvas, fieldRect);
-    _drawFaintMapGrid(canvas, fieldRect);
-    canvas.drawRect(
-      fieldRect,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          fieldRect.center,
-          fieldRect.shortestSide * 0.78,
-          const [Color(0x00000000), Color(0x33604428)],
-        ),
+    _drawPaperWear(canvas, field);
+    final splitY = field.top + field.height * 0.46;
+    final ink = Paint()
+      ..color = kEnemyBand.withValues(alpha: 0.38)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(Offset(field.left + 18, splitY), Offset(field.right - 18, splitY), ink);
+    final campSize = (field.width * 0.16).clamp(36.0, 64.0);
+    _drawInkLabel(
+      canvas,
+      '敵陣',
+      Offset(field.center.dx, field.top + (splitY - field.top) * 0.46),
+      campSize,
     );
-    _drawEnemyCampBand(canvas, fieldRect);
+    final railTop = castleBandRect.top;
+    _drawInkLabel(
+      canvas,
+      '自陣',
+      Offset(field.center.dx, splitY + (railTop - splitY) * 0.42),
+      campSize,
+    );
     _drawOwnCastleBand(canvas);
+    canvas.drawRect(
+      field,
+      Paint()
+        ..color = const Color(0xFF3A2A1A)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6,
+    );
     canvas.restore();
   }
 
-  /// Roads and hill marks so the floor reads as a map, not an empty grid.
-  void _drawMapMarks(Canvas canvas, Rect field) {
-    final hill = Paint()..color = const Color(0xFF6E8A58).withValues(alpha: 0.22);
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(field.left + field.width * 0.22, field.top + field.height * 0.38),
-        width: field.width * 0.28,
-        height: field.height * 0.10,
-      ),
-      hill,
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(field.left + field.width * 0.74, field.top + field.height * 0.46),
-        width: field.width * 0.22,
-        height: field.height * 0.08,
-      ),
-      hill,
-    );
-    final road = Paint()
-      ..color = const Color(0xFF8C6232).withValues(alpha: 0.45)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 7
-      ..strokeCap = StrokeCap.round;
-    final spine = Path()
-      ..moveTo(field.left + field.width * 0.48, field.top + field.height * 0.16)
-      ..quadraticBezierTo(
-        field.left + field.width * 0.62,
-        field.top + field.height * 0.42,
-        field.left + field.width * 0.46,
-        field.top + field.height * 0.78,
-      );
-    canvas.drawPath(spine, road);
-    final fork = Path()
-      ..moveTo(field.left + field.width * 0.18, field.top + field.height * 0.22)
-      ..quadraticBezierTo(
-        field.left + field.width * 0.30,
-        field.top + field.height * 0.50,
-        field.left + field.width * 0.46,
-        field.top + field.height * 0.62,
-      );
-    canvas.drawPath(fork, road..strokeWidth = 4);
-    final ink = Paint()
-      ..color = const Color(0xFF5C4030).withValues(alpha: 0.35)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
+  /// Deterministic stains so the sheet reads as worn paper, not a painted map.
+  void _drawPaperWear(Canvas canvas, Rect field) {
+    const stains = <Offset>[
+      Offset(0.18, 0.22),
+      Offset(0.72, 0.18),
+      Offset(0.30, 0.62),
+      Offset(0.80, 0.70),
+      Offset(0.50, 0.40),
+    ];
+    final paint = Paint()..color = const Color(0xFF6A4E32).withValues(alpha: 0.10);
+    for (final s in stains) {
+      canvas.drawOval(
         Rect.fromCenter(
-          center: Offset(field.left + field.width * 0.70, field.top + field.height * 0.30),
-          width: 18,
-          height: 14,
+          center: Offset(field.left + field.width * s.dx, field.top + field.height * s.dy),
+          width: field.width * 0.22,
+          height: field.height * 0.06,
         ),
-        const Radius.circular(2),
+        paint,
+      );
+    }
+  }
+
+  void _drawInkLabel(Canvas canvas, String text, Offset center, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: kEnemyBand.withValues(alpha: 0.40),
+          fontSize: fontSize,
+          fontWeight: FontWeight.w700,
+          letterSpacing: fontSize * 0.18,
+        ),
       ),
-      ink,
-    );
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
   }
 
-  /// Thin guide on the parchment. Not the bright gold lattice on black.
-  void _drawFaintMapGrid(Canvas canvas, Rect rect) {
-    const cols = 8;
-    const rows = 10;
-    const inset = 8.0;
-    final left = rect.left + inset;
-    final right = rect.right - inset;
-    final top = rect.top + inset;
-    final bottom = rect.bottom - inset;
-    final cellW = (right - left) / cols;
-    final cellH = (bottom - top) / rows;
-    final line = Paint()
-      ..color = const Color(0xFF6B4A28).withValues(alpha: 0.16)
-      ..strokeWidth = 0.7;
-    for (var r = 0; r <= rows; r++) {
-      final y = top + r * cellH;
-      canvas.drawLine(Offset(left, y), Offset(right, y), line);
-    }
-    for (var c = 0; c <= cols; c++) {
-      final x = left + c * cellW;
-      canvas.drawLine(Offset(x, top), Offset(x, bottom), line);
-    }
-  }
-
-  void _drawEnemyCampBand(Canvas canvas, Rect fieldRect) {
-    final h = fieldRect.height * 0.16;
-    final band = Rect.fromLTWH(fieldRect.left, fieldRect.top, fieldRect.width, h);
-    canvas.drawRect(band, Paint()..color = kEnemyBand.withValues(alpha: 0.42));
-    canvas.drawLine(
-      Offset(band.left + 8, band.bottom),
-      Offset(band.right - 8, band.bottom),
-      Paint()
-        ..color = const Color(0xFF3A221C).withValues(alpha: 0.55)
-        ..strokeWidth = 1.4,
-    );
-    _drawText(canvas, '敵陣', Offset(14, band.top + 8), const Color(0xFFF3E6D0), 13);
-  }
-
-  /// Bottom own-castle band (drag-in = 返城, drag-out = 出陣).
+  /// Near-edge red rail. Drag-in still parks; the big 自陣 sits on the paper above it.
   void _drawOwnCastleBand(Canvas canvas) {
     final band = castleBandRect;
-    canvas.drawRect(band, Paint()..color = kOwnBand.withValues(alpha: castleBandHot ? 0.72 : 0.48));
+    canvas.drawRect(
+      band,
+      Paint()..color = kOwnBand.withValues(alpha: castleBandHot ? 0.95 : 0.88),
+    );
     final edge = Paint()
-      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.55)
-      ..strokeWidth = castleBandHot ? 2.6 : 1.4;
+      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.40)
+      ..strokeWidth = castleBandHot ? 2.6 : 1.2;
     canvas.drawLine(Offset(band.left + 8, band.top), Offset(band.right - 8, band.top), edge);
     if (castleBandHot) {
-      canvas.drawRect(
-        Rect.fromLTWH(band.left, band.top, band.width, 3),
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.55),
-      );
+      _drawText(canvas, '歸城區', Offset(16, band.top + 8), const Color(0xFFF3E6D0), 13);
     }
-    _drawText(
-      canvas,
-      castleBandHot ? '歸城區' : '自陣',
-      Offset(16, band.top + 8),
-      const Color(0xFFF3E6D0),
-      13,
-    );
   }
 
   void _drawLacquerGrain(Canvas canvas, Rect rect, {double alpha = 0.12}) {
