@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
 import 'game/ransen_visual_verify.dart';
+import 'game/soft_pin_visual_verify.dart';
 import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
@@ -39,6 +40,9 @@ const bool kSpeedCompareVerify =
 
 // dart-define: RANSEN_VISUAL_VERIFY=true — free-match frames A–D.
 // Not DEMO_SHOT and not shotPassMode. See [kRansenVisualVerify].
+//
+// dart-define: SOFT_PIN_VISUAL_VERIFY=true — place, release, then
+// ① mid / ④ charge / ④ lit / ② arrive. See [kSoftPinVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -108,7 +112,7 @@ class _AppRootState extends State<AppRoot> {
         kFeelShot == 'bow-attack' ||
         kFeelShot == 'cav-idle' ||
         kFeelShot == 'cav-attack';
-    if (kRansenVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
+    if (kSoftPinVisualVerify || kRansenVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kSpeedCompareVerify || kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -117,7 +121,7 @@ class _AppRootState extends State<AppRoot> {
   }
 
   _AppStage _initialStage() {
-    if (kRansenVisualVerify) return _AppStage.match;
+    if (kSoftPinVisualVerify || kRansenVisualVerify) return _AppStage.match;
     if (kLiveVerify == 'bow') return _AppStage.match;
     if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
@@ -1004,7 +1008,7 @@ class _MatchShellState extends State<MatchShell> {
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (kRansenVisualVerify) {
+      if (kSoftPinVisualVerify || kRansenVisualVerify) {
         // Free match. Clock runs. No FEEL/DEMO freeze and no shotPassMode.
         _game.setupMatchDemoField();
         _game.clock.reset();
@@ -1012,7 +1016,11 @@ class _MatchShellState extends State<MatchShell> {
         setState(() {});
         Future<void>.delayed(const Duration(milliseconds: 500), () {
           if (!mounted) return;
-          _runRansenVisualVerify();
+          if (kSoftPinVisualVerify) {
+            _runSoftPinVisualVerify();
+          } else {
+            _runRansenVisualVerify();
+          }
         });
         return;
       }
@@ -1064,6 +1072,48 @@ class _MatchShellState extends State<MatchShell> {
     });
   }
 
+  /// Place, release, march. Pauses on ① / ④ / ② and writes app-tmp PNGs.
+  Future<void> _runSoftPinVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY run '
+      'flutter run --dart-define=SOFT_PIN_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY capture '
+      'xcrun simctl io booted screenshot <name>.png '
+      'during each HOLD line (~4s). '
+      'PNGs also land in the app tmp/soft-pin-visual/ '
+      '(xcrun simctl get_app_container booted com.bosco.sangokushiTaisen data).',
+    );
+    final script = SoftPinVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdSoftPinFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdSoftPinFrame(SoftPinVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _writeVerifyPng('SOFT_PIN_VISUAL_VERIFY', 'soft-pin-visual', shot.id);
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY HOLD ${shot.id} '
+      'screenshot now — paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
   /// Pauses on each prove frame, writes a PNG, and holds for simctl.
   Future<void> _runRansenVisualVerify() async {
     if (!mounted) return;
@@ -1095,7 +1145,7 @@ class _MatchShellState extends State<MatchShell> {
     if (mounted) setState(() {});
     await WidgetsBinding.instance.endOfFrame;
     await Future<void>.delayed(const Duration(milliseconds: 80));
-    await _writeRansenPng(shot.id);
+    await _writeVerifyPng('RANSEN_VISUAL_VERIFY', 'ransen-visual', shot.id);
     // ignore: avoid_print
     print(
       'RANSEN_VISUAL_VERIFY HOLD ${shot.id} '
@@ -1106,28 +1156,28 @@ class _MatchShellState extends State<MatchShell> {
     _game.resumeEngine();
   }
 
-  Future<void> _writeRansenPng(String id) async {
+  Future<void> _writeVerifyPng(String logTag, String folder, String id) async {
     try {
       final boundary = _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) {
         // ignore: avoid_print
-        print('RANSEN_VISUAL_VERIFY PNG skip $id (no boundary)');
+        print('$logTag PNG skip $id (no boundary)');
         return;
       }
       final image = await boundary.toImage(pixelRatio: 2);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) return;
-      final dir = Directory('${Directory.systemTemp.path}/ransen-visual');
+      final dir = Directory('${Directory.systemTemp.path}/$folder');
       await dir.create(recursive: true);
       final file = File('${dir.path}/$id.png');
       await file.writeAsBytes(
         data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       );
       // ignore: avoid_print
-      print('RANSEN_VISUAL_VERIFY PNG ${file.path}');
+      print('$logTag PNG ${file.path}');
     } catch (e) {
       // ignore: avoid_print
-      print('RANSEN_VISUAL_VERIFY PNG fail $id $e');
+      print('$logTag PNG fail $id $e');
     }
   }
 
