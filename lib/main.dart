@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
 import 'game/ransen_visual_verify.dart';
+import 'game/retreat_revive_visual_verify.dart';
 import 'game/soft_pin_visual_verify.dart';
 import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
@@ -44,6 +45,10 @@ const bool kSpeedCompareVerify =
 // dart-define: SOFT_PIN_VISUAL_VERIFY=true — place, release, then
 // ① 落點釘＋部隊追上 / ④ 零青 / ④ SNAP / ② カード先・部隊追いつき.
 // See [kSoftPinVisualVerify].
+//
+// dart-define: RETREAT_REVIVE_VISUAL_VERIFY=true — free-match holds R1–R4
+// (撤退 frozen / castle tick / HP100 redeploy / 返城回血). Not a device run
+// from Cloud. See [kRetreatReviveVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -113,7 +118,7 @@ class _AppRootState extends State<AppRoot> {
         kFeelShot == 'bow-attack' ||
         kFeelShot == 'cav-idle' ||
         kFeelShot == 'cav-attack';
-    if (kSoftPinVisualVerify || kRansenVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
+    if (kSoftPinVisualVerify || kRansenVisualVerify || kRetreatReviveVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kSpeedCompareVerify || kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -122,7 +127,7 @@ class _AppRootState extends State<AppRoot> {
   }
 
   _AppStage _initialStage() {
-    if (kSoftPinVisualVerify || kRansenVisualVerify) return _AppStage.match;
+    if (kSoftPinVisualVerify || kRansenVisualVerify || kRetreatReviveVisualVerify) return _AppStage.match;
     if (kLiveVerify == 'bow') return _AppStage.match;
     if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
@@ -1009,7 +1014,7 @@ class _MatchShellState extends State<MatchShell> {
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (kSoftPinVisualVerify || kRansenVisualVerify) {
+      if (kSoftPinVisualVerify || kRansenVisualVerify || kRetreatReviveVisualVerify) {
         // Free match. Clock runs. No FEEL/DEMO freeze and no shotPassMode.
         _game.setupMatchDemoField();
         _game.clock.reset();
@@ -1019,8 +1024,10 @@ class _MatchShellState extends State<MatchShell> {
           if (!mounted) return;
           if (kSoftPinVisualVerify) {
             _runSoftPinVisualVerify();
-          } else {
+          } else if (kRansenVisualVerify) {
             _runRansenVisualVerify();
+          } else {
+            _runRetreatReviveVisualVerify();
           }
         });
         return;
@@ -1109,6 +1116,49 @@ class _MatchShellState extends State<MatchShell> {
     print(
       'SOFT_PIN_VISUAL_VERIFY HOLD ${shot.id} '
       'screenshot now — paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
+  /// Pauses on R1–R4. Writes a PNG only when this define is actually run.
+  Future<void> _runRetreatReviveVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY run '
+      'flutter run --dart-define=RETREAT_REVIVE_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY checks '
+      'R1 HP0 skull+撤退 reviveLeft frozen 3s outside; '
+      'R2 drag into castleBand ticks; '
+      'R3 HP=100 can leave; '
+      'R4 alive park no skull no 復活 bell. '
+      'PNGs land in app tmp/retreat-revive-visual/ during each HOLD (~4s).',
+    );
+    final script = RetreatReviveVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdRetreatReviveFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdRetreatReviveFrame(RetreatReviveVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _writeVerifyPng('RETREAT_REVIVE_VISUAL_VERIFY', 'retreat-revive-visual', shot.id);
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY HOLD ${shot.id} '
+      'paused ${shot.hold.inMilliseconds}ms',
     );
     await Future<void>.delayed(shot.hold);
     if (!mounted) return;
