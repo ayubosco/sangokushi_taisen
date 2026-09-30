@@ -67,10 +67,11 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
-  /// Finger-up COMMITS [dragTo]. The full-color card pins on that gold 落點.
-  /// [fieldPos] is the translucent shadow, which keeps marching until 合體.
+  /// Finger-up COMMITS [dragTo]. The full-color card stays on that gold 落點 (落點釘).
+  /// [fieldPos] is the translucent 影子行軍. The troop body catches up (部隊追上)
+  /// until it coincides with the card.
   /// [dragging] only means the finger is still moving the waypoint.
-  /// Never teleport the shadow onto the finger.
+  /// Never teleport the troop body onto the finger.
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
@@ -242,12 +243,13 @@ class TaisenGame extends FlameGame {
   /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
   static const double kWatchFractionOfGame = 0.15;
 
-  /// Field shadow while the full-color card is pinned on 落點.
+  /// 影子行軍 while the full-color card stays on 落點 (落點釘).
   /// A second full-color card is a Fail — the march body is this silhouette only.
   static const bool kMarchShadowFullColor = false;
   static const double kMarchShadowOpacity = 0.38;
-  /// Last stretch where the shadow sinks into the pinned card (合體).
-  static const double kMergeSinkPx = 36.0;
+  /// Last stretch where 影子行軍 fades as the troop catches the 落點釘 (部隊追上).
+  /// Identifiers keep the existing march-body names.
+  static const double kCatchUpFadePx = 36.0;
 
   /// Castle strip height inside the game band (~3–4% screen after shell chrome).
   static const double kCastleStripPx = 22.0;
@@ -656,19 +658,19 @@ class TaisenGame extends FlameGame {
     return Offset(48.0 + i * (tokenR * 2 + 20), watchH + 110);
   }
 
-  /// Waypoint is ahead of the body: card pins on [dragTo], shadow is [fieldPos].
+  /// Waypoint is ahead of the body: 落點釘 is [dragTo], 影子行軍 is [fieldPos].
   bool pinnedMarchAt(int i) {
     if (dragTo == null || selectedIndex != i || i < 0 || i >= fieldPos.length) return false;
     return (fieldPos[i] - dragTo!).distance > kArrivalEpsilon;
   }
 
-  /// Full-color field card. Pinned on the gold 落點 during a march; the card after 合體.
+  /// Full-color field card. On 落點 during the march; the same card once 部隊追上.
   Offset pinnedCardAt(int i) => pinnedMarchAt(i) ? dragTo! : tokenCenter(i);
 
-  /// Translucent march body. Gameplay, aura rings, and the Watch solid unit use this.
+  /// Translucent 影子行軍. Gameplay, aura rings, and the Watch solid unit use this.
   Offset shadowAt(int i) => tokenCenter(i);
 
-  /// Cyan rings and the 蓄緊 caption sit on the marching shadow, never the pin.
+  /// Cyan rings and the 蓄緊 caption sit on the 影子行軍, never the 落點釘.
   Offset chargeRingAnchor(int i) => shadowAt(i);
 
   /// Own unit the top Watch paints. A live selection wins so the band follows
@@ -688,14 +690,14 @@ class TaisenGame extends FlameGame {
     return null;
   }
 
-  /// Battlefield point Watch paints. Physical march, never the pinned 落點.
+  /// Battlefield point Watch paints. The troop body, never the 落點釘.
   Offset watchBodyAt(int i) => shadowAt(i);
 
-  /// Shadow strength. Full while the gap is open; it sinks to 0 as it enters the card.
+  /// 影子行軍 strength. Full while the gap is open; fades to 0 as 部隊追上.
   double marchShadowOpacityAt(int i) {
     if (!pinnedMarchAt(i) || dragTo == null) return 0;
     final gap = (fieldPos[i] - dragTo!).distance;
-    final fade = (gap / kMergeSinkPx).clamp(0.0, 1.0);
+    final fade = (gap / kCatchUpFadePx).clamp(0.0, 1.0);
     return kMarchShadowOpacity * fade;
   }
 
@@ -1361,7 +1363,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Ghost path from the marching shadow to the pinned card. Low opacity.
+    // Low-opacity trail from 影子行軍 to the 落點釘. Not a second card.
     if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
       _drawGoldWaypointGuide(
         canvas,
@@ -1391,7 +1393,7 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.waitAura ||
               t.s1 == S1Phase.hitCharge);
 
-      // Aura rings bind to the shadow (march position), never the pinned card.
+      // Aura rings bind to the 影子行軍, never the 落點釘.
       _drawFieldTelegraph(
         canvas,
         chargeRingAnchor(i),
@@ -1404,7 +1406,7 @@ class TaisenGame extends FlameGame {
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
       if (pinned) {
-        // Silhouette only. kMarchShadowFullColor stays false — a second
+        // 影子行軍 silhouette only. kMarchShadowFullColor stays false — a second
         // full-color card on the path is a Fail.
         _drawMarchShadow(
           canvas,
@@ -1447,7 +1449,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Full-color card pinned on the gold 落點. Shadow merges here on arrival (合體).
+    // Full-color 落點釘. On arrive the troop body coincides with this card (部隊追上).
     if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
       final i = selectedIndex!;
       final card = field[i];
@@ -1640,7 +1642,7 @@ class TaisenGame extends FlameGame {
 
   /// Gold dashed arrow + soft gold landing disc — waypoint / 落點 guide.
   /// Distinct from cyan concentric charge rings (Design soft-fail lock).
-  /// [ghostTrail]: in-transit path stays low-opacity so the body is not the destination.
+  /// [ghostTrail]: in-transit path stays low-opacity so 影子行軍 is not the 落點.
   void _drawGoldWaypointGuide(
     Canvas canvas,
     Offset from,
@@ -1954,8 +1956,8 @@ class TaisenGame extends FlameGame {
       enemyTroop = field[enemySafe].troop;
     }
 
-    // Watch solid unit is the physical march (shadow / fieldPos): position, facing, 氣勢.
-    // It is not pinned on the field 落點. On 合體, that point is the one card.
+    // Watch solid unit is the troop body (影子行軍 / fieldPos): position, facing, 氣勢.
+    // It is not stuck on the 落點釘. When 部隊追上, card and body are the same spot.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
@@ -2062,8 +2064,8 @@ class TaisenGame extends FlameGame {
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
-  /// Marching body. Ash silhouette — no sprite, gold border, faction fill, or name.
-  /// The full-color card is drawn once, pinned on the 落點, until this sinks into it.
+  /// 影子行軍. Ash silhouette — no sprite, gold border, faction fill, or name.
+  /// The full-color 落點釘 is drawn once on the drop until the troop body coincides with it.
   void _drawMarchShadow(
     Canvas canvas,
     Offset center, {
@@ -2843,7 +2845,7 @@ class TaisenGame extends FlameGame {
       return dx * dx + dy * dy <= hitR * hitR;
     }
     if (within(tokenCenter(i))) return true;
-    // Pinned full-color card is the visible grab target while the shadow marches.
+    // The 落點釘 is the visible grab target while 影子行軍 catches up.
     return pinnedMarchAt(i) && within(dragTo!);
   }
 

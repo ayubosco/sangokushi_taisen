@@ -260,7 +260,7 @@ void main() {
     expect(g.dragTo, isNull);
     expect(g.dragging, isFalse);
     expect(g.pinnedMarchAt(0), isFalse);
-    expect(g.pinnedCardAt(0), g.shadowAt(0), reason: '合體: shadow and card are one');
+    expect(g.pinnedCardAt(0), g.shadowAt(0), reason: 'arrive: 落點釘 and troop body coincide');
     expect((g.tokenCenter(0) - landing).distance, lessThanOrEqualTo(TaisenGame.kArrivalEpsilon));
     expect(frames, greaterThan(5), reason: 'arrival is a march, not a release snap');
   });
@@ -385,7 +385,7 @@ void main() {
     expect(g.auraActive, isFalse);
   });
 
-  test('soft pin: shadow sinks into the card; Watch and aura follow the body', () {
+  test('落點釘: troop catches the card; Watch and aura follow the body', () {
     final g = readyGame();
     final start = Offset(g.size.x * 0.22, g.watchH + g.fieldH * 0.70);
     _placeOwn(g, start, TroopType.cavalry);
@@ -430,7 +430,7 @@ void main() {
     }
     expect(g.auraActive, isTrue);
     expect(g.showChargeCyanRings, isTrue, reason: 'lit aura snaps on');
-    expect(g.pinnedMarchAt(0), isTrue, reason: 'aura lights on the shadow before 合體');
+    expect(g.pinnedMarchAt(0), isTrue, reason: 'aura lights on 影子行軍 before 部隊追上');
     expect((g.chargeRingAnchor(0) - g.pinnedCardAt(0)).distance, greaterThan(20));
     expect(g.watchBodyAt(0), g.shadowAt(0));
 
@@ -450,7 +450,7 @@ void main() {
     }
     expect(g.dragTo, isNull);
     expect(g.pinnedMarchAt(0), isFalse);
-    expect(g.marchShadowOpacityAt(0), 0, reason: 'shadow is gone after 合體');
+    expect(g.marchShadowOpacityAt(0), 0, reason: '影子行軍 is gone once 部隊追上');
     expect(g.pinnedCardAt(0), g.tokenCenter(0));
     expect(g.shadowAt(0), g.tokenCenter(0));
     expect(g.watchBodyAt(0), g.tokenCenter(0));

@@ -49,7 +49,8 @@ void main() {
     expect(charging.rings, isFalse);
     expect(charging.aura, isFalse);
     expect(charging.pinned, isTrue);
-    expect(charging.caption, contains('zero cyan'));
+    expect(charging.caption, contains('零青'));
+    expect(charging.caption, contains('落點釘'));
 
     final lit = shots[2];
     expect(lit.aura, isTrue);
@@ -66,7 +67,7 @@ void main() {
     expect(arrived.pinGap, lessThan(0.5));
     expect(arrived.travel01, 0);
     expect(arrived.rings, isFalse);
-    expect(arrived.caption, contains('合體'));
+    expect(arrived.caption, contains('部隊追いつき'));
     expect(g.tutorial, isNull);
     expect(g.dragTo, isNull);
     expect(g.pinnedCardAt(0), g.shadowAt(0));

@@ -5,8 +5,10 @@ import 'taisen_game.dart';
 /// dart-define: SOFT_PIN_VISUAL_VERIFY=true
 /// Free-match place → release → march. Never sets shotPassMode / DEMO_SHOT.
 ///
-/// One release, four holds:
-/// 1-mid pin + ash shadow, 4-charge zero cyan, 4-lit SNAP on the shadow, 2-arrive 合體.
+/// One release, four holds. Player overlay is 落點釘＋部隊追上
+/// (JP カード先・部隊追いつき).
+/// 1-mid 落點釘 with 影子行軍 still behind, 4-charge zero cyan,
+/// 4-lit SNAP on the troop body, 2-arrive the body coincides with the card.
 ///
 /// flutter run --dart-define=SOFT_PIN_VISUAL_VERIFY=true -d <udid>
 const bool kSoftPinVisualVerify = bool.fromEnvironment(
@@ -49,7 +51,7 @@ class SoftPinVisualShot {
   bool get pass {
     switch (id) {
       case '1-mid':
-        // ① Released march: full-color pin and a still-solid ash shadow.
+        // ① Released march: 落點釘 ahead, 影子行軍 still catching up.
         return !dragging &&
             pinned &&
             travel01 >= 0.30 &&
@@ -61,7 +63,7 @@ class SoftPinVisualShot {
             label != '突撃' &&
             !TaisenGame.kMarchShadowFullColor;
       case '4-charge':
-        // ④ charging half: still marching, zero cyan.
+        // ④ charging half: 部隊追上 still short of the card, zero cyan.
         return !dragging &&
             pinned &&
             travel01 >= 0.68 &&
@@ -72,7 +74,7 @@ class SoftPinVisualShot {
             pinGap > 50 &&
             label != '突撃';
       case '4-lit':
-        // ④ lit half: SNAP rings on the shadow, card still pinned ahead.
+        // ④ lit half: SNAP rings on 影子行軍, 落點釘 still ahead.
         return !dragging &&
             pinned &&
             aura &&
@@ -81,7 +83,7 @@ class SoftPinVisualShot {
             pinGap > 36 &&
             label == '氣勢';
       case '2-arrive':
-        // ② Shadow has sunk into the one card.
+        // ② 部隊追上: card position and troop body coincide.
         return !dragging &&
             !pinned &&
             shadowOpacity == 0 &&
@@ -108,7 +110,7 @@ class SoftPinVisualVerify {
   final Future<void> Function() step;
   final Future<void> Function(SoftPinVisualShot shot) hold;
 
-  /// Straight release long enough to light the aura before the shadow arrives.
+  /// Straight release long enough to light the aura before 部隊追上.
   static const double kReleasePx = 240;
 
   Future<void> run() async {
@@ -171,7 +173,7 @@ class SoftPinVisualVerify {
       print('SOFT_PIN_VISUAL_VERIFY FAIL 1-mid never reached');
     }
     final midPct = (game.debugTravel01 * 100).round();
-    await _emit('1-mid', '① mid pin+shadow $midPct%', kSoftPinVisualHold);
+    await _emit('1-mid', '① 落點釘＋部隊追上 $midPct%', kSoftPinVisualHold);
 
     final charging = await _until(
       () =>
@@ -187,7 +189,7 @@ class SoftPinVisualVerify {
       print('SOFT_PIN_VISUAL_VERIFY FAIL 4-charge never reached');
     }
     final chargePct = (game.debugTravel01 * 100).round();
-    await _emit('4-charge', '④ charge zero cyan $chargePct%', kSoftPinVisualHold);
+    await _emit('4-charge', '④ 落點釘＋部隊追上 零青 $chargePct%', kSoftPinVisualHold);
 
     final lit = await _until(
       () =>
@@ -201,7 +203,7 @@ class SoftPinVisualVerify {
       // ignore: avoid_print
       print('SOFT_PIN_VISUAL_VERIFY FAIL 4-lit never snapped');
     }
-    await _emit('4-lit', '④ lit SNAP on shadow', kSoftPinVisualHold);
+    await _emit('4-lit', '④ 部隊追上 SNAP', kSoftPinVisualHold);
 
     final arrived = await _until(
       () =>
@@ -213,9 +215,9 @@ class SoftPinVisualVerify {
     );
     if (!arrived) {
       // ignore: avoid_print
-      print('SOFT_PIN_VISUAL_VERIFY FAIL 2-arrive never merged');
+      print('SOFT_PIN_VISUAL_VERIFY FAIL 2-arrive 部隊未追上');
     }
-    await _emit('2-arrive', '② 合體 one card', kSoftPinVisualHold);
+    await _emit('2-arrive', '② カード先・部隊追いつき', kSoftPinVisualHold);
   }
 
   Future<void> _emit(String id, String caption, Duration holdFor) async {

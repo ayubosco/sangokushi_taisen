@@ -42,7 +42,8 @@ const bool kSpeedCompareVerify =
 // Not DEMO_SHOT and not shotPassMode. See [kRansenVisualVerify].
 //
 // dart-define: SOFT_PIN_VISUAL_VERIFY=true — place, release, then
-// ① mid / ④ charge / ④ lit / ② arrive. See [kSoftPinVisualVerify].
+// ① 落點釘＋部隊追上 / ④ 零青 / ④ SNAP / ② カード先・部隊追いつき.
+// See [kSoftPinVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
