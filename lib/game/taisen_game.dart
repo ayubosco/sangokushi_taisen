@@ -1463,8 +1463,7 @@ class TaisenGame extends FlameGame {
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
       if (pinned) {
-        // 影子行軍: ash outline + weapon corner. kMarchShadowFullColor stays false —
-        // a second full-color card on the path is a Fail.
+        // 影子行軍: ash 5:8 frame + weapon corner only. kMarchShadowFullColor stays false.
         _drawMarchShadow(
           canvas,
           shadowAt(i),
@@ -2135,10 +2134,10 @@ class TaisenGame extends FlameGame {
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
-  /// 影子行軍. Ash 5:8 outline and a weapon-corner silhouette.
-  /// The wash stays faint so it is not a gray brick. The weapon stays bright
-  /// enough to read the troop, then fades with [opacity] as 部隊追上.
-  /// Not a human figure and not a second full-color card.
+  /// 影子行軍. Ash 5:8 frame plus one weapon corner.
+  /// Black-gold paints sit in opacity 0.35–0.50 while the gap is open, then
+  /// fade with [opacity] as 部隊追上. 騎 is an oblique 騎槍, never a horseshoe
+  /// and never a bare 騎 glyph. No human figure and no second full-color card.
   void _drawMarchShadow(
     Canvas canvas,
     Offset center, {
@@ -2150,135 +2149,291 @@ class TaisenGame extends FlameGame {
   }) {
     if (opacity <= 0.02) return;
     final presence = (opacity / kMarchShadowOpacity).clamp(0.0, 1.0);
+    // Full-march black-gold sits in the locked 0.35–0.50 band. Catch-up fades it.
+    final ink = (0.46 * presence).clamp(0.0, 0.50);
     final rect = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cardW * 0.1));
     canvas.drawRRect(
       rrect,
-      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.42),
+      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.34),
     );
     canvas.drawRRect(
       rrect,
       Paint()
-        ..color = FactionColors.gold.withValues(alpha: presence * 0.8)
+        ..color = const Color(0xFF1A140C).withValues(alpha: ink)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
+        ..strokeWidth = 2.6,
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: ink)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.3,
     );
     _drawMarchWeapon(
       canvas,
-      Offset(center.dx, rect.top + cardH * 0.38),
+      rect,
       troop,
-      scale: (cardW / 34.0).clamp(0.85, 1.5),
-      alpha: presence * 0.95,
-    );
-    _drawText(
-      canvas,
-      _troopMark(troop),
-      Offset(rect.center.dx - cardW * 0.16, rect.bottom - cardH * 0.26),
-      FactionColors.gold.withValues(alpha: presence * 0.95),
-      (cardW * 0.30).clamp(10.0, 14.0),
+      alpha: ink,
     );
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(facing);
     final chevron = Path()
       ..moveTo(0, -cardH * 0.62)
-      ..lineTo(-cardW * 0.10, -cardH * 0.50)
-      ..lineTo(cardW * 0.10, -cardH * 0.50)
+      ..lineTo(-cardW * 0.14, -cardH * 0.50)
+      ..lineTo(cardW * 0.14, -cardH * 0.50)
       ..close();
     canvas.drawPath(
       chevron,
-      Paint()..color = FactionColors.gold.withValues(alpha: presence * 0.7),
+      Paint()..color = FactionColors.gold.withValues(alpha: ink),
     );
     canvas.restore();
   }
 
-  /// Upright weapon only. Facing stays on the chevron so the glyph does not spin.
+  /// Weapon corner only. Upright so the troop reads; the chevron carries facing.
   void _drawMarchWeapon(
     Canvas canvas,
-    Offset c,
+    Rect card,
     TroopType troop, {
-    required double scale,
     required double alpha,
   }) {
     if (alpha <= 0.02) return;
-    final s = scale;
-    final ash = const Color(0xFFF4EBD4).withValues(alpha: alpha);
-    final gold = FactionColors.gold.withValues(alpha: alpha);
-    final stroke = Paint()
-      ..color = ash
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.6 * s
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final fill = Paint()..color = gold;
+    final c = card.center;
+    final w = card.width;
+    final h = card.height;
     switch (troop) {
       case TroopType.cavalry:
-        canvas.drawArc(
-          Rect.fromCenter(center: c, width: 22 * s, height: 26 * s),
-          -0.5,
-          2.5,
-          false,
-          stroke,
+        // Oblique 騎槍. A straight shaft plus a tip. Not an arc and not a ring.
+        _drawLance(
+          canvas,
+          from: Offset(c.dx - w * 0.28, c.dy + h * 0.22),
+          to: Offset(c.dx + w * 0.22, c.dy - h * 0.24),
+          head: w * 0.22,
+          alpha: alpha,
         );
-        canvas.drawCircle(Offset(c.dx - 8 * s, c.dy + 8 * s), 3.2 * s, stroke);
       case TroopType.spear:
-        canvas.drawLine(Offset(c.dx, c.dy + 16 * s), Offset(c.dx, c.dy - 6 * s), stroke);
-        final tip = Path()
-          ..moveTo(c.dx, c.dy - 18 * s)
-          ..lineTo(c.dx - 6.5 * s, c.dy - 5 * s)
-          ..lineTo(c.dx + 6.5 * s, c.dy - 5 * s)
-          ..close();
-        canvas.drawPath(tip, fill);
-        canvas.drawPath(tip, stroke);
+        _drawLance(
+          canvas,
+          from: Offset(c.dx, c.dy + h * 0.16),
+          to: Offset(c.dx, c.dy - h * 0.30),
+          head: w * 0.26,
+          alpha: alpha,
+        );
       case TroopType.bow:
-        final arc = Path()
-          ..moveTo(c.dx - 8 * s, c.dy - 15 * s)
-          ..quadraticBezierTo(c.dx + 16 * s, c.dy, c.dx - 8 * s, c.dy + 15 * s);
-        canvas.drawPath(arc, stroke);
-        canvas.drawLine(
-          Offset(c.dx - 8 * s, c.dy - 15 * s),
-          Offset(c.dx - 8 * s, c.dy + 15 * s),
-          stroke,
-        );
-        canvas.drawLine(
-          Offset(c.dx - 6 * s, c.dy),
-          Offset(c.dx + 10 * s, c.dy),
-          Paint()
-            ..color = ash
-            ..strokeWidth = 1.6 * s
-            ..strokeCap = StrokeCap.round,
-        );
+        _drawBowCorner(canvas, c, w, h, alpha);
       case TroopType.infantry:
-        canvas.drawLine(
-          Offset(c.dx - 11 * s, c.dy + 12 * s),
-          Offset(c.dx + 11 * s, c.dy - 12 * s),
-          stroke,
-        );
-        canvas.drawLine(
-          Offset(c.dx - 1 * s, c.dy),
-          Offset(c.dx - 10 * s, c.dy + 4 * s),
-          stroke,
-        );
+        _drawShortBlade(canvas, c, w, h, alpha);
       case TroopType.siege:
-        canvas.drawLine(
-          Offset(c.dx - 13 * s, c.dy - 2 * s),
-          Offset(c.dx + 13 * s, c.dy - 2 * s),
-          stroke,
-        );
-        canvas.drawCircle(Offset(c.dx - 7 * s, c.dy + 8 * s), 5 * s, stroke);
-        canvas.drawCircle(Offset(c.dx + 7 * s, c.dy + 8 * s), 5 * s, stroke);
-        canvas.drawLine(Offset(c.dx, c.dy - 2 * s), Offset(c.dx, c.dy - 12 * s), stroke);
+        _drawSiegeCart(canvas, c, w, h, alpha);
     }
   }
 
-  String _troopMark(TroopType troop) {
-    return switch (troop) {
-      TroopType.cavalry => '騎',
-      TroopType.spear => '槍',
-      TroopType.bow => '弓',
-      TroopType.infantry => '步',
-      TroopType.siege => '城',
-    };
+  /// Black shaft under a gold core, gold tip edged in black.
+  void _drawLance(
+    Canvas canvas, {
+    required Offset from,
+    required Offset to,
+    required double head,
+    required double alpha,
+  }) {
+    final delta = to - from;
+    final len = delta.distance;
+    if (len < 1 || head <= 0) return;
+    final dir = delta / len;
+    final n = Offset(-dir.dy, dir.dx);
+    final neck = to - dir * (head * 1.05);
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    canvas.drawLine(
+      from,
+      neck,
+      Paint()
+        ..color = black
+        ..strokeWidth = head * 0.34
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      from,
+      neck,
+      Paint()
+        ..color = gold
+        ..strokeWidth = head * 0.16
+        ..strokeCap = StrokeCap.round,
+    );
+    final tip = Path()
+      ..moveTo(to.dx, to.dy)
+      ..lineTo(neck.dx + n.dx * head * 0.62, neck.dy + n.dy * head * 0.62)
+      ..lineTo(neck.dx - n.dx * head * 0.62, neck.dy - n.dy * head * 0.62)
+      ..close();
+    canvas.drawPath(tip, Paint()..color = black);
+    final tipGold = Path()
+      ..moveTo(to.dx - dir.dx * 1.4, to.dy - dir.dy * 1.4)
+      ..lineTo(
+        neck.dx + n.dx * head * 0.36 + dir.dx * 1.6,
+        neck.dy + n.dy * head * 0.36 + dir.dy * 1.6,
+      )
+      ..lineTo(
+        neck.dx - n.dx * head * 0.36 + dir.dx * 1.6,
+        neck.dy - n.dy * head * 0.36 + dir.dy * 1.6,
+      )
+      ..close();
+    canvas.drawPath(tipGold, Paint()..color = gold);
+  }
+
+  void _drawBowCorner(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final limb = Paint()
+      ..color = black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.07
+      ..strokeCap = StrokeCap.round;
+    final limbGold = Paint()
+      ..color = gold
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.032
+      ..strokeCap = StrokeCap.round;
+    final bow = Path()
+      ..moveTo(c.dx - w * 0.06, c.dy - h * 0.28)
+      ..quadraticBezierTo(c.dx + w * 0.34, c.dy, c.dx - w * 0.06, c.dy + h * 0.28);
+    canvas.drawPath(bow, limb);
+    canvas.drawPath(bow, limbGold);
+    final string = Paint()
+      ..color = gold
+      ..strokeWidth = w * 0.025
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(c.dx - w * 0.06, c.dy - h * 0.28),
+      Offset(c.dx - w * 0.06, c.dy + h * 0.28),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.045
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      Offset(c.dx - w * 0.06, c.dy - h * 0.28),
+      Offset(c.dx - w * 0.06, c.dy + h * 0.28),
+      string,
+    );
+    final tail = Offset(c.dx - w * 0.20, c.dy);
+    final tip = Offset(c.dx + w * 0.22, c.dy);
+    canvas.drawLine(
+      tail,
+      Offset(c.dx + w * 0.08, c.dy),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.045
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      tail,
+      Offset(c.dx + w * 0.08, c.dy),
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.02
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(c.dx + w * 0.06, c.dy - h * 0.07)
+      ..lineTo(c.dx + w * 0.06, c.dy + h * 0.07)
+      ..close();
+    canvas.drawPath(head, Paint()..color = black);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx - w * 0.03, tip.dy)
+        ..lineTo(c.dx + w * 0.08, c.dy - h * 0.04)
+        ..lineTo(c.dx + w * 0.08, c.dy + h * 0.04)
+        ..close(),
+      Paint()..color = gold,
+    );
+  }
+
+  void _drawShortBlade(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final tip = Offset(c.dx + w * 0.16, c.dy - h * 0.16);
+    final heel = Offset(c.dx - w * 0.10, c.dy + h * 0.08);
+    final blade = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(heel.dx - w * 0.06, heel.dy + h * 0.02)
+      ..lineTo(heel.dx + w * 0.05, heel.dy + h * 0.07)
+      ..close();
+    canvas.drawPath(blade, Paint()..color = black);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx - w * 0.03, tip.dy + h * 0.02)
+        ..lineTo(heel.dx - w * 0.02, heel.dy + h * 0.03)
+        ..lineTo(heel.dx + w * 0.02, heel.dy + h * 0.05)
+        ..close(),
+      Paint()..color = gold,
+    );
+    canvas.drawLine(
+      Offset(heel.dx - w * 0.12, heel.dy - h * 0.02),
+      Offset(heel.dx + w * 0.10, heel.dy + h * 0.08),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.07
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      Offset(heel.dx - w * 0.08, heel.dy),
+      Offset(heel.dx + w * 0.06, heel.dy + h * 0.06),
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.028
+        ..strokeCap = StrokeCap.round,
+    );
+    final gripEnd = Offset(heel.dx - w * 0.08, heel.dy + h * 0.10);
+    canvas.drawLine(
+      heel,
+      gripEnd,
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.055
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      heel,
+      gripEnd,
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.022
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawSiegeCart(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final beam = Paint()
+      ..color = black
+      ..strokeWidth = h * 0.07
+      ..strokeCap = StrokeCap.round;
+    final beamGold = Paint()
+      ..color = gold
+      ..strokeWidth = h * 0.028
+      ..strokeCap = StrokeCap.round;
+    final y = c.dy - h * 0.04;
+    canvas.drawLine(Offset(c.dx - w * 0.32, y), Offset(c.dx + w * 0.32, y), beam);
+    canvas.drawLine(Offset(c.dx - w * 0.32, y), Offset(c.dx + w * 0.32, y), beamGold);
+    canvas.drawLine(Offset(c.dx, y), Offset(c.dx, y - h * 0.16), beam);
+    canvas.drawLine(Offset(c.dx, y), Offset(c.dx, y - h * 0.16), beamGold);
+    for (final dx in [-w * 0.16, w * 0.16]) {
+      final hub = Offset(c.dx + dx, c.dy + h * 0.14);
+      canvas.drawCircle(hub, w * 0.11, Paint()..color = black);
+      canvas.drawCircle(
+        hub,
+        w * 0.11,
+        Paint()
+          ..color = gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * 0.035,
+      );
+      canvas.drawCircle(hub, w * 0.035, Paint()..color = gold);
+    }
   }
 
   void _drawCardLikeToken(
