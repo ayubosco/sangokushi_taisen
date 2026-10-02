@@ -51,6 +51,8 @@ class TaisenGame extends FlameGame {
 
   /// Design assets: weapon corner atlas + lacquer field swatch + 5:8 token art.
   ui.Image? _weaponSheet;
+  /// v2 chart: 騎 ring+斜槍, 槍 tip, 弓 bow+arrow. Not the horseshoe badge sheet.
+  ui.Image? _weaponCornerSheet;
   ui.Image? _tokenCards58;
   ui.Image? _tokenSpear58;
   ui.Image? _tokenDao58;
@@ -281,6 +283,7 @@ class TaisenGame extends FlameGame {
     clock.reset();
     if (!wasRunning) clock.pause();
     _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
+    _weaponCornerSheet = await _loadUiImage('assets/icons/cost6-weapon-icons-v2.png');
     _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
     _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
     _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
@@ -2134,10 +2137,15 @@ class TaisenGame extends FlameGame {
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
   }
 
-  /// 影子行軍. Ash 5:8 frame plus one weapon corner.
+  /// Wei-column crops from cost6-weapon-icons-v2. Same weapon shape in every faction.
+  static const Rect _kCornerCavSrc = Rect.fromLTWH(273, 191, 141, 141);
+  static const Rect _kCornerSpearSrc = Rect.fromLTWH(321, 381, 45, 149);
+  static const Rect _kCornerBowSrc = Rect.fromLTWH(292, 612, 115, 113);
+
+  /// 影子行軍. Ash 5:8 frame plus one weapon corner copied from the v2 chart.
   /// Black-gold paints sit in opacity 0.35–0.50 while the gap is open, then
-  /// fade with [opacity] as 部隊追上. 騎 is an oblique 騎槍, never a horseshoe
-  /// and never a bare 騎 glyph. No human figure and no second full-color card.
+  /// fade with [opacity] as 部隊追上. 騎 is the chart's ring + oblique spear,
+  /// never a horseshoe and never a bare 騎 glyph. No human figure.
   void _drawMarchShadow(
     Canvas canvas,
     Offset center, {
@@ -2205,29 +2213,90 @@ class TaisenGame extends FlameGame {
     final h = card.height;
     switch (troop) {
       case TroopType.cavalry:
-        // Oblique 騎槍. A straight shaft plus a tip. Not an arc and not a ring.
-        _drawLance(
-          canvas,
-          from: Offset(c.dx - w * 0.28, c.dy + h * 0.22),
-          to: Offset(c.dx + w * 0.22, c.dy - h * 0.24),
-          head: w * 0.22,
-          alpha: alpha,
-        );
+        if (!_drawCornerSheet(canvas, card, _kCornerCavSrc, alpha)) {
+          _drawCavRingSpear(canvas, c, w, h, alpha);
+        }
       case TroopType.spear:
-        _drawLance(
-          canvas,
-          from: Offset(c.dx, c.dy + h * 0.16),
-          to: Offset(c.dx, c.dy - h * 0.30),
-          head: w * 0.26,
-          alpha: alpha,
-        );
+        if (!_drawCornerSheet(canvas, card, _kCornerSpearSrc, alpha)) {
+          _drawLance(
+            canvas,
+            from: Offset(c.dx, c.dy + h * 0.16),
+            to: Offset(c.dx, c.dy - h * 0.30),
+            head: w * 0.26,
+            alpha: alpha,
+          );
+        }
       case TroopType.bow:
-        _drawBowCorner(canvas, c, w, h, alpha);
+        if (!_drawCornerSheet(canvas, card, _kCornerBowSrc, alpha)) {
+          _drawBowCorner(canvas, c, w, h, alpha);
+        }
       case TroopType.infantry:
         _drawShortBlade(canvas, c, w, h, alpha);
       case TroopType.siege:
         _drawSiegeCart(canvas, c, w, h, alpha);
     }
+  }
+
+  /// Gold strokes from the v2 chart. Near-black chart fill stays transparent.
+  bool _drawCornerSheet(Canvas canvas, Rect card, Rect src, double alpha) {
+    final sheet = _weaponCornerSheet;
+    if (sheet == null || alpha <= 0.02) return false;
+    final inset = card.deflate(card.width * 0.08);
+    final scale = math.min(inset.width / src.width, inset.height / src.height);
+    final dst = Rect.fromCenter(
+      center: inset.center,
+      width: src.width * scale,
+      height: src.height * scale,
+    );
+    final k = alpha;
+    canvas.drawImageRect(
+      sheet,
+      src,
+      dst,
+      Paint()
+        ..filterQuality = FilterQuality.medium
+        ..colorFilter = ColorFilter.matrix(<double>[
+          k, 0, 0, 0, 0,
+          0, k, 0, 0, 0,
+          0, 0, k, 0, 0,
+          0.85 * k, 0.55 * k, 0.20 * k, 0, -28 * k,
+        ]),
+    );
+    return true;
+  }
+
+  /// Sheet fallback: ring + oblique spear + small loop. Not a horseshoe.
+  void _drawCavRingSpear(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final rad = math.min(w, h) * 0.32;
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = rad * 0.14
+      ..color = black;
+    final ringGold = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = rad * 0.06
+      ..color = gold;
+    canvas.drawCircle(c, rad, ring);
+    canvas.drawCircle(c, rad, ringGold);
+    final tail = Offset(c.dx - rad * 0.55, c.dy + rad * 0.55);
+    final tip = Offset(c.dx + rad * 0.78, c.dy - rad * 0.78);
+    final shaft = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = rad * 0.12
+      ..color = black;
+    canvas.drawLine(tail, tip, shaft);
+    canvas.drawLine(
+      tail,
+      tip,
+      Paint()
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = rad * 0.05
+        ..color = gold,
+    );
+    canvas.drawCircle(tip, rad * 0.16, ring..strokeWidth = rad * 0.08);
+    canvas.drawCircle(tip, rad * 0.16, ringGold..strokeWidth = rad * 0.035);
   }
 
   /// Black shaft under a gold core, gold tip edged in black.
