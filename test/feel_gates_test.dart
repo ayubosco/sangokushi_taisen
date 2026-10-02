@@ -260,7 +260,7 @@ void main() {
     expect(g.dragTo, isNull);
     expect(g.dragging, isFalse);
     expect(g.pinnedMarchAt(0), isFalse);
-    expect(g.pinnedCardAt(0), g.shadowAt(0), reason: '合體: shadow and card are one');
+    expect(g.pinnedCardAt(0), g.shadowAt(0), reason: 'arrive: 落點釘 and troop body coincide');
     expect((g.tokenCenter(0) - landing).distance, lessThanOrEqualTo(TaisenGame.kArrivalEpsilon));
     expect(frames, greaterThan(5), reason: 'arrival is a march, not a release snap');
   });
@@ -290,6 +290,10 @@ void main() {
       g.debugStepPursuit(1 / 60);
     }
     expect(g.pinnedCardAt(0), landing, reason: 'full-color card stays pinned');
+    expect(g.marchShadowOpacityAt(0), closeTo(TaisenGame.kMarchShadowOpacity, 0.02));
+    expect(TaisenGame.kMarchShadowFullColor, isFalse, reason: 'march body is a shadow, not a second card');
+    expect(g.chargeRingAnchor(0), g.shadowAt(0));
+    expect(g.watchBodyAt(0), g.shadowAt(0));
     expect((g.shadowAt(0) - start).distance, greaterThan(8), reason: 'shadow marched after release');
     expect(
       (g.pinnedCardAt(0) - g.shadowAt(0)).distance,
@@ -379,6 +383,85 @@ void main() {
     expect(auraFrame / 60.0, greaterThan(0.4), reason: 'aura is not instant on finger-up');
     expect(g.debugTravel01, 0, reason: 'arrive clears travel and aura to 0');
     expect(g.auraActive, isFalse);
+  });
+
+  test('落點釘: troop catches the card; Watch and aura follow the body', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.22, g.watchH + g.fieldH * 0.70);
+    _placeOwn(g, start, TroopType.cavalry);
+    g.field.add(Cost6Roster.all.firstWhere((c) => c.troop == TroopType.spear));
+    g.fieldIsEnemy.add(false);
+    g.fieldInCastle.add(false);
+    g.fieldPos.add(Offset(start.dx, start.dy + 70));
+
+    final landing = Offset(start.dx + 200, start.dy - 16);
+    g.panStart(start);
+    g.panEnd(landing);
+
+    expect(TaisenGame.kMarchShadowFullColor, isFalse);
+    expect(g.pinnedMarchAt(0), isTrue);
+    expect(g.showChargeCyanRings, isFalse);
+    expect(g.chargeRingAnchor(0), g.shadowAt(0));
+    expect((g.chargeRingAnchor(0) - g.pinnedCardAt(0)).distance, greaterThan(140));
+    expect(g.watchOwnIndex, 0, reason: 'Watch follows the placed unit, not the parked spear');
+    expect(g.watchBodyAt(0), g.shadowAt(0));
+    expect(g.marchShadowOpacityAt(0), closeTo(TaisenGame.kMarchShadowOpacity, 0.001));
+
+    const band = Rect.fromLTWH(0, 0, 390, 120);
+    final watchAtDrop = g.mapFieldToWatch(g.watchBodyAt(0), band);
+    final watchAtPin = g.mapFieldToWatch(g.pinnedCardAt(0), band);
+    expect((watchAtDrop - watchAtPin).distance, greaterThan(8));
+
+    const dt = 1 / 60;
+    var guard = 0;
+    while (g.debugTravel01 < 0.35 && g.dragTo != null && guard < 500) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.auraActive, isFalse);
+    expect(g.showChargeCyanRings, isFalse, reason: 'charging is zero cyan');
+    expect(g.chargeRingAnchor(0), g.shadowAt(0));
+    expect((g.mapFieldToWatch(g.watchBodyAt(0), band) - watchAtDrop).distance, greaterThan(2));
+
+    guard = 0;
+    while (!g.auraActive && g.dragTo != null && guard < 500) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.auraActive, isTrue);
+    expect(g.showChargeCyanRings, isTrue, reason: 'lit aura snaps on');
+    expect(g.pinnedMarchAt(0), isTrue, reason: 'aura lights on 影子行軍 before 部隊追上');
+    expect((g.chargeRingAnchor(0) - g.pinnedCardAt(0)).distance, greaterThan(20));
+    expect(g.watchBodyAt(0), g.shadowAt(0));
+
+    guard = 0;
+    while (g.debugWaypointLagPx > 16 && g.dragTo != null && guard < 500) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.pinnedMarchAt(0), isTrue);
+    expect(g.marchShadowOpacityAt(0), lessThan(TaisenGame.kMarchShadowOpacity * 0.55));
+    expect(g.marchShadowOpacityAt(0), greaterThan(0));
+
+    guard = 0;
+    while (g.dragTo != null && guard < 400) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.dragTo, isNull);
+    expect(g.pinnedMarchAt(0), isFalse);
+    expect(g.marchShadowOpacityAt(0), 0, reason: '影子行軍 is gone once 部隊追上');
+    expect(g.pinnedCardAt(0), g.tokenCenter(0));
+    expect(g.shadowAt(0), g.tokenCenter(0));
+    expect(g.watchBodyAt(0), g.tokenCenter(0));
+    expect(g.chargeRingAnchor(0), g.tokenCenter(0));
+    expect(
+      (g.mapFieldToWatch(g.watchBodyAt(0), band) - g.mapFieldToWatch(g.tokenCenter(0), band)).distance,
+      lessThan(0.01),
+      reason: 'arrive: Watch spot is the field spot',
+    );
+    expect(g.auraActive, isFalse);
+    expect(g.showChargeCyanRings, isFalse, reason: 'arrive clears the meter');
   });
 }
 

@@ -12,6 +12,7 @@ import 'faction_colors.dart';
 import 'fx_windows.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
+import 'unit_life.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
@@ -50,7 +51,8 @@ class TaisenGame extends FlameGame {
 
   /// Design assets: weapon corner atlas + lacquer field swatch + 5:8 token art.
   ui.Image? _weaponSheet;
-  ui.Image? _fieldLacquer;
+  /// v2 chart: 騎 ring+斜槍, 槍 tip, 弓 bow+arrow. Not the horseshoe badge sheet.
+  ui.Image? _weaponCornerSheet;
   ui.Image? _tokenCards58;
   ui.Image? _tokenSpear58;
   ui.Image? _tokenDao58;
@@ -67,10 +69,11 @@ class TaisenGame extends FlameGame {
   int? tutorialDropGuideIndex;
 
   /// Drag state (field-local coords).
-  /// Finger-up COMMITS [dragTo]. The full-color card pins on that gold 落點.
-  /// [fieldPos] is the translucent shadow, which keeps marching until 合體.
+  /// Finger-up COMMITS [dragTo]. The full-color card stays on that gold 落點 (落點釘).
+  /// [fieldPos] is the translucent 影子行軍. The troop body catches up (部隊追上)
+  /// until it coincides with the card.
   /// [dragging] only means the finger is still moving the waypoint.
-  /// Never teleport the shadow onto the finger.
+  /// Never teleport the troop body onto the finger.
   bool dragging = false;
   Offset? dragFrom;
   Offset? dragTo;
@@ -111,11 +114,37 @@ class TaisenGame extends FlameGame {
   bool debugInRansen(int i) => _ransenUnits.contains(i);
   double debugUnitHp(int i) =>
       (i >= 0 && i < _unitHp.length) ? _unitHp[i] : kRansenMaxHp;
+  UnitLife debugUnitLife(int i) => _lifeAt(i);
+  double debugReviveLeft(int i) =>
+      (i >= 0 && i < _reviveLeft.length) ? _reviveLeft[i] : 0;
+  bool debugShowsSkull(int i) => _lifeAt(i) != UnitLife.alive;
+  String debugLifeTipAt(int i) => _lifeTipAt(i);
+  /// Playtest source of the hit that retreated this body.
+  /// Stays up through the castle countdown. Empty once the body is ready to leave.
+  String debugRetreatCause(int i) {
+    final life = _lifeAt(i);
+    if (life != UnitLife.retreating && life != UnitLife.inCastleReviving) return '';
+    if (i < 0 || i >= _hpCause.length) return '';
+    return _hpCause[i];
+  }
+
+  /// True when this siege is taking the castle-band stub this tick.
+  bool debugCastleChipAt(int i) => _castleChip.contains(i);
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
   /// Live prove overlay. Null in normal play. Not a shot freeze.
   String? visualVerifyCaption;
+
+  /// World point of the drawn 槍尖. Facing 0 is up. Not the body center.
+  Offset spearTipAt(int i) {
+    final c = tokenCenter(i);
+    final facing = isEnemyAt(i) ? enemyFacing : ownFacing;
+    return Offset(
+      c.dx + math.sin(facing) * kSpearTipReach,
+      c.dy - math.cos(facing) * kSpearTipReach,
+    );
+  }
 
   /// Spear tip glow is on unless that spear is inside 亂戰 (tip retracts).
   bool spearTipExtendedAt(int i) {
@@ -153,12 +182,44 @@ class TaisenGame extends FlameGame {
 
   /// Bodies currently in 亂戰 (ally↔enemy hitbox overlap). Exits when overlap ends.
   final Set<int> _ransenUnits = {};
+  /// Spear-tip contacts already resolved. Cleared when the tip leaves that body.
+  final Set<String> _tipResolved = {};
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
+  /// Playtest name of the last stub hit. Shown on the skull when that hit retreats the body.
+  /// 突撃 / 迎擊 / 射 / 亂戰 / 城傷. Not a new DPS table.
+  final List<String> _hpCause = [];
+  /// Siege bodies taking the castle-band stub this tick. Draws 「城傷」. Not a new DPS table.
+  final Set<int> _castleChip = {};
+  final List<UnitLife> _unitLife = [];
+  /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
+  final List<double> _reviveLeft = [];
+  /// Match morale stub. Retreat subtracts [kRetreatMoraleCost] only.
+  int matchMorale = 0;
 
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
   static const double kRansenTickPerSec = 6.0;
   static const double kRansenMaxHp = 100.0;
+
+  /// Retreat splash ceiling from the Research delta (≤~1s). Not a DPS number.
+  static const double kRetreatSplashSec = 1.0;
+  /// Slice base [adapted]. 天 has no official second. Do not substitute wiki ~35s.
+  static const double kReviveBaseSec = 15.0;
+  /// 特技「復活／活」only. 15 × 2/3 = 10.
+  static const double kReviveSkillMul = 2 / 3;
+  /// Retreat does not spend morale.
+  static const int kRetreatMoraleCost = 0;
+
+  /// Playtest bursts, counted in seconds of [kRansenTickPerSec]. Not wiki DPS.
+  /// 突撃 is a sharp drop and still leaves a full bar in 亂戰.
+  static const double kChargeBurstSec = 8.0;
+  /// One stopped bow shot. Shooter HP does not scale it.
+  static const double kBowShotBurstSec = 6.0;
+  /// 攻城 outgoing 亂戰 fraction. Incoming castle damage stays on the full stub.
+  static const double kSiegeRansenMul = 0.25;
+  /// Drawn 槍尖 reach (48 × field tip scale). The hit core is smaller than body overlap.
+  static const double kSpearTipReach = 48 * 1.28;
+  static const double kSpearTipHitR = 18.0;
   /// 亂戰 world speed as a fraction of open-field march.
   /// Playtest band 0.55–0.65. 0.60 is the AC-mid default: obvious, still peelable.
   /// Not a DPS number. 突破術／捕縛術 are out of scope.
@@ -222,7 +283,7 @@ class TaisenGame extends FlameGame {
     clock.reset();
     if (!wasRunning) clock.pause();
     _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
-    _fieldLacquer = await _loadUiImage('assets/field/field-lacquer-swatch.png');
+    _weaponCornerSheet = await _loadUiImage('assets/icons/cost6-weapon-icons-v2.png');
     _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
     _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
     _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
@@ -242,8 +303,13 @@ class TaisenGame extends FlameGame {
   /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
   static const double kWatchFractionOfGame = 0.15;
 
-  /// Field shadow while the full-color card is pinned on 落點. Not full opacity.
+  /// 影子行軍 while the full-color card stays on 落點 (落點釘).
+  /// A second full-color card is a Fail — the march body is this silhouette only.
+  static const bool kMarchShadowFullColor = false;
   static const double kMarchShadowOpacity = 0.38;
+  /// Last stretch where 影子行軍 fades as the troop catches the 落點釘 (部隊追上).
+  /// Identifiers keep the existing march-body names.
+  static const double kCatchUpFadePx = 36.0;
 
   /// Castle strip height inside the game band (~3–4% screen after shell chrome).
   static const double kCastleStripPx = 22.0;
@@ -258,6 +324,14 @@ class TaisenGame extends FlameGame {
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
   static const double kTokenWidthFracOfField = 0.10; // Bosco eye: still too big at 0.12; try 0.10
+
+  /// JL3 card table, redrawn. Aged paper, ink camps, red near-edge. Not a photo and not a gold grid.
+  static const Color kDesktopParchment = Color(0xFFC4A882);
+  static const Color kDesktopParchmentDeep = Color(0xFFB09068);
+  /// Faded ink for 敵陣 / 自陣.
+  static const Color kEnemyBand = Color(0xFF3A2A1E);
+  /// Near-edge rail on the JL3 table. Same rect as the own-castle band.
+  static const Color kOwnBand = Color(0xFF8E2E2A);
   static const double kTokenAspectWH = 5 / 8; // W/H
 
   double get castleBandH => fieldH * kCastleBandFracOfField;
@@ -314,9 +388,10 @@ class TaisenGame extends FlameGame {
   /// Body rests on the waypoint once it is this close, then [dragTo] clears.
   static const double kArrivalEpsilon = 2.0;
 
-  /// 天 wiki base speeds — https://w.atwiki.jp/taisendsten/pages/119.html
-  /// 騎 1.1, 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5. Not the oral order 騎>弓>歩＝槍.
+  /// 天 wiki / troop-move-speed-relative.md. Not the oral order 騎>弓>歩＝槍.
+  /// 騎 1.1 (aura 1.32), 歩 0.9, 弓 0.8, 槍 0.7, 攻城 0.5.
   /// Bow 走射 0.96 is not a waypoint state (stop-then-shot stays 0.8 while marching).
+  /// https://w.atwiki.jp/taisendsten/pages/119.html
   static double pursuitWikiBase(TroopType troop) {
     return switch (troop) {
       TroopType.cavalry => 1.1,
@@ -425,6 +500,7 @@ class TaisenGame extends FlameGame {
       return false;
     }
     fieldPos[i] = next;
+    _noteCastleExit(i, next);
     // 亂戰: cavalry must not build or keep filling aura while bodies overlap.
     // Contact resolution itself runs in [_tickRansen], once per frame.
     final scrambled = _ransenUnits.contains(i);
@@ -482,7 +558,10 @@ class TaisenGame extends FlameGame {
       fieldInCastle.add(false);
     }
     fieldInCastle[i] = true;
-    triggerReturnCityFx();
+    // Alive 歸城 is the heal path. A retreated body only starts the countdown.
+    if (_lifeAt(i) == UnitLife.alive) {
+      triggerReturnCityFx();
+    }
     _cancelBowWindup();
     _clearTravelMeterOnStop();
     _matchChargeIndex = null;
@@ -544,6 +623,19 @@ class TaisenGame extends FlameGame {
       ..clear()
       ..add(kRansenMaxHp)
       ..add(kRansenMaxHp);
+    _hpCause
+      ..clear()
+      ..add('')
+      ..add('');
+    _castleChip.clear();
+    _unitLife
+      ..clear()
+      ..add(UnitLife.alive)
+      ..add(UnitLife.alive);
+    _reviveLeft
+      ..clear()
+      ..add(0)
+      ..add(0);
     _hitFlashIndex = null;
     _hitFlashLeft = 0;
     _hitFlashLabel = '';
@@ -556,6 +648,10 @@ class TaisenGame extends FlameGame {
     _pulse += dt;
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickSpearTips();
+    _tickCastleSiegeChip(dt);
+    _tickBowWindup(dt);
+    _tickUnitLife(dt);
     _maybeSnapKiseiFlash();
   }
 
@@ -651,17 +747,48 @@ class TaisenGame extends FlameGame {
     return Offset(48.0 + i * (tokenR * 2 + 20), watchH + 110);
   }
 
-  /// Waypoint is ahead of the body: card pins on [dragTo], shadow is [fieldPos].
+  /// Waypoint is ahead of the body: 落點釘 is [dragTo], 影子行軍 is [fieldPos].
   bool pinnedMarchAt(int i) {
     if (dragTo == null || selectedIndex != i || i < 0 || i >= fieldPos.length) return false;
     return (fieldPos[i] - dragTo!).distance > kArrivalEpsilon;
   }
 
-  /// Full-color field card. Pinned on the gold 落點 during a march; the card after 合體.
+  /// Full-color field card. On 落點 during the march; the same card once 部隊追上.
   Offset pinnedCardAt(int i) => pinnedMarchAt(i) ? dragTo! : tokenCenter(i);
 
-  /// Translucent march body. Gameplay, aura rings, and the Watch solid unit use this.
+  /// Translucent 影子行軍. Gameplay, aura rings, and the Watch solid unit use this.
   Offset shadowAt(int i) => tokenCenter(i);
+
+  /// Cyan rings and the 蓄緊 caption sit on the 影子行軍, never the 落點釘.
+  Offset chargeRingAnchor(int i) => shadowAt(i);
+
+  /// Own unit the top Watch paints. A live selection wins so the band follows
+  /// the body you placed, not whoever was spawned first.
+  int? get watchOwnIndex {
+    final sel = selectedIndex;
+    if (sel != null && sel >= 0 && sel < fieldPos.length && !isEnemyAt(sel)) {
+      return sel;
+    }
+    final tut = tutorialOwnIndex;
+    if (tut != null && tut >= 0 && tut < fieldPos.length && !isEnemyAt(tut)) {
+      return tut;
+    }
+    if (fieldIsEnemy.isEmpty) return fieldPos.isEmpty ? null : 0;
+    final i = fieldIsEnemy.indexWhere((e) => !e);
+    if (i >= 0 && i < fieldPos.length) return i;
+    return null;
+  }
+
+  /// Battlefield point Watch paints. The troop body, never the 落點釘.
+  Offset watchBodyAt(int i) => shadowAt(i);
+
+  /// 影子行軍 strength. Full while the gap is open; fades to 0 as 部隊追上.
+  double marchShadowOpacityAt(int i) {
+    if (!pinnedMarchAt(i) || dragTo == null) return 0;
+    final gap = (fieldPos[i] - dragTo!).distance;
+    final fade = (gap / kCatchUpFadePx).clamp(0.0, 1.0);
+    return kMarchShadowOpacity * fade;
+  }
 
   void setupSession1Field() {
     field.clear();
@@ -1112,6 +1239,9 @@ class TaisenGame extends FlameGame {
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
     _pursueWaypoint(dt);
     _tickRansen(dt);
+    _tickSpearTips();
+    _tickCastleSiegeChip(dt);
+    _tickUnitLife(dt);
     _decayChargeAfterStop(dt);
 
     // Every frame: Watch telegraph follows live field charge facing + aura (not demo cycle alone).
@@ -1215,21 +1345,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Free-match bow: accumulate still time toward ~1C; first shot only when ready.
-    // 亂戰 stops the shot — windup does not advance while the bow is overlapping.
-    if (tutorial == null && _bowWindupIndex != null && _ransenUnits.contains(_bowWindupIndex)) {
-      _cancelBowWindup();
-    } else if (tutorial == null && _bowWindupIndex != null && !_bowDidShoot) {
-      _bowWindupC += dt / CClock.secondsPerC;
-      if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
-        if (!_bowShotReady && !_verifyLoggedBowReady) {
-          _verifyLoggedBowReady = true;
-          // ignore: avoid_print
-          print('VERIFY_BOW readyC=${clock.remainingC} windupC=${_bowWindupC.toStringAsFixed(2)}');
-        }
-        _bowShotReady = true;
-      }
-    }
+    _tickBowWindup(dt);
 
     // Session2 / match: facing drives spear tip — player sets facingCorrect / _matchFacingCorrect.
     final t = tutorial;
@@ -1267,34 +1383,16 @@ class TaisenGame extends FlameGame {
     // Top short watch (H0 ≤18% game): full battlefield — BOTH sides, READ-ONLY. 3D/perspective OK here.
     canvas.drawRect(Rect.fromLTWH(0, 0, w, wh), Paint()..color = const Color(0xFF141414));
     _drawLacquerGrain(canvas, Rect.fromLTWH(0, 0, w, wh), alpha: 0.08);
-    _drawText(canvas, '全戰場（只睇）', const Offset(12, 8), FactionColors.gold, 13);
     _drawWatchFullField(canvas, Rect.fromLTWH(0, 0, w, wh));
 
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
 
-    // Bottom flat ortho playfield (H0 ≥55%): lacquer + ortho gold grid — NO perspective/vanishing.
+    // Flat ortho table (H0 ≥55%). Parchment map + 敵陣／自陣. Not the black + gold vacuum.
     final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
-    canvas.drawRect(fieldRect, Paint()..color = const Color(0xFF0A0A0A));
-    _drawFieldLacquer(canvas, fieldRect);
-    _drawOrthoFieldGrid(canvas, fieldRect);
-    _drawLacquerGrain(canvas, fieldRect, alpha: 0.04);
-    _drawOwnCastleBand(canvas, fieldRect);
+    _drawDesktopTable(canvas, fieldRect);
 
     final t = tutorial;
-    // Light vertical padding (tip is overlay; keep dragH ≥0.55).
-    _drawText(canvas, '雙方動向（可操作）', Offset(16, fieldTop + 14), FactionColors.gold, 16);
-    if (t == null) {
-      final ownN = fieldIsEnemy.where((e) => !e).length;
-      final enN = fieldIsEnemy.where((e) => e).length;
-      _drawText(
-        canvas,
-        'Cost $costCap · 場上 ${field.length}/$fieldMax（己$ownN／敵$enN）',
-        Offset(16, fieldTop + 34),
-        Colors.white54,
-        12,
-      );
-    }
 
     // Session1 / feel: drop guide + dashed path (not after tipNext / hit)
     if (t != null &&
@@ -1325,7 +1423,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Ghost path from the marching shadow to the pinned card. Low opacity.
+    // Low-opacity trail from 影子行軍 to the 落點釘. Not a second card.
     if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
       _drawGoldWaypointGuide(
         canvas,
@@ -1355,26 +1453,54 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.waitAura ||
               t.s1 == S1Phase.hitCharge);
 
-      // Aura rings bind to the shadow (march position), never the pinned card.
-      _drawFieldTelegraph(canvas, center, card, i, isOwn: !isEnemy && tutorialOwnIndex == i, isEnemy: isEnemy);
+      // Aura rings bind to the 影子行軍, never the 落點釘.
+      _drawFieldTelegraph(
+        canvas,
+        chargeRingAnchor(i),
+        card,
+        i,
+        isOwn: !isEnemy && tutorialOwnIndex == i,
+        isEnemy: isEnemy,
+      );
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
       if (pinned) {
-        _drawCardLikeToken(
+        // 影子行軍: ash 5:8 frame + weapon corner only. kMarchShadowFullColor stays false.
+        _drawMarchShadow(
           canvas,
-          center,
-          card,
-          index: i,
+          shadowAt(i),
           cardW: tokenSize.width,
           cardH: tokenSize.height,
-          selected: false,
-          isEnemy: false,
-          dim: false,
-          pulseOwn: false,
-          opacity: kMarchShadowOpacity,
+          opacity: marchShadowOpacityAt(i),
+          facing: ownFacing,
+          troop: card.troop,
         );
-        _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+      } else if (_lifeAt(i) != UnitLife.alive) {
+        _drawRetreatToken(canvas, center, tokenSize);
+        final tip = _lifeTipAt(i);
+        if (tip.isNotEmpty) {
+          _drawText(
+            canvas,
+            tip,
+            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
+            const Color(0xFFFFF59D),
+            11,
+          );
+        }
+        if (_lifeAt(i) == UnitLife.inCastleReviving) {
+          _drawReviveBar(canvas, center, i, tokenSize);
+        }
+        final cause = debugRetreatCause(i);
+        if (cause.isNotEmpty) {
+          _drawText(
+            canvas,
+            cause,
+            Offset(center.dx - 14, center.dy + tokenSize.height / 2 + 2),
+            const Color(0xFFFFF59D),
+            12,
+          );
+        }
       } else {
         _drawCardLikeToken(
           canvas,
@@ -1405,10 +1531,19 @@ class TaisenGame extends FlameGame {
           11,
         );
         _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+        if (debugCastleChipAt(i)) {
+          _drawText(
+            canvas,
+            '城傷',
+            Offset(center.dx - 14, center.dy - tokenSize.height / 2 - 18),
+            const Color(0xFFFFF59D),
+            12,
+          );
+        }
       }
     }
 
-    // Full-color card pinned on the gold 落點. Shadow merges here on arrival (合體).
+    // Full-color 落點釘. On arrive the troop body coincides with this card (部隊追上).
     if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
       final i = selectedIndex!;
       final card = field[i];
@@ -1477,36 +1612,19 @@ class TaisenGame extends FlameGame {
               ? selectedIndex
               : null);
       if (travel01 > kChargeRingShowTravel01 && captionIdx != null) {
-        final oc = tokenCenter(captionIdx);
-        _drawFatFloatText(
+        final oc = chargeRingAnchor(captionIdx);
+        _drawText(
           canvas,
           '蓄緊 ${(travel01 * 100).round()}%',
-          Offset(oc.dx, oc.dy - tokenSize.height / 2 - 22),
-          fontSize: 18,
+          Offset(oc.dx - 18, oc.dy - tokenSize.height / 2 - 16),
+          FactionColors.gold.withValues(alpha: 0.9),
+          11,
         );
       }
     }
 
     // Design lock: NO floating「突撃」/「迎擊」buttons.
     // Charge = drag far → aura → collide (auto flash). Intercept = tip always on × enemy aura (auto).
-
-    // Temporary charge-pipeline debug (travel% / aura on) — Bosco fail triage.
-    if (t != null && t.session == TutorialSession.session1) {
-      final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-      final pct = (travel01 * 100).round();
-      final aura = auraActive;
-      // Match field look: off / charging (travel fill) / ON (auraActive).
-      final auraDbg = aura
-          ? 'ON'
-          : (travel01 > kChargeRingShowTravel01 ? 'charging' : 'off');
-      _drawText(
-        canvas,
-        'DBG travel $pct%  aura $auraDbg  lag ${debugWaypointLagPx.round()}  ${t.s1.name}',
-        Offset(12, fieldTop + 36),
-        const Color(0xFF00E5FF),
-        11,
-      );
-    }
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
       final c = tokenCenter(_hitFlashIndex!);
@@ -1570,15 +1688,7 @@ class TaisenGame extends FlameGame {
       canvas.restore();
     }
 
-    final prove = visualVerifyCaption;
-    if (prove != null && prove.isNotEmpty) {
-      _drawFatFloatText(
-        canvas,
-        prove,
-        Offset(w * 0.5, fieldTop + 22),
-        fontSize: 18,
-      );
-    }
+    // Verify captions stay in the log. Painting them covers the table.
   }
 
   /// Removed: floating charge/intercept buttons (Design/UIUX lock).
@@ -1601,7 +1711,7 @@ class TaisenGame extends FlameGame {
 
   /// Gold dashed arrow + soft gold landing disc — waypoint / 落點 guide.
   /// Distinct from cyan concentric charge rings (Design soft-fail lock).
-  /// [ghostTrail]: in-transit path stays low-opacity so the body is not the destination.
+  /// [ghostTrail]: in-transit path stays low-opacity so 影子行軍 is not the 落點.
   void _drawGoldWaypointGuide(
     Canvas canvas,
     Offset from,
@@ -1657,100 +1767,110 @@ class TaisenGame extends FlameGame {
   }
 
 
-  void _drawFieldLacquer(Canvas canvas, Rect rect) {
-    final img = _fieldLacquer;
-    if (img == null) return;
-    final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
-    // Cover-fit texture only (no baked perspective grid — ortho drawn in code).
-    final scale = math.max(rect.width / src.width, rect.height / src.height);
-    final dw = src.width * scale;
-    final dh = src.height * scale;
-    final dx = rect.left + (rect.width - dw) / 2;
-    final dy = rect.top + (rect.height - dh) / 2;
+  /// JL3 table: worn paper, 敵陣 above the line, 自陣 below, red rail at the near edge.
+  void _drawDesktopTable(Canvas canvas, Rect field) {
     canvas.save();
-    canvas.clipRect(rect);
-    canvas.drawImageRect(
-      img,
-      src,
-      Rect.fromLTWH(dx, dy, dw, dh),
-      Paint()..filterQuality = FilterQuality.medium,
+    canvas.clipRect(field);
+    canvas.drawRect(
+      field,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          field.topCenter,
+          field.bottomCenter,
+          const [Color(0xFFD8C4A0), kDesktopParchment, kDesktopParchmentDeep],
+          const [0.0, 0.42, 1.0],
+        ),
     );
-    // Soft vignette so gold tokens separate from field.
-    canvas.drawRect(rect, Paint()..color = const Color(0xFF000000).withValues(alpha: 0.18));
+    final fiber = Paint()
+      ..color = const Color(0xFF6E5030).withValues(alpha: 0.09)
+      ..strokeWidth = 1;
+    for (var i = 0; i < 28; i++) {
+      final y = field.top + (i + 0.5) * field.height / 28;
+      canvas.drawLine(Offset(field.left, y), Offset(field.right, y), fiber);
+    }
+    _drawPaperWear(canvas, field);
+    final splitY = field.top + field.height * 0.46;
+    final ink = Paint()
+      ..color = kEnemyBand.withValues(alpha: 0.38)
+      ..strokeWidth = 1.5;
+    canvas.drawLine(Offset(field.left + 18, splitY), Offset(field.right - 18, splitY), ink);
+    final campSize = (field.width * 0.16).clamp(36.0, 64.0);
+    _drawInkLabel(
+      canvas,
+      '敵陣',
+      Offset(field.center.dx, field.top + (splitY - field.top) * 0.46),
+      campSize,
+    );
+    final railTop = castleBandRect.top;
+    _drawInkLabel(
+      canvas,
+      '自陣',
+      Offset(field.center.dx, splitY + (railTop - splitY) * 0.42),
+      campSize,
+    );
+    _drawOwnCastleBand(canvas);
+    canvas.drawRect(
+      field,
+      Paint()
+        ..color = const Color(0xFF3A2A1A)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 6,
+    );
     canvas.restore();
   }
 
-  /// Flat orthographic gold grid on operable field — parallel lines, equal cells, no vanishing point.
-  void _drawOrthoFieldGrid(Canvas canvas, Rect rect) {
-    const cols = 8;
-    const rows = 10;
-    const inset = 10.0;
-    final left = rect.left + inset;
-    final right = rect.right - inset;
-    final top = rect.top + inset;
-    final bottom = rect.bottom - inset;
-    final cellW = (right - left) / cols;
-    final cellH = (bottom - top) / rows;
-    final line = Paint()
-      ..color = FactionColors.gold.withValues(alpha: 0.42)
-      ..strokeWidth = 1.15
-      ..isAntiAlias = true;
-    final soft = Paint()
-      ..color = FactionColors.gold.withValues(alpha: 0.16)
-      ..strokeWidth = 2.4
-      ..isAntiAlias = true;
-    for (var r = 0; r <= rows; r++) {
-      final y = top + r * cellH;
-      canvas.drawLine(Offset(left, y), Offset(right, y), soft);
-      canvas.drawLine(Offset(left, y), Offset(right, y), line);
-    }
-    for (var c = 0; c <= cols; c++) {
-      final x = left + c * cellW;
-      canvas.drawLine(Offset(x, top), Offset(x, bottom), soft);
-      canvas.drawLine(Offset(x, top), Offset(x, bottom), line);
-    }
-    final dot = Paint()..color = FactionColors.gold.withValues(alpha: 0.7);
-    for (var r = 0; r <= rows; r++) {
-      for (var c = 0; c <= cols; c++) {
-        canvas.drawCircle(Offset(left + c * cellW, top + r * cellH), 1.6, dot);
-      }
+  /// Deterministic stains so the sheet reads as worn paper, not a painted map.
+  void _drawPaperWear(Canvas canvas, Rect field) {
+    const stains = <Offset>[
+      Offset(0.18, 0.22),
+      Offset(0.72, 0.18),
+      Offset(0.30, 0.62),
+      Offset(0.80, 0.70),
+      Offset(0.50, 0.40),
+    ];
+    final paint = Paint()..color = const Color(0xFF6A4E32).withValues(alpha: 0.10);
+    for (final s in stains) {
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(field.left + field.width * s.dx, field.top + field.height * s.dy),
+          width: field.width * 0.22,
+          height: field.height * 0.06,
+        ),
+        paint,
+      );
     }
   }
 
-  /// Bottom own-castle band (drag-in = 返城, drag-out = 出陣). Lacquer + pale gold.
-  void _drawOwnCastleBand(Canvas canvas, Rect fieldRect) {
+  void _drawInkLabel(Canvas canvas, String text, Offset center, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: kEnemyBand.withValues(alpha: 0.40),
+          fontSize: fontSize,
+          fontWeight: FontWeight.w700,
+          letterSpacing: fontSize * 0.18,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+  }
+
+  /// Near-edge red rail. Drag-in still parks; the big 自陣 sits on the paper above it.
+  void _drawOwnCastleBand(Canvas canvas) {
     final band = castleBandRect;
-    // Fill
-    canvas.drawRect(band, Paint()..color = const Color(0xFF0C0C0C));
-    // Top pale-gold edge
-    final edge = Paint()
-      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.45)
-      ..strokeWidth = castleBandHot ? 2.6 : 1.4;
-    canvas.drawLine(Offset(band.left + 8, band.top), Offset(band.right - 8, band.top), edge);
-    // Soft inner wash when hot
-    if (castleBandHot) {
-      canvas.drawRect(
-        band,
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.14),
-      );
-      canvas.drawRect(
-        Rect.fromLTWH(band.left, band.top, band.width, 3),
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.55),
-      );
-    }
-    // Corner ticks
-    final tick = Paint()
-      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.85 : 0.35)
-      ..strokeWidth = 1.5;
-    canvas.drawLine(Offset(band.left + 10, band.top + 6), Offset(band.left + 10, band.top + 18), tick);
-    canvas.drawLine(Offset(band.right - 10, band.top + 6), Offset(band.right - 10, band.top + 18), tick);
-    _drawText(
-      canvas,
-      castleBandHot ? '歸城區' : '己城',
-      Offset(16, band.top + 10),
-      FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.55),
-      12,
+    canvas.drawRect(
+      band,
+      Paint()..color = kOwnBand.withValues(alpha: castleBandHot ? 0.95 : 0.88),
     );
+    final edge = Paint()
+      ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.40)
+      ..strokeWidth = castleBandHot ? 2.6 : 1.2;
+    canvas.drawLine(Offset(band.left + 8, band.top), Offset(band.right - 8, band.top), edge);
+    if (castleBandHot) {
+      _drawText(canvas, '歸城區', Offset(16, band.top + 8), const Color(0xFFF3E6D0), 13);
+    }
   }
 
   void _drawLacquerGrain(Canvas canvas, Rect rect, {double alpha = 0.12}) {
@@ -1764,45 +1884,31 @@ class TaisenGame extends FlameGame {
   }
 
   void _drawCastleRaceBars(Canvas canvas, double w, double fieldTop) {
-    // Thicker dual castle bars sitting on the mid divider (does not block drag).
+    // Dual castle bars on the watch/field seam. Height stays inside the watch band.
     final band = Rect.fromLTWH(0, fieldTop - 22, w, 22);
-    canvas.drawRect(band, Paint()..color = const Color(0xFF0C0C0C));
-    canvas.drawLine(
-      Offset(0, fieldTop),
-      Offset(w, fieldTop),
-      Paint()
-        ..color = FactionColors.gold
-        ..strokeWidth = 2.2,
-    );
-    const barH = 10.0;
-    final left = Rect.fromLTWH(16, fieldTop - 16, (w * 0.38), barH);
-    final right = Rect.fromLTWH(w - 16 - (w * 0.38), fieldTop - 16, (w * 0.38), barH);
-    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(3)), Paint()..color = const Color(0xFF2A2A2A));
-    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(3)), Paint()..color = const Color(0xFF2A2A2A));
+    canvas.drawRect(band, Paint()..color = FactionColors.lacquer);
+    const barH = 14.0;
+    final left = Rect.fromLTWH(10, fieldTop - 18, w * 0.34, barH);
+    final right = Rect.fromLTWH(w - 10 - w * 0.34, fieldTop - 18, w * 0.34, barH);
+    final track = Paint()..color = const Color(0xFF2A241C);
+    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(2)), track);
+    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(2)), track);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH), const Radius.circular(3)),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH),
+        const Radius.circular(2),
+      ),
       Paint()..color = FactionColors.shu,
     );
     canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH), const Radius.circular(3)),
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH),
+        const Radius.circular(2),
+      ),
       Paint()..color = FactionColors.wei,
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(left, const Radius.circular(3)),
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(right, const Radius.circular(3)),
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4,
-    );
-    _drawText(canvas, '己城', Offset(left.left, left.top - 14), FactionColors.gold, 11);
-    _drawText(canvas, '敵城', Offset(right.left, right.top - 14), FactionColors.gold, 11);
+    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFFF3E6D0), 11);
+    _drawText(canvas, '敵', Offset(right.right - 16, right.top - 1), const Color(0xFFF3E6D0), 11);
   }
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
@@ -1810,8 +1916,7 @@ class TaisenGame extends FlameGame {
     final t = tutorial;
     _drawWatchPerspectiveLane(canvas, band);
 
-    final ownIdx = tutorialOwnIndex ??
-        (fieldIsEnemy.isEmpty ? null : fieldIsEnemy.indexWhere((e) => !e));
+    final ownIdx = watchOwnIndex;
     final enemyIdx = tutorialEnemyIndex ??
         (fieldIsEnemy.isEmpty ? null : fieldIsEnemy.indexWhere((e) => e));
     final ownSafe = (ownIdx != null && ownIdx >= 0 && ownIdx < fieldPos.length) ? ownIdx : null;
@@ -1820,7 +1925,7 @@ class TaisenGame extends FlameGame {
 
     final ownFallback = Offset(band.width * 0.34, band.top + band.height * 0.72);
     final enemyFallback = Offset(band.width * 0.62, band.top + band.height * 0.38);
-    final ownField = ownSafe != null ? fieldPos[ownSafe] : ownFallback;
+    final ownField = ownSafe != null ? watchBodyAt(ownSafe) : ownFallback;
     final enemyField = enemySafe != null ? fieldPos[enemySafe] : enemyFallback;
     final ownC = ownSafe != null ? mapFieldToWatch(ownField, band) : ownFallback;
     final enemyC = enemySafe != null ? mapFieldToWatch(enemyField, band) : enemyFallback;
@@ -1916,9 +2021,17 @@ class TaisenGame extends FlameGame {
       enemyTroop = field[enemySafe].troop;
     }
 
-    // Watch solid unit is march progress (shadow / fieldPos): position, facing, 氣勢.
-    // It is not pinned on the field 落點.
+    // Watch solid unit is the troop body (影子行軍 / fieldPos): position, facing, 氣勢.
+    // It is not stuck on the 落點釘. When 部隊追上, card and body are the same spot.
     _drawMiniToken(canvas, ownC, ownFill, enemy: false, scale: ownScale, troop: ownTroop);
+    if (ownSafe != null && _lifeAt(ownSafe) != UnitLife.alive) {
+      canvas.drawCircle(ownC, 7, Paint()..color = const Color(0xFFB0A8A0));
+      _drawText(canvas, '撤', ownC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
+    }
+    if (enemySafe != null && _lifeAt(enemySafe) != UnitLife.alive) {
+      canvas.drawCircle(enemyC, 7, Paint()..color = const Color(0xFFB0A8A0));
+      _drawText(canvas, '撤', enemyC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
+    }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
     _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
@@ -2022,6 +2135,374 @@ class TaisenGame extends FlameGame {
     }
     // Weapons-only glyph
     _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
+  }
+
+  /// Wei-column crops from cost6-weapon-icons-v2. Same weapon shape in every faction.
+  static const Rect _kCornerCavSrc = Rect.fromLTWH(273, 191, 141, 141);
+  static const Rect _kCornerSpearSrc = Rect.fromLTWH(321, 381, 45, 149);
+  static const Rect _kCornerBowSrc = Rect.fromLTWH(292, 612, 115, 113);
+
+  /// 影子行軍. Ash 5:8 frame plus one weapon corner copied from the v2 chart.
+  /// Black-gold paints sit in opacity 0.35–0.50 while the gap is open, then
+  /// fade with [opacity] as 部隊追上. 騎 is the chart's ring + oblique spear,
+  /// never a horseshoe and never a bare 騎 glyph. No human figure.
+  void _drawMarchShadow(
+    Canvas canvas,
+    Offset center, {
+    required double cardW,
+    required double cardH,
+    required double opacity,
+    required double facing,
+    required TroopType troop,
+  }) {
+    if (opacity <= 0.02) return;
+    final presence = (opacity / kMarchShadowOpacity).clamp(0.0, 1.0);
+    // Full-march black-gold sits in the locked 0.35–0.50 band. Catch-up fades it.
+    final ink = (0.46 * presence).clamp(0.0, 0.50);
+    final rect = Rect.fromCenter(center: center, width: cardW, height: cardH);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cardW * 0.1));
+    canvas.drawRRect(
+      rrect,
+      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.34),
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = const Color(0xFF1A140C).withValues(alpha: ink)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.6,
+    );
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: ink)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.3,
+    );
+    _drawMarchWeapon(
+      canvas,
+      rect,
+      troop,
+      alpha: ink,
+    );
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(facing);
+    final chevron = Path()
+      ..moveTo(0, -cardH * 0.62)
+      ..lineTo(-cardW * 0.14, -cardH * 0.50)
+      ..lineTo(cardW * 0.14, -cardH * 0.50)
+      ..close();
+    canvas.drawPath(
+      chevron,
+      Paint()..color = FactionColors.gold.withValues(alpha: ink),
+    );
+    canvas.restore();
+  }
+
+  /// Weapon corner only. Upright so the troop reads; the chevron carries facing.
+  void _drawMarchWeapon(
+    Canvas canvas,
+    Rect card,
+    TroopType troop, {
+    required double alpha,
+  }) {
+    if (alpha <= 0.02) return;
+    final c = card.center;
+    final w = card.width;
+    final h = card.height;
+    switch (troop) {
+      case TroopType.cavalry:
+        if (!_drawCornerSheet(canvas, card, _kCornerCavSrc, alpha)) {
+          _drawCavRingSpear(canvas, c, w, h, alpha);
+        }
+      case TroopType.spear:
+        if (!_drawCornerSheet(canvas, card, _kCornerSpearSrc, alpha)) {
+          _drawLance(
+            canvas,
+            from: Offset(c.dx, c.dy + h * 0.16),
+            to: Offset(c.dx, c.dy - h * 0.30),
+            head: w * 0.26,
+            alpha: alpha,
+          );
+        }
+      case TroopType.bow:
+        if (!_drawCornerSheet(canvas, card, _kCornerBowSrc, alpha)) {
+          _drawBowCorner(canvas, c, w, h, alpha);
+        }
+      case TroopType.infantry:
+        _drawShortBlade(canvas, c, w, h, alpha);
+      case TroopType.siege:
+        _drawSiegeCart(canvas, c, w, h, alpha);
+    }
+  }
+
+  /// Gold strokes from the v2 chart. Near-black chart fill stays transparent.
+  bool _drawCornerSheet(Canvas canvas, Rect card, Rect src, double alpha) {
+    final sheet = _weaponCornerSheet;
+    if (sheet == null || alpha <= 0.02) return false;
+    final inset = card.deflate(card.width * 0.08);
+    final scale = math.min(inset.width / src.width, inset.height / src.height);
+    final dst = Rect.fromCenter(
+      center: inset.center,
+      width: src.width * scale,
+      height: src.height * scale,
+    );
+    final k = alpha;
+    canvas.drawImageRect(
+      sheet,
+      src,
+      dst,
+      Paint()
+        ..filterQuality = FilterQuality.medium
+        ..colorFilter = ColorFilter.matrix(<double>[
+          k, 0, 0, 0, 0,
+          0, k, 0, 0, 0,
+          0, 0, k, 0, 0,
+          0.85 * k, 0.55 * k, 0.20 * k, 0, -28 * k,
+        ]),
+    );
+    return true;
+  }
+
+  /// Sheet fallback: ring + oblique spear + small loop. Not a horseshoe.
+  void _drawCavRingSpear(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final rad = math.min(w, h) * 0.32;
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = rad * 0.14
+      ..color = black;
+    final ringGold = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = rad * 0.06
+      ..color = gold;
+    canvas.drawCircle(c, rad, ring);
+    canvas.drawCircle(c, rad, ringGold);
+    final tail = Offset(c.dx - rad * 0.55, c.dy + rad * 0.55);
+    final tip = Offset(c.dx + rad * 0.78, c.dy - rad * 0.78);
+    final shaft = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = rad * 0.12
+      ..color = black;
+    canvas.drawLine(tail, tip, shaft);
+    canvas.drawLine(
+      tail,
+      tip,
+      Paint()
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = rad * 0.05
+        ..color = gold,
+    );
+    canvas.drawCircle(tip, rad * 0.16, ring..strokeWidth = rad * 0.08);
+    canvas.drawCircle(tip, rad * 0.16, ringGold..strokeWidth = rad * 0.035);
+  }
+
+  /// Black shaft under a gold core, gold tip edged in black.
+  void _drawLance(
+    Canvas canvas, {
+    required Offset from,
+    required Offset to,
+    required double head,
+    required double alpha,
+  }) {
+    final delta = to - from;
+    final len = delta.distance;
+    if (len < 1 || head <= 0) return;
+    final dir = delta / len;
+    final n = Offset(-dir.dy, dir.dx);
+    final neck = to - dir * (head * 1.05);
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    canvas.drawLine(
+      from,
+      neck,
+      Paint()
+        ..color = black
+        ..strokeWidth = head * 0.34
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      from,
+      neck,
+      Paint()
+        ..color = gold
+        ..strokeWidth = head * 0.16
+        ..strokeCap = StrokeCap.round,
+    );
+    final tip = Path()
+      ..moveTo(to.dx, to.dy)
+      ..lineTo(neck.dx + n.dx * head * 0.62, neck.dy + n.dy * head * 0.62)
+      ..lineTo(neck.dx - n.dx * head * 0.62, neck.dy - n.dy * head * 0.62)
+      ..close();
+    canvas.drawPath(tip, Paint()..color = black);
+    final tipGold = Path()
+      ..moveTo(to.dx - dir.dx * 1.4, to.dy - dir.dy * 1.4)
+      ..lineTo(
+        neck.dx + n.dx * head * 0.36 + dir.dx * 1.6,
+        neck.dy + n.dy * head * 0.36 + dir.dy * 1.6,
+      )
+      ..lineTo(
+        neck.dx - n.dx * head * 0.36 + dir.dx * 1.6,
+        neck.dy - n.dy * head * 0.36 + dir.dy * 1.6,
+      )
+      ..close();
+    canvas.drawPath(tipGold, Paint()..color = gold);
+  }
+
+  void _drawBowCorner(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final limb = Paint()
+      ..color = black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.07
+      ..strokeCap = StrokeCap.round;
+    final limbGold = Paint()
+      ..color = gold
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.032
+      ..strokeCap = StrokeCap.round;
+    final bow = Path()
+      ..moveTo(c.dx - w * 0.06, c.dy - h * 0.28)
+      ..quadraticBezierTo(c.dx + w * 0.34, c.dy, c.dx - w * 0.06, c.dy + h * 0.28);
+    canvas.drawPath(bow, limb);
+    canvas.drawPath(bow, limbGold);
+    final string = Paint()
+      ..color = gold
+      ..strokeWidth = w * 0.025
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(c.dx - w * 0.06, c.dy - h * 0.28),
+      Offset(c.dx - w * 0.06, c.dy + h * 0.28),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.045
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      Offset(c.dx - w * 0.06, c.dy - h * 0.28),
+      Offset(c.dx - w * 0.06, c.dy + h * 0.28),
+      string,
+    );
+    final tail = Offset(c.dx - w * 0.20, c.dy);
+    final tip = Offset(c.dx + w * 0.22, c.dy);
+    canvas.drawLine(
+      tail,
+      Offset(c.dx + w * 0.08, c.dy),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.045
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      tail,
+      Offset(c.dx + w * 0.08, c.dy),
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.02
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(c.dx + w * 0.06, c.dy - h * 0.07)
+      ..lineTo(c.dx + w * 0.06, c.dy + h * 0.07)
+      ..close();
+    canvas.drawPath(head, Paint()..color = black);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx - w * 0.03, tip.dy)
+        ..lineTo(c.dx + w * 0.08, c.dy - h * 0.04)
+        ..lineTo(c.dx + w * 0.08, c.dy + h * 0.04)
+        ..close(),
+      Paint()..color = gold,
+    );
+  }
+
+  void _drawShortBlade(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final tip = Offset(c.dx + w * 0.16, c.dy - h * 0.16);
+    final heel = Offset(c.dx - w * 0.10, c.dy + h * 0.08);
+    final blade = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(heel.dx - w * 0.06, heel.dy + h * 0.02)
+      ..lineTo(heel.dx + w * 0.05, heel.dy + h * 0.07)
+      ..close();
+    canvas.drawPath(blade, Paint()..color = black);
+    canvas.drawPath(
+      Path()
+        ..moveTo(tip.dx - w * 0.03, tip.dy + h * 0.02)
+        ..lineTo(heel.dx - w * 0.02, heel.dy + h * 0.03)
+        ..lineTo(heel.dx + w * 0.02, heel.dy + h * 0.05)
+        ..close(),
+      Paint()..color = gold,
+    );
+    canvas.drawLine(
+      Offset(heel.dx - w * 0.12, heel.dy - h * 0.02),
+      Offset(heel.dx + w * 0.10, heel.dy + h * 0.08),
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.07
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      Offset(heel.dx - w * 0.08, heel.dy),
+      Offset(heel.dx + w * 0.06, heel.dy + h * 0.06),
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.028
+        ..strokeCap = StrokeCap.round,
+    );
+    final gripEnd = Offset(heel.dx - w * 0.08, heel.dy + h * 0.10);
+    canvas.drawLine(
+      heel,
+      gripEnd,
+      Paint()
+        ..color = black
+        ..strokeWidth = w * 0.055
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      heel,
+      gripEnd,
+      Paint()
+        ..color = gold
+        ..strokeWidth = w * 0.022
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  void _drawSiegeCart(Canvas canvas, Offset c, double w, double h, double alpha) {
+    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final gold = FactionColors.gold.withValues(alpha: alpha);
+    final beam = Paint()
+      ..color = black
+      ..strokeWidth = h * 0.07
+      ..strokeCap = StrokeCap.round;
+    final beamGold = Paint()
+      ..color = gold
+      ..strokeWidth = h * 0.028
+      ..strokeCap = StrokeCap.round;
+    final y = c.dy - h * 0.04;
+    canvas.drawLine(Offset(c.dx - w * 0.32, y), Offset(c.dx + w * 0.32, y), beam);
+    canvas.drawLine(Offset(c.dx - w * 0.32, y), Offset(c.dx + w * 0.32, y), beamGold);
+    canvas.drawLine(Offset(c.dx, y), Offset(c.dx, y - h * 0.16), beam);
+    canvas.drawLine(Offset(c.dx, y), Offset(c.dx, y - h * 0.16), beamGold);
+    for (final dx in [-w * 0.16, w * 0.16]) {
+      final hub = Offset(c.dx + dx, c.dy + h * 0.14);
+      canvas.drawCircle(hub, w * 0.11, Paint()..color = black);
+      canvas.drawCircle(
+        hub,
+        w * 0.11,
+        Paint()
+          ..color = gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = w * 0.035,
+      );
+      canvas.drawCircle(hub, w * 0.035, Paint()..color = gold);
+    }
   }
 
   void _drawCardLikeToken(
@@ -2758,7 +3239,7 @@ class TaisenGame extends FlameGame {
       return dx * dx + dy * dy <= hitR * hitR;
     }
     if (within(tokenCenter(i))) return true;
-    // Pinned full-color card is the visible grab target while the shadow marches.
+    // The 落點釘 is the visible grab target while 影子行軍 catches up.
     return pinnedMarchAt(i) && within(dragTo!);
   }
 
@@ -2832,9 +3313,7 @@ class TaisenGame extends FlameGame {
         return;
       }
       if (selectedIndex == i && _bowShotReady && !_bowDidShoot && _bowWindupIndex == i) {
-        flashHit(i, '射');
-        _bowDidShoot = true;
-        _bowShotReady = false;
+        _releaseBowShot(i);
         return;
       }
       selectedIndex = i;
@@ -2958,7 +3437,9 @@ class TaisenGame extends FlameGame {
         while (fieldInCastle.length <= i) {
           fieldInCastle.add(false);
         }
-        if (bandHot) {
+        final leavingCastle = _lifeAt(i) == UnitLife.readyRedeploy ||
+            _lifeAt(i) == UnitLife.inCastleReviving;
+        if (bandHot && !leavingCastle) {
           // Body is already in 己城: park and drop the waypoint. Do not keep marching.
           _parkInCastle(i, at);
         } else {
@@ -3000,6 +3481,7 @@ class TaisenGame extends FlameGame {
     final flashSec = switch (label) {
       '突撃' => kChargeFlashSec,
       '氣勢' => kKiseiFlashSec,
+      '撤退' => kRetreatSplashSec,
       _ => math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC)),
     };
     _hitFlashLeft = flashSec;
@@ -3051,12 +3533,195 @@ class TaisenGame extends FlameGame {
     _clearTravelMeterOnStop();
   }
 
+  UnitLife _lifeAt(int i) {
+    if (i < 0 || i >= _unitLife.length) return UnitLife.alive;
+    return _unitLife[i];
+  }
+
+  bool _bodyInOwnCastle(int i) {
+    if (i < 0 || i >= fieldPos.length || isEnemyAt(i)) return false;
+    if (i < fieldInCastle.length && fieldInCastle[i]) return true;
+    return inCastleBand(fieldPos[i]);
+  }
+
+  double _reviveSecondsFor(int i) {
+    if (i < 0 || i >= field.length) return kReviveBaseSec;
+    return reviveSeconds(
+      skilled: skillHasRevive(field[i].skills),
+      baseSec: kReviveBaseSec,
+      skillMul: kReviveSkillMul,
+    );
+  }
+
+  String _lifeTipAt(int i) {
+    switch (_lifeAt(i)) {
+      case UnitLife.retreating:
+        return '散咗拖返城先復活';
+      case UnitLife.alive:
+        final parked = i < fieldInCastle.length && fieldInCastle[i];
+        if (parked && debugUnitHp(i) < kRansenMaxHp) return '返城回血';
+        return '';
+      case UnitLife.inCastleReviving:
+      case UnitLife.readyRedeploy:
+        return '';
+    }
+  }
+
+  void _ensureLifeSlots() {
+    while (_unitLife.length < field.length) {
+      _unitLife.add(UnitLife.alive);
+      _reviveLeft.add(0);
+    }
+    if (_unitLife.length > field.length) {
+      _unitLife.removeRange(field.length, _unitLife.length);
+      _reviveLeft.removeRange(field.length, _reviveLeft.length);
+    }
+  }
+
+  /// HP ≤ 0. Clears the march, the aura, and 亂戰. Morale is unchanged.
+  void _enterRetreat(int i) {
+    _ensureLifeSlots();
+    _ensureHpSlots();
+    if (i < 0 || i >= field.length) return;
+    if (_unitLife[i] != UnitLife.alive) return;
+    _unitHp[i] = 0;
+    _unitLife[i] = UnitLife.retreating;
+    _reviveLeft[i] = _reviveSecondsFor(i);
+    _ransenUnits.remove(i);
+    matchMorale -= kRetreatMoraleCost;
+    if (selectedIndex == i) {
+      dragTo = null;
+      dragging = false;
+      _lastDragDir = null;
+      _clearTravelMeterOnStop();
+    }
+    if (_matchChargeIndex == i) {
+      _matchChargeIndex = null;
+      _matchChargeC = 0;
+    }
+    flashHit(i, '撤退');
+  }
+
+  /// Test hook: set playtest HP without starting retreat. 0 still needs [debugForceHpZero].
+  void debugSetUnitHp(int i, double hp) {
+    _ensureHpSlots();
+    if (i < 0 || i >= _unitHp.length) return;
+    _unitHp[i] = hp.clamp(0.0, kRansenMaxHp);
+  }
+
+  /// Test hook: HP → 0 starts retreat. Does not invent a damage source.
+  void debugForceHpZero(int i) {
+    _ensureHpSlots();
+    _ensureLifeSlots();
+    if (i < 0 || i >= _unitHp.length) return;
+    _unitHp[i] = 0;
+    _enterRetreat(i);
+  }
+
+  void _finishRevive(int i) {
+    _reviveLeft[i] = 0;
+    _unitHp[i] = kRansenMaxHp;
+    _unitLife[i] = UnitLife.readyRedeploy;
+  }
+
+  void _noteCastleExit(int i, Offset pos) {
+    if (i < 0 || i >= fieldInCastle.length || !fieldInCastle[i]) return;
+    if (inCastleBand(pos)) return;
+    fieldInCastle[i] = false;
+    if (i < _unitLife.length && _unitLife[i] == UnitLife.readyRedeploy) {
+      _unitLife[i] = UnitLife.alive;
+    }
+  }
+
+  /// Countdown runs only inside 己城. Outside, [reviveLeft] stays put.
+  /// Alive bodies in the castle heal. That path is not the revive bell.
+  void _tickUnitLife(double dt) {
+    _ensureLifeSlots();
+    _ensureHpSlots();
+    if (dt < 0) return;
+    for (var i = 0; i < field.length; i++) {
+      if (isEnemyAt(i)) continue;
+      final inCastle = _bodyInOwnCastle(i);
+      switch (_unitLife[i]) {
+        case UnitLife.alive:
+          // 歸城 heal is the parked path. Standing in the band while fighting does not heal.
+          final parked = i < fieldInCastle.length && fieldInCastle[i];
+          if (parked && dt > 0 && _unitHp[i] < kRansenMaxHp) {
+            _unitHp[i] = math.min(kRansenMaxHp, _unitHp[i] + kRansenTickPerSec * dt);
+          }
+          break;
+        case UnitLife.retreating:
+          if (!inCastle) break;
+          _unitLife[i] = UnitLife.inCastleReviving;
+          _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
+          if (_reviveLeft[i] <= 0) _finishRevive(i);
+          break;
+        case UnitLife.inCastleReviving:
+          if (!inCastle) break;
+          _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
+          if (_reviveLeft[i] <= 0) _finishRevive(i);
+          break;
+        case UnitLife.readyRedeploy:
+          if (!inCastle) {
+            _unitLife[i] = UnitLife.alive;
+            if (i < fieldInCastle.length) fieldInCastle[i] = false;
+          }
+          break;
+      }
+    }
+  }
+
+  void _drawRetreatToken(Canvas canvas, Offset c, Size tokenSize) {
+    final rect = Rect.fromCenter(center: c, width: tokenSize.width, height: tokenSize.height);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+      Paint()..color = const Color(0xFFB0A8A0),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+      Paint()
+        ..color = const Color(0xFF5D534C)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+    _drawText(canvas, '骷', Offset(c.dx - 8, c.dy - 10), const Color(0xFF3E2723), 16);
+  }
+
+  void _drawReviveBar(Canvas canvas, Offset c, int i, Size tokenSize) {
+    final total = _reviveSecondsFor(i);
+    if (total <= 0) return;
+    final left = i < _reviveLeft.length ? _reviveLeft[i] : 0.0;
+    final frac = (left / total).clamp(0.0, 1.0);
+    final bar = Rect.fromCenter(
+      center: Offset(c.dx, c.dy - tokenSize.height / 2 - 6),
+      width: tokenSize.width,
+      height: 4,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+      Paint()..color = const Color(0xFF3E2723),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * frac, bar.height),
+        const Radius.circular(2),
+      ),
+      Paint()..color = const Color(0xFFFFF59D),
+    );
+  }
+
   void _ensureHpSlots() {
     while (_unitHp.length < field.length) {
       _unitHp.add(kRansenMaxHp);
     }
+    while (_hpCause.length < _unitHp.length) {
+      _hpCause.add('');
+    }
     if (_unitHp.length > field.length) {
       _unitHp.removeRange(field.length, _unitHp.length);
+      if (_hpCause.length > field.length) {
+        _hpCause.removeRange(field.length, _hpCause.length);
+      }
       _ransenUnits.removeWhere((i) => i >= field.length);
     }
   }
@@ -3078,15 +3743,17 @@ class TaisenGame extends FlameGame {
     _ensureHpSlots();
 
     final overlapping = <int>{};
+    final pairs = <(int, int)>[];
     int? chargeAlly;
     int? chargeEnemy;
     for (var a = 0; a < field.length; a++) {
-      if (isEnemyAt(a)) continue;
+      if (isEnemyAt(a) || _lifeAt(a) != UnitLife.alive) continue;
       for (var e = 0; e < field.length; e++) {
-        if (!isEnemyAt(e)) continue;
+        if (!isEnemyAt(e) || _lifeAt(e) != UnitLife.alive) continue;
         if (!inMeleeContact(tokenCenter(a), tokenCenter(e))) continue;
         overlapping.add(a);
         overlapping.add(e);
+        pairs.add((a, e));
         final repeat = _chargeResolvedThisContact && _meleeEnemyIndex == e;
         if (chargeAlly == null && !repeat && _ownsLiveCharge(a) && auraActive) {
           chargeAlly = a;
@@ -3097,6 +3764,12 @@ class TaisenGame extends FlameGame {
 
     if (chargeAlly != null && chargeEnemy != null) {
       _fireChargeHit(chargeAlly, chargeEnemy);
+      pairs.removeWhere((p) => _lifeAt(p.$1) != UnitLife.alive || _lifeAt(p.$2) != UnitLife.alive);
+      overlapping.clear();
+      for (final p in pairs) {
+        overlapping.add(p.$1);
+        overlapping.add(p.$2);
+      }
     }
 
     if (overlapping.isEmpty) {
@@ -3112,10 +3785,132 @@ class TaisenGame extends FlameGame {
     _suppressRansenActions();
 
     if (dt <= 0) return;
-    for (final i in _ransenUnits) {
-      if (i < 0 || i >= _unitHp.length) continue;
-      _unitHp[i] = math.max(0.0, _unitHp[i] - kRansenTickPerSec * dt);
+    final dealt = <int, double>{};
+    for (final pair in pairs) {
+      final ally = pair.$1;
+      final enemy = pair.$2;
+      if (_lifeAt(ally) != UnitLife.alive || _lifeAt(enemy) != UnitLife.alive) continue;
+      dealt[ally] = (dealt[ally] ?? 0) + _ransenOutgoingPerSec(enemy) * dt;
+      dealt[enemy] = (dealt[enemy] ?? 0) + _ransenOutgoingPerSec(ally) * dt;
     }
+    for (final entry in dealt.entries) {
+      _applyHpLoss(entry.key, entry.value, cause: '亂戰');
+    }
+    _ransenUnits.removeWhere((i) => i < 0 || i >= field.length || _lifeAt(i) != UnitLife.alive);
+    if (_ransenUnits.length < 2) _ransenUnits.clear();
+  }
+
+  /// Playtest outgoing 亂戰 rate. 攻城 is a fraction of the shared stub. Not wiki DPS.
+  double _ransenOutgoingPerSec(int i) {
+    if (i < 0 || i >= field.length) return 0;
+    if (field[i].troop == TroopType.siege) {
+      return kRansenTickPerSec * kSiegeRansenMul;
+    }
+    return kRansenTickPerSec;
+  }
+
+  void _applyHpLoss(int i, double amount, {required String cause}) {
+    _ensureHpSlots();
+    _ensureLifeSlots();
+    if (amount <= 0 || i < 0 || i >= _unitHp.length) return;
+    if (_lifeAt(i) != UnitLife.alive) return;
+    _unitHp[i] = math.max(0.0, _unitHp[i] - amount);
+    if (i < _hpCause.length) _hpCause[i] = cause;
+    if (_unitHp[i] <= 0) _enterRetreat(i);
+  }
+
+  /// 槍尖 contact is not body 亂戰. A cavalry on the tip takes the full HP bar.
+  void _tickSpearTips() {
+    _ensureLifeSlots();
+    final still = <String>{};
+    for (var s = 0; s < field.length; s++) {
+      if (_lifeAt(s) != UnitLife.alive || !spearTipExtendedAt(s)) continue;
+      for (var o = 0; o < field.length; o++) {
+        if (o == s || isEnemyAt(s) == isEnemyAt(o)) continue;
+        if (_lifeAt(o) != UnitLife.alive) continue;
+        if (inMeleeContact(tokenCenter(s), tokenCenter(o))) continue;
+        if ((spearTipAt(s) - tokenCenter(o)).distance > kSpearTipHitR) continue;
+        final key = '$s:$o';
+        still.add(key);
+        if (_tipResolved.contains(key)) continue;
+        _tipResolved.add(key);
+        final heavy = field[o].troop == TroopType.cavalry;
+        flashHit(s, '迎擊');
+        _applyHpLoss(o, heavy ? kRansenMaxHp : kRansenTickPerSec, cause: '迎擊');
+      }
+    }
+    _tipResolved.removeWhere((key) => !still.contains(key));
+  }
+
+  /// 攻城 standing in 己城 loses the shared stub while an enemy is in that band
+  /// and the bodies are not already in 亂戰. Not a second DPS table.
+  void _tickCastleSiegeChip(double dt) {
+    _castleChip.clear();
+    if (dt <= 0) return;
+    for (var i = 0; i < field.length; i++) {
+      if (_lifeAt(i) != UnitLife.alive || field[i].troop != TroopType.siege) continue;
+      if (!inCastleBand(fieldPos[i])) continue;
+      var enemyInBand = false;
+      var overlapping = false;
+      for (var e = 0; e < field.length; e++) {
+        if (e == i || isEnemyAt(e) == isEnemyAt(i) || _lifeAt(e) != UnitLife.alive) continue;
+        if (!inCastleBand(fieldPos[e])) continue;
+        enemyInBand = true;
+        if (inMeleeContact(tokenCenter(i), tokenCenter(e))) overlapping = true;
+      }
+      if (enemyInBand && !overlapping) {
+        _castleChip.add(i);
+        _applyHpLoss(i, kRansenTickPerSec * dt, cause: '城傷');
+      }
+    }
+  }
+
+  /// Still time only. A committed march or 亂戰 drops the windup, so a moving bow has no arrow.
+  void _tickBowWindup(double dt) {
+    if (tutorial != null || _bowWindupIndex == null || dt < 0) return;
+    final i = _bowWindupIndex!;
+    final moving = dragTo != null && selectedIndex == i;
+    if (_ransenUnits.contains(i) || moving) {
+      _cancelBowWindup();
+      return;
+    }
+    if (_bowDidShoot) return;
+    _bowWindupC += dt / CClock.secondsPerC;
+    if (_bowWindupC >= FxWindows.bowStopBeforeShotC) {
+      if (!_bowShotReady && !_verifyLoggedBowReady) {
+        _verifyLoggedBowReady = true;
+        // ignore: avoid_print
+        print('VERIFY_BOW readyC=${clock.remainingC} windupC=${_bowWindupC.toStringAsFixed(2)}');
+      }
+      _bowShotReady = true;
+    }
+  }
+
+  /// Stopped bow only. Marching or 亂戰 releases nothing. Low HP does not weaken it.
+  void _releaseBowShot(int i) {
+    _bowDidShoot = true;
+    _bowShotReady = false;
+    final moving = dragTo != null && selectedIndex == i;
+    if (_ransenUnits.contains(i) || moving) return;
+    final target = _nearestBowTarget(i);
+    flashHit(i, '射');
+    if (target == null) return;
+    _applyHpLoss(target, kBowShotBurstSec * kRansenTickPerSec, cause: '射');
+  }
+
+  int? _nearestBowTarget(int i) {
+    int? best;
+    var bestD = double.infinity;
+    for (var o = 0; o < field.length; o++) {
+      if (o == i || isEnemyAt(o) == isEnemyAt(i) || _lifeAt(o) != UnitLife.alive) continue;
+      if (inMeleeContact(tokenCenter(i), tokenCenter(o))) continue;
+      final d = (tokenCenter(o) - tokenCenter(i)).distance;
+      if (d < bestD) {
+        bestD = d;
+        best = o;
+      }
+    }
+    return best;
   }
 
   /// 突撃 once, then the caller keeps the pair in 亂戰 if they still overlap.
@@ -3143,6 +3938,8 @@ class TaisenGame extends FlameGame {
     _matchChargeC = 0;
     _dragTravelDist = 0;
     _prevAuraActive = false;
+    // One 突撃 is several seconds of the overlap stub. The pair then stays in 亂戰.
+    _applyHpLoss(enemy, kChargeBurstSec * kRansenTickPerSec, cause: '突撃');
   }
 
   /// Bow stops shooting, spear tip is a draw-time retract, cavalry drops a live aura.

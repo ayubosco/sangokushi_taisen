@@ -22,6 +22,17 @@ void main() {
     expect(hitR, greaterThanOrEqualTo(24.0));
   });
 
+  test('JL3 table is aged paper plus a red rail, not a black vacuum', () {
+    expect(TaisenGame.kDesktopParchment.computeLuminance(), greaterThan(0.35));
+    expect(TaisenGame.kDesktopParchmentDeep.computeLuminance(), greaterThan(0.2));
+    expect(TaisenGame.kOwnBand.computeLuminance(), lessThan(0.25));
+    expect(TaisenGame.kEnemyBand, isNot(TaisenGame.kOwnBand));
+    expect(TaisenGame.kEnemyBand, isNot(TaisenGame.kDesktopParchment));
+    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.18));
+    expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.55));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
+  });
+
   test('own and enemy field tokens share identical card size (no enemy scale)', () {
     // Regression: enemy hard-outline used to inflate +20/+12 and read as bigger card.
     expect(TaisenGame.kTokenWidthFracOfField, 0.10);

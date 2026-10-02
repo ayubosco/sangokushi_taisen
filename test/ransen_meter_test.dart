@@ -157,6 +157,7 @@ void main() {
     expect(TaisenGame.kChargeFlashSec, lessThanOrEqualTo(1.0));
     expect(g.debugTravel01, 0);
     expect(g.auraActive, isFalse);
+    expect(g.showChargeCyanRings, isFalse, reason: '亂戰 after 突撃 has zero charge ring');
     expect(g.debugInRansen(0), isTrue);
     expect(g.debugInRansen(1), isTrue);
     expect(g.debugUnitHp(0), lessThan(TaisenGame.kRansenMaxHp));
@@ -220,6 +221,7 @@ void main() {
     }
     expect(cav.debugInRansen(0), isTrue);
     expect(cav.auraActive, isFalse);
+    expect(cav.showChargeCyanRings, isFalse, reason: '亂戰 draws zero charge ring');
     expect(cav.debugHitLabel, isNot('突撃'));
     expect(cav.debugTravel01, greaterThan(kept - 0.001));
     expect(cav.debugTravel01, lessThan(kept + 0.08),
