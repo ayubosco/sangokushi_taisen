@@ -1504,7 +1504,22 @@ class TaisenGame extends FlameGame {
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
-      if (pinned) {
+      final revivingHere = _lifeAt(i) == UnitLife.inCastleReviving && _bodyInOwnCastle(i);
+      if (revivingHere) {
+        // Grey card in 歸城區. The full-color 落點釘 stays hidden until 出陣.
+        final face = _onScreenCardCenter(center);
+        _drawRevivingCard(canvas, face, i, tokenSize);
+        final cause = debugRetreatCause(i);
+        if (cause.isNotEmpty) {
+          _drawText(
+            canvas,
+            cause,
+            Offset(face.dx - 14, face.dy + tokenSize.height / 2 + 2),
+            const Color(0xFFFFF59D),
+            12,
+          );
+        }
+      } else if (pinned) {
         // 影子行軍: ash 5:8 frame + weapon corner only. kMarchShadowFullColor stays false.
         _drawMarchShadow(
           canvas,
@@ -1526,10 +1541,6 @@ class TaisenGame extends FlameGame {
             const Color(0xFFFFF59D),
             11,
           );
-        }
-        // Countdown number only inside 己城. A body that leaves keeps the frozen timer off-screen.
-        if (_lifeAt(i) == UnitLife.inCastleReviving && _bodyInOwnCastle(i)) {
-          _drawReviveBar(canvas, center, i, tokenSize);
         }
         final cause = debugRetreatCause(i);
         if (cause.isNotEmpty) {
@@ -1611,7 +1622,10 @@ class TaisenGame extends FlameGame {
     }
 
     // Full-color 落點釘. On arrive the troop body coincides with this card (部隊追上).
-    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
+    // A retreating / reviving body does not wear that card — R2 stays grey until 出陣.
+    if (selectedIndex != null &&
+        pinnedMarchAt(selectedIndex!) &&
+        _lifeAt(selectedIndex!) == UnitLife.alive) {
       final i = selectedIndex!;
       final card = field[i];
       final cardAt = dragTo!;
@@ -1699,12 +1713,13 @@ class TaisenGame extends FlameGame {
         // CHARGE punch / 氣勢 snap / intercept — never show 「突撃」 unless aura+contact.
         final isChargePunch = _hitFlashLabel == '突撃';
         final isKisei = _hitFlashLabel == '氣勢';
+        final isRetreatSplash = _hitFlashLabel == '撤退';
         _drawFatFloatText(
           canvas,
           _hitFlashLabel,
-          Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : 78)),
+          Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78)),
           alpha: 1,
-          fontSize: isChargePunch ? 36 : isKisei ? 32 : 22,
+          fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? 32 : 22,
         );
         final punchCyan = (isChargePunch || _hitFlashLabel == '迎擊') &&
             _chargeCyanOnUnit(_hitFlashIndex!);
@@ -2053,11 +2068,13 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.intercept:
+        // Ellipse, wedge, and the cyan pillar are a living spear's 迎擊 mark.
+        // A retreating or in-castle body keeps the 撤 card with none of that.
         final retractSpear = ownSafe != null &&
             ownSafe < field.length &&
             field[ownSafe].troop == TroopType.spear &&
             !spearTipExtendedAt(ownSafe);
-        if (!retractSpear) {
+        if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
           _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
@@ -2073,7 +2090,9 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.bow:
-        _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
+        if (ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
+          _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
+        }
         break;
       case AWindowKind.stratagem:
         break;
@@ -2104,7 +2123,9 @@ class TaisenGame extends FlameGame {
       _drawText(canvas, '撤', enemyC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
     }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
-    _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
+    if (ownSafe == null || _chargeCyanOnUnit(ownSafe)) {
+      _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
+    }
     _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
     if (showAWindowDebugLabels) {
       final label = switch (kind) {
@@ -3804,6 +3825,38 @@ class TaisenGame extends FlameGame {
     }
   }
 
+  /// Keep a 5:8 card fully inside the game canvas so its face is not clipped
+  /// by the bottom edge of the 歸城區.
+  Offset _onScreenCardCenter(Offset at) {
+    final card = tokenCardSize;
+    final minX = card.width / 2 + 2;
+    final maxX = math.max(minX, size.x - card.width / 2 - 2);
+    final minY = (size.y > 0 ? watchH : 0) + card.height / 2 + 2;
+    final maxY = math.max(minY, size.y - card.height / 2 - 2);
+    return Offset(at.dx.clamp(minX, maxX), at.dy.clamp(minY, maxY));
+  }
+
+  /// Reviving inside 己城: grey card, countdown centred on the face. Full colour
+  /// returns only once the body is alive again (出陣).
+  void _drawRevivingCard(Canvas canvas, Offset c, int i, Size tokenSize) {
+    final rect = Rect.fromCenter(center: c, width: tokenSize.width, height: tokenSize.height);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(tokenSize.width * 0.08));
+    canvas.drawRRect(rrect, Paint()..color = const Color(0xFF8E8680));
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = const Color(0xFF5C564F)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2,
+    );
+    final total = _reviveSecondsFor(i);
+    if (total <= 0) return;
+    final left = i < _reviveLeft.length ? _reviveLeft[i] : 0.0;
+    if (left <= 0) return;
+    final label = left.ceil().clamp(1, 99).toString();
+    _drawFatFloatText(canvas, label, c, fontSize: 26);
+  }
+
   void _drawRetreatToken(Canvas canvas, Offset c, Size tokenSize) {
     final rect = Rect.fromCenter(center: c, width: tokenSize.width, height: tokenSize.height);
     canvas.drawRRect(
@@ -3818,38 +3871,6 @@ class TaisenGame extends FlameGame {
         ..strokeWidth = 1.5,
     );
     _drawText(canvas, '骷', Offset(c.dx - 8, c.dy - 10), const Color(0xFF3E2723), 16);
-  }
-
-  void _drawReviveBar(Canvas canvas, Offset c, int i, Size tokenSize) {
-    final total = _reviveSecondsFor(i);
-    if (total <= 0) return;
-    final left = i < _reviveLeft.length ? _reviveLeft[i] : 0.0;
-    final frac = (left / total).clamp(0.0, 1.0);
-    final bar = Rect.fromCenter(
-      center: Offset(c.dx, c.dy - tokenSize.height / 2 - 6),
-      width: tokenSize.width,
-      height: 4,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
-      Paint()..color = const Color(0xFF3E2723),
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(bar.left, bar.top, bar.width * frac, bar.height),
-        const Radius.circular(2),
-      ),
-      Paint()..color = const Color(0xFFFFF59D),
-    );
-    // Seconds only while reviving inside 己城. Outside, this painter is not called.
-    final label = left.ceil().clamp(1, 99).toString();
-    _drawText(
-      canvas,
-      label,
-      Offset(c.dx - label.length * 6.0, c.dy + 2),
-      const Color(0xFF1A140C),
-      22,
-    );
   }
 
   void _ensureHpSlots() {

@@ -1161,10 +1161,15 @@ class _MatchShellState extends State<MatchShell> {
 
   Future<void> _holdRetreatReviveFrame(RetreatReviveVisualShot shot) async {
     _game.visualVerifyCaption = shot.caption;
+    if (mounted) setState(() {});
+    // pauseEngine stops the ticker. Capturing immediately writes the previous
+    // frame, so an R1 「撤退」 re-flash never reaches the PNG. Paint it first.
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
     _game.pauseEngine();
     if (mounted) setState(() {});
     await WidgetsBinding.instance.endOfFrame;
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await Future<void>.delayed(const Duration(milliseconds: 48));
     await _writeVerifyPng('RETREAT_REVIVE_VISUAL_VERIFY', 'retreat-revive-visual', shot.id);
     // ignore: avoid_print
     print(
