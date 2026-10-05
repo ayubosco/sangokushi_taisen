@@ -1514,7 +1514,7 @@ class TaisenGame extends FlameGame {
           _drawText(
             canvas,
             cause,
-            Offset(face.dx - 14, face.dy + tokenSize.height / 2 + 2),
+            Offset(face.dx - 14, face.dy - tokenSize.height / 2 - 16),
             const Color(0xFFFFF59D),
             12,
           );
