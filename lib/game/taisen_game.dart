@@ -49,9 +49,8 @@ class TaisenGame extends FlameGame {
   /// Shot mode: keep 返城 float visible.
   bool holdReturnFlash = false;
 
-  /// Design assets: weapon corner atlas + lacquer field swatch + 5:8 token art.
-  ui.Image? _weaponSheet;
-  /// v2 chart: 騎 ring+斜槍, 槍 tip, 弓 bow+arrow. Not the horseshoe badge sheet.
+  /// v2 chart: 騎 ring+斜槍, 槍 tip, 弓 bow+arrow. Watch, field fallback, and 影子行軍 share this.
+  /// The horseshoe badge sheet is not a troop icon.
   ui.Image? _weaponCornerSheet;
   ui.Image? _tokenCards58;
   ui.Image? _tokenSpear58;
@@ -104,6 +103,30 @@ class TaisenGame extends FlameGame {
   }
   /// BINARY playfeel: field + Watch draw cyan rings only while [auraActive].
   bool get showChargeCyanRings => auraActive;
+
+  /// Lit charge on a living body outside 己城. Retreat, revive, and 歸城 draw none.
+  bool _chargeCyanOnUnit(int i) {
+    if (i < 0 || i >= field.length || i >= fieldPos.length) return false;
+    if (_lifeAt(i) != UnitLife.alive) return false;
+    if (i < fieldInCastle.length && fieldInCastle[i]) return false;
+    if (!isEnemyAt(i) && inCastleBand(fieldPos[i])) return false;
+    return true;
+  }
+
+  /// Field FX stay below the watch/field seam. Castle race bars sit on that seam.
+  Rect _fieldFxClip() {
+    final top = size.y > 0 ? watchH : 0.0;
+    return Rect.fromLTWH(0, top, size.x, math.max(0.0, size.y - top));
+  }
+
+  /// Watch FX stay inside the watch and above the castle race bars.
+  Rect _watchFxClip() {
+    final top = size.y > 0 ? watchH : 0.0;
+    return Rect.fromLTWH(0, 0, size.x, math.max(0.0, top - kCastleStripPx));
+  }
+
+  /// Outermost cyan radius. 1.5× the field token width — not the old ~5× punch.
+  double get _chargeRingMaxR => tokenCardSize.width * 1.5;
   String get debugHitLabel => _hitFlashLabel;
   /// off / charging (!aura, travel mid) / lit — CHARGE_AUTO_VERIFY mid vs lit proof.
   String get debugChargeFeel {
@@ -282,7 +305,6 @@ class TaisenGame extends FlameGame {
     final wasRunning = clock.running;
     clock.reset();
     if (!wasRunning) clock.pause();
-    _weaponSheet = await _loadUiImage('assets/ui/token-weapons-sheet.png');
     _weaponCornerSheet = await _loadUiImage('assets/icons/cost6-weapon-icons-v2.png');
     _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
     _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
@@ -571,6 +593,16 @@ class TaisenGame extends FlameGame {
     castleBandHot = false;
   }
 
+  /// 「氣勢」is the aura snap. A retreated, reviving, or in-castle body must not keep it.
+  void _dropAuraFlashOffBody() {
+    final i = _hitFlashIndex;
+    if (i == null || _hitFlashLabel != '氣勢') return;
+    if (_chargeCyanOnUnit(i)) return;
+    _hitFlashLeft = 0;
+    _hitFlashIndex = null;
+    _hitFlashLabel = '';
+  }
+
   void _maybeSnapKiseiFlash() {
     final nowAura = auraActive;
     if (nowAura && !_prevAuraActive) {
@@ -639,6 +671,11 @@ class TaisenGame extends FlameGame {
     _hitFlashIndex = null;
     _hitFlashLeft = 0;
     _hitFlashLabel = '';
+    _matchEnemyChargeIndex = null;
+    _matchEnemyChargeC = 0;
+    _matchTurnWindowOpen = false;
+    _matchFacingCorrect = false;
+    _matchSpearIndex = null;
     _cancelBowWindup();
   }
 
@@ -653,6 +690,7 @@ class TaisenGame extends FlameGame {
     _tickBowWindup(dt);
     _tickUnitLife(dt);
     _maybeSnapKiseiFlash();
+    _dropAuraFlashOffBody();
   }
 
   /// Stop fade only. Arrival clears the waypoint; this drains travel / aura.
@@ -1315,6 +1353,7 @@ class TaisenGame extends FlameGame {
     }
 
     _maybeSnapKiseiFlash();
+    _dropAuraFlashOffBody();
 
     // Tutorial S1: 突撃 only on collide while aura ready (handled in walk / panEnd).
 
@@ -1488,7 +1527,8 @@ class TaisenGame extends FlameGame {
             11,
           );
         }
-        if (_lifeAt(i) == UnitLife.inCastleReviving) {
+        // Countdown number only inside 己城. A body that leaves keeps the frozen timer off-screen.
+        if (_lifeAt(i) == UnitLife.inCastleReviving && _bodyInOwnCastle(i)) {
           _drawReviveBar(canvas, center, i, tokenSize);
         }
         final cause = debugRetreatCause(i);
@@ -1538,6 +1578,33 @@ class TaisenGame extends FlameGame {
             Offset(center.dx - 14, center.dy - tokenSize.height / 2 - 18),
             const Color(0xFFFFF59D),
             12,
+          );
+        }
+        final tip = _lifeTipAt(i);
+        if (tip.isNotEmpty) {
+          _drawText(
+            canvas,
+            tip,
+            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 28),
+            const Color(0xFFFFF59D),
+            12,
+          );
+          final hp01 = (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0);
+          final bar = Rect.fromCenter(
+            center: Offset(center.dx, center.dy - tokenSize.height / 2 - 12),
+            width: tokenSize.width,
+            height: 5,
+          );
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+            Paint()..color = const Color(0xFF3E2723),
+          );
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(bar.left, bar.top, bar.width * hp01, bar.height),
+              const Radius.circular(2),
+            ),
+            Paint()..color = const Color(0xFFEF9A9A),
           );
         }
       }
@@ -1639,11 +1706,16 @@ class TaisenGame extends FlameGame {
           alpha: 1,
           fontSize: isChargePunch ? 36 : isKisei ? 32 : 22,
         );
-        if (!isKisei) {
-          // 氣勢 uses snapped charge rings (already on). Extra cyan circle is 突撃/迎擊 only.
+        final punchCyan = (isChargePunch || _hitFlashLabel == '迎擊') &&
+            _chargeCyanOnUnit(_hitFlashIndex!);
+        if (punchCyan) {
+          // 氣勢 uses snapped charge rings. 撤退 / 歸城 / revive draw no cyan.
+          final cap = _chargeRingMaxR;
+          canvas.save();
+          canvas.clipRect(_fieldFxClip());
           canvas.drawCircle(
             c,
-            isChargePunch ? 58 : 42,
+            math.min(isChargePunch ? 58.0 : 42.0, cap),
             Paint()
               ..color = const Color(0xFF80DEEA).withValues(
                 alpha: (isChargePunch
@@ -1654,6 +1726,7 @@ class TaisenGame extends FlameGame {
               ..style = PaintingStyle.stroke
               ..strokeWidth = isChargePunch ? 5.5 : 3.5,
           );
+          canvas.restore();
         }
       } else {
         // MELEE light bump — soft ring only, never 「突撃」
@@ -1946,18 +2019,19 @@ class TaisenGame extends FlameGame {
         final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
         final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
         final live01 = math.max(travel01, match01);
-        // BINARY: Watch mirrors field. Charging = ZERO cyan. Lit = SNAP thick rings.
-        if (auraActive) {
-          _drawChargeRings(
+        // BINARY: Watch mirrors field. Charging = ZERO cyan. Lit = SNAP rings on a living body.
+        if (auraActive && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
+          _drawWatchChargeRings(
             canvas,
             ownC,
             52 * ownScale,
             const Color(0xFF00E5FF),
+            tokenScale: ownScale,
             whiteCore: true,
             facing: ownFacing,
-            fullyLit: true,
           );
-        } else if (live01 > kChargeRingShowTravel01) {
+        } else if (live01 > kChargeRingShowTravel01 &&
+            (ownSafe == null || _chargeCyanOnUnit(ownSafe))) {
           _drawText(
             canvas,
             '蓄緊 ${(live01 * 100).round()}%',
@@ -1966,19 +2040,15 @@ class TaisenGame extends FlameGame {
             11,
           );
         }
-        final showEnemyCharge = (t != null && t.enemyAuraVisible) ||
-            (t == null &&
-                _matchEnemyChargeIndex != null &&
-                _matchEnemyChargeC >= 1.0);
-        if (showEnemyCharge) {
-          _drawChargeRings(
+        if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
+          _drawWatchChargeRings(
             canvas,
             enemyC,
             32 * enemyScale,
             const Color(0xFF00E5FF).withValues(alpha: 0.85),
+            tokenScale: enemyScale,
             whiteCore: true,
             facing: enemyFacing,
-            fullyLit: true,
           );
         }
         break;
@@ -1990,12 +2060,13 @@ class TaisenGame extends FlameGame {
         if (!retractSpear) {
           _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
         }
-        if (t == null || t.enemyAuraVisible) {
-          _drawChargeRings(
+        if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
+          _drawWatchChargeRings(
             canvas,
             enemyC,
             26 * enemyScale,
             const Color(0xFF00E5FF).withValues(alpha: 0.8),
+            tokenScale: enemyScale,
             whiteCore: true,
             facing: enemyFacing,
           );
@@ -2133,8 +2204,61 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 1.4 * scale,
       );
     }
-    // Weapons-only glyph
-    _drawWeapon(canvas, c.translate(0, 2 * scale), troop, Colors.white.withValues(alpha: 0.9), scale: 0.85 * scale);
+    // Same weapon-only source as the field token and 影子行軍. Not the horseshoe badge.
+    _drawMarchWeapon(
+      canvas,
+      Rect.fromCenter(center: c.translate(0, 2 * scale), width: w * 0.78, height: h * 0.62),
+      troop,
+      alpha: 0.92,
+    );
+  }
+
+  /// Enemy cyan only while that body is alive, outside 己城, and actually lit.
+  bool _enemyChargeLit(int? enemyIndex, {required bool tutorialEnemyAura}) {
+    if (enemyIndex == null || !_chargeCyanOnUnit(enemyIndex)) return false;
+    if (tutorialEnemyAura) return true;
+    return _matchEnemyChargeIndex == enemyIndex && _matchEnemyChargeC >= 1.0;
+  }
+
+  void _drawWatchChargeRings(
+    Canvas canvas,
+    Offset c,
+    double baseR,
+    Color color, {
+    required double tokenScale,
+    bool whiteCore = false,
+    double facing = 0,
+  }) {
+    _drawChargeRings(
+      canvas,
+      c,
+      baseR,
+      color,
+      whiteCore: whiteCore,
+      facing: facing,
+      maxRadius: 34.0 * tokenScale * 1.5,
+      clip: _watchFxClip(),
+    );
+  }
+
+  void _drawFieldChargeRings(
+    Canvas canvas,
+    Offset c,
+    double baseR,
+    Color color, {
+    bool whiteCore = false,
+    double facing = 0,
+  }) {
+    _drawChargeRings(
+      canvas,
+      c,
+      baseR,
+      color,
+      whiteCore: whiteCore,
+      facing: facing,
+      maxRadius: _chargeRingMaxR,
+      clip: _fieldFxClip(),
+    );
   }
 
   /// Wei-column crops from cost6-weapon-icons-v2. Same weapon shape in every faction.
@@ -2841,15 +2965,14 @@ class TaisenGame extends FlameGame {
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session1 && isOwn) {
       // BINARY: cyan rings ONLY when auraActive. Charging = gold waypoint + 蓄緊 (render).
-      if (auraActive) {
-        _drawChargeRings(
+      if (auraActive && _chargeCyanOnUnit(index)) {
+        _drawFieldChargeRings(
           canvas,
           c,
           58.0,
           const Color(0xFF00E5FF),
           whiteCore: true,
           facing: ownFacing,
-          fullyLit: true,
         );
       }
       return;
@@ -2862,8 +2985,8 @@ class TaisenGame extends FlameGame {
         }
         return;
       }
-      if (isEnemy && t.enemyAuraVisible) {
-        _drawChargeRings(
+      if (isEnemy && t.enemyAuraVisible && _chargeCyanOnUnit(index)) {
+        _drawFieldChargeRings(
           canvas,
           c,
           40,
@@ -2878,27 +3001,28 @@ class TaisenGame extends FlameGame {
     switch (card.troop) {
       case TroopType.cavalry:
         // 「見環先撞」BINARY: cyan only when fully armed (auraActive). Mid-fill = no rings.
-        if (_matchChargeIndex == index && auraActive) {
-          _drawChargeRings(
+        if (_matchChargeIndex == index && auraActive && _chargeCyanOnUnit(index)) {
+          _drawFieldChargeRings(
             canvas,
             c,
             56.0,
             const Color(0xFF00E5FF),
             whiteCore: true,
             facing: ownFacing,
-            fullyLit: true,
           );
         }
         // Enemy charge aura for intercept turn window — visible only when fully lit.
-        if (isEnemy && _matchEnemyChargeIndex == index && _matchEnemyChargeC >= 1.0) {
-          _drawChargeRings(
+        if (isEnemy &&
+            _matchEnemyChargeIndex == index &&
+            _matchEnemyChargeC >= 1.0 &&
+            _chargeCyanOnUnit(index)) {
+          _drawFieldChargeRings(
             canvas,
             c,
             42.0,
             const Color(0xFF00E5FF),
             whiteCore: true,
             facing: enemyFacing,
-            fullyLit: true,
           );
         }
         break;
@@ -2947,13 +3071,22 @@ class TaisenGame extends FlameGame {
     double facing = 0,
     /// BINARY: false = draw nothing. true = SNAP thick cyan-white full rings.
     bool fullyLit = true,
+    /// Outermost pixel. Defaults to 1.5× the field token width.
+    double? maxRadius,
+    /// Keeps the punch inside the field or inside the watch, above the castle bars.
+    Rect? clip,
   }) {
     if (!fullyLit) return; // charging / mid-fill: no arcs, no faint rings, no aura-like cyan
     final t = (_pulse % 1.2) / 1.2;
     // Gold waypoint/landing disc stays separate (_drawGoldWaypointGuide).
+    final naturalOuter = math.max(baseR + 78, math.max(baseR + 42, baseR * 1.85));
+    final cap = maxRadius ?? _chargeRingMaxR;
+    final fit = (cap <= 1 || naturalOuter <= 1) ? 1.0 : math.min(1.0, cap / naturalOuter);
     canvas.save();
+    if (clip != null) canvas.clipRect(clip);
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
+    canvas.scale(fit);
     canvas.translate(-c.dx, -c.dy);
 
     // Fully lit SNAP: exaggerated thick cyan-white rings (eye-obvious vs 蓄緊).
@@ -3708,6 +3841,15 @@ class TaisenGame extends FlameGame {
       ),
       Paint()..color = const Color(0xFFFFF59D),
     );
+    // Seconds only while reviving inside 己城. Outside, this painter is not called.
+    final label = left.ceil().clamp(1, 99).toString();
+    _drawText(
+      canvas,
+      label,
+      Offset(c.dx - label.length * 6.0, c.dy + 2),
+      const Color(0xFF1A140C),
+      22,
+    );
   }
 
   void _ensureHpSlots() {
@@ -4079,75 +4221,15 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Sheet is 1280×720, 4 cells (騎／槍／弓／刀). Crop circular badge (skip gold「騎」label below).
-  static const double _weaponCellW = 320;
-  static const double _weaponSrcPad = 30;
-  static const double _weaponSrcY = 150;
-  static const double _weaponSrcSize = 260; // circle only
-
-  Rect _weaponSrcRect(TroopType troop) {
-    final col = switch (troop) {
-      TroopType.cavalry => 0,
-      TroopType.spear => 1,
-      TroopType.bow => 2,
-      TroopType.infantry => 3,
-      TroopType.siege => 3, // 刀角標
-    };
-    return Rect.fromLTWH(
-      col * _weaponCellW + _weaponSrcPad,
-      _weaponSrcY,
-      _weaponSrcSize,
-      _weaponSrcSize,
-    );
-  }
-
+  /// Field-token fallback. Same v2 weapon corner as Watch and 影子行軍 — never the horseshoe badge.
   void _drawWeapon(Canvas canvas, Offset c, TroopType troop, Color color, {double scale = 1}) {
-    final sheet = _weaponSheet;
     final dstSize = 40.0 * scale;
-    final dst = Rect.fromCenter(center: c, width: dstSize, height: dstSize);
-    if (sheet != null) {
-      final src = _weaponSrcRect(troop);
-      final paint = Paint()
-        ..filterQuality = FilterQuality.high
-        ..colorFilter = color.a < 0.95
-            ? ColorFilter.mode(Colors.white.withValues(alpha: color.a), BlendMode.modulate)
-            : null;
-      canvas.drawImageRect(sheet, src, dst, paint);
-      return;
-    }
-    // Fallback procedural (assets not loaded yet) — never grey-circle slash.
-    final s = scale;
-    final p = Paint()
-      ..color = color
-      ..strokeWidth = 2.5 * s
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-    switch (troop) {
-      case TroopType.cavalry:
-        canvas.drawArc(Rect.fromCenter(center: c, width: 22 * s, height: 26 * s), 0.4, 2.3, false, p);
-        break;
-      case TroopType.spear:
-        canvas.drawLine(Offset(c.dx, c.dy + 16 * s), Offset(c.dx, c.dy - 16 * s), p);
-        final tip = Path()
-          ..moveTo(c.dx, c.dy - 18 * s)
-          ..lineTo(c.dx - 7 * s, c.dy - 8 * s)
-          ..lineTo(c.dx + 7 * s, c.dy - 8 * s)
-          ..close();
-        canvas.drawPath(tip, Paint()..color = color);
-        break;
-      case TroopType.bow:
-        final arc = Path()
-          ..moveTo(c.dx - 10 * s, c.dy - 14 * s)
-          ..quadraticBezierTo(c.dx + 14 * s, c.dy, c.dx - 10 * s, c.dy + 14 * s);
-        canvas.drawPath(arc, p);
-        canvas.drawLine(Offset(c.dx - 8 * s, c.dy), Offset(c.dx + 12 * s, c.dy), p);
-        break;
-      case TroopType.siege:
-      case TroopType.infantry:
-        canvas.drawLine(Offset(c.dx - 10 * s, c.dy + 8 * s), Offset(c.dx + 12 * s, c.dy - 12 * s), p);
-        canvas.drawLine(Offset(c.dx - 2 * s, c.dy + 2 * s), Offset(c.dx - 12 * s, c.dy + 6 * s), p);
-        break;
-    }
+    _drawMarchWeapon(
+      canvas,
+      Rect.fromCenter(center: c, width: dstSize, height: dstSize),
+      troop,
+      alpha: color.a.clamp(0.0, 1.0).toDouble(),
+    );
   }
 
   void _drawText(Canvas canvas, String text, Offset at, Color color, double fontSize) {

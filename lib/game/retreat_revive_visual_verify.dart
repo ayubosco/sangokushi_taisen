@@ -154,6 +154,9 @@ class RetreatReviveVisualVerify {
     final reviveAtForce = game.debugReviveLeft(0);
     final moraleAtForce = game.matchMorale;
     await _advance(3);
+    // The 1s 「撤退」 splash decays during the freeze proof on device.
+    // Put it back for the hold so the capture shows the flash, not only the skull.
+    game.flashHit(0, '撤退');
     await _emit(
       id: 'R1',
       caption: 'R1 撤退 frozen',

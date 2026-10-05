@@ -77,7 +77,10 @@ class TroopRetreatVisualShot {
       case 'CAV':
         return label == '突撃' &&
             dropped > TaisenGame.kRansenTickPerSec &&
-            (dropped - burst).abs() < 0.25 &&
+            // One contact frame also applies the overlap tick. Device dt is not
+            // exactly 1/60, so allow a small chip around the 48 burst — not a
+            // full second of 亂戰.
+            (dropped - burst).abs() < 1.0 &&
             enemyLife == UnitLife.alive &&
             enemyHp > 0 &&
             allyRansen &&
@@ -177,7 +180,22 @@ class TroopRetreatVisualVerify {
     final before = game.debugUnitHp(1);
     game.dragTo = null;
     game.fieldPos[1] = game.fieldPos[0];
-    await step();
+    // Device step is a 16ms yield. One yield can return before the engine
+    // resolves aura+contact, so the hold was still the 「氣勢」 snap. Wait until
+    // the contact frame, then emit immediately so 「突撃」 has not decayed.
+    final contacted = await _until(() {
+      final dropped = before - game.debugUnitHp(1);
+      return game.debugHitLabel == '突撃' &&
+          dropped > TaisenGame.kRansenTickPerSec &&
+          game.debugUnitLife(1) == UnitLife.alive &&
+          game.debugUnitHp(1) > 0 &&
+          game.debugInRansen(0) &&
+          game.debugInRansen(1);
+    });
+    if (!contacted) {
+      // ignore: avoid_print
+      print('TROOP_RETREAT_VISUAL_VERIFY FAIL CAV contact never fired');
+    }
     await _emit(
       id: 'CAV',
       caption: 'CAV 突撃 > 亂戰',

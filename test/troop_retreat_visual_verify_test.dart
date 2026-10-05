@@ -72,4 +72,38 @@ void main() {
     expect(siege.enemyHp, TaisenGame.kRansenMaxHp);
     expect(g.tutorial, isNull);
   });
+
+  test('CAV hold waits through a missed engine tick for 突撃 contact', () async {
+    final g = TaisenGame();
+    g.onGameResize(Vector2(390, 844));
+    var skippedOverlap = false;
+    final shots = <TroopRetreatVisualShot>[];
+    final script = TroopRetreatVisualVerify(
+      game: g,
+      step: () async {
+        final overlapped = g.fieldPos.length > 1 &&
+            (g.fieldPos[0] - g.fieldPos[1]).distance < 1 &&
+            g.debugUnitHp(1) >= TaisenGame.kRansenMaxHp - 0.01 &&
+            g.debugHitLabel == '氣勢';
+        if (overlapped && !skippedOverlap) {
+          skippedOverlap = true;
+          return;
+        }
+        g.debugStepPursuit(1 / 60);
+      },
+      hold: (shot) async {
+        shots.add(shot);
+      },
+    );
+    await script.run();
+
+    expect(skippedOverlap, isTrue, reason: 'the missed tick must happen on the 氣勢 overlap');
+    final drop = shots.firstWhere((s) => s.id == 'CAV');
+    expect(drop.pass, isTrue, reason: 'label=${drop.label} dropped=${drop.dropped}');
+    expect(drop.label, '突撃');
+    expect(drop.dropped, greaterThan(TaisenGame.kRansenTickPerSec));
+    for (final shot in shots) {
+      expect(shot.pass, isTrue, reason: shot.id);
+    }
+  });
 }
