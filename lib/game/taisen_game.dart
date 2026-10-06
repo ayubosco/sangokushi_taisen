@@ -142,6 +142,44 @@ class TaisenGame extends FlameGame {
       (i >= 0 && i < _reviveLeft.length) ? _reviveLeft[i] : 0;
   bool debugShowsSkull(int i) => _lifeAt(i) != UnitLife.alive;
   String debugLifeTipAt(int i) => _lifeTipAt(i);
+
+  /// Center of the fat 「撤退」 splash for a token at [tokenCenter].
+  Offset debugRetreatSplashCenter(Offset tokenCenter) =>
+      tokenCenter + const Offset(0, -kRetreatSplashLift);
+
+  /// Half the fat-splash glyph box. Same style as [_drawFatFloatText].
+  double debugRetreatSplashHalfHeight() => _fatGlyphHalfHeight('撤退');
+
+  /// Top-left of the retreat life tip. Just under the splash, not inside it.
+  Offset debugLifeTipOrigin(Offset tokenCenter) {
+    final bottom = debugRetreatSplashCenter(tokenCenter).dy + debugRetreatSplashHalfHeight();
+    return Offset(tokenCenter.dx - 36, bottom + kRetreatTipClearance);
+  }
+
+  /// Top-left of 「落點」. Prefers [drop] under the disc; stays inside the canvas.
+  Offset debugLandingLabelOrigin(Offset anchor, {double drop = kLandingLabelDrop}) {
+    final textH = _plainGlyphHeight('落點', kLandingLabelFont);
+    final preferred = anchor.dy + drop;
+    final maxY = size.y - textH - kScreenEdgePad;
+    final y = preferred > maxY ? maxY : preferred;
+    return Offset(anchor.dx - 14, math.max(kScreenEdgePad, y));
+  }
+
+  /// Visual face of a card that must stay on the canvas, including the label strip.
+  Offset debugOnScreenCardCenter(Offset at) => _onScreenCardCenter(at);
+
+  /// Where the field card is painted. Gameplay stays on [tokenCenter].
+  Offset debugCardPaintCenter(int i) => _cardPaintCenter(i, tokenCenter(i));
+
+  /// Enemies first, then own, so a stacked contact paints the player's card last.
+  List<int> debugFieldCardPaintOrder() {
+    final enemies = <int>[];
+    final own = <int>[];
+    for (var i = 0; i < field.length; i++) {
+      (isEnemyAt(i) ? enemies : own).add(i);
+    }
+    return [...enemies, ...own];
+  }
   /// Playtest source of the hit that retreated this body.
   /// Stays up through the castle countdown. Empty once the body is ready to leave.
   String debugRetreatCause(int i) {
@@ -226,6 +264,22 @@ class TaisenGame extends FlameGame {
 
   /// Retreat splash ceiling from the Research delta (≤~1s). Not a DPS number.
   static const double kRetreatSplashSec = 1.0;
+  /// 「撤退」 is centered this far above the token. Font matches the fat splash.
+  static const double kRetreatSplashLift = 56;
+  static const double kRetreatSplashFont = 32;
+  /// Life tip sits this far under the splash so the freeze shows both lines.
+  static const double kRetreatTipClearance = 8;
+  static const double kRetreatTipFont = 11;
+  /// 「落點」 under the landing disc. Lifted when the castle card meets the edge.
+  static const double kLandingLabelFont = 12;
+  static const double kLandingLabelDrop = 22;
+  static const double kScreenEdgePad = 4;
+  /// Strip kept under a bottom-clamped card so the label is not clipped.
+  static const double kLandingLabelReserve = 18;
+  /// Own card steps aside at contact. Fractions of the 5:8 face.
+  /// X toward screen-left, Y toward 自陣. Gameplay centers do not move.
+  static const double kContactOwnCardShiftXFrac = 0.50;
+  static const double kContactOwnCardShiftYFrac = 0.18;
   /// Slice base [adapted]. 天 has no official second. Do not substitute wiki ~35s.
   static const double kReviveBaseSec = 15.0;
   /// 特技「復活／活」only. 15 × 2/3 = 10.
@@ -1455,7 +1509,7 @@ class TaisenGame extends FlameGame {
           ..strokeWidth = 2.0,
       );
       canvas.drawCircle(drop, 6, Paint()..color = FactionColors.gold.withValues(alpha: 0.9));
-      _drawText(canvas, '落點', Offset(drop.dx - 14, drop.dy + 28), FactionColors.gold.withValues(alpha: 0.85), 12);
+      _drawLandingLabel(canvas, drop, drop: 28);
       if (tutorialOwnIndex != null) {
         final from = tokenCenter(tutorialOwnIndex!);
         _drawGoldWaypointGuide(canvas, from, drop, drawLanding: false);
@@ -1469,16 +1523,32 @@ class TaisenGame extends FlameGame {
         shadowAt(selectedIndex!),
         dragTo!,
         ghostTrail: true,
-        labelLanding: true,
       );
     }
 
     // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
     // Own + enemy share ONE tokenSize — faction via outline/facing/color only, never scale.
     final tokenSize = tokenCardSize;
+    // Rings stay on the true body. 突撃オーラ still marks the contact, not the offset card.
     for (var i = 0; i < field.length; i++) {
       final card = field[i];
+      final isEnemy = i < fieldIsEnemy.length
+          ? fieldIsEnemy[i]
+          : (tutorialEnemyIndex == i);
+      _drawFieldTelegraph(
+        canvas,
+        chargeRingAnchor(i),
+        card,
+        i,
+        isOwn: !isEnemy && tutorialOwnIndex == i,
+        isEnemy: isEnemy,
+      );
+    }
+    // Enemies first, then own, so a stacked contact keeps the player's card readable.
+    for (final i in debugFieldCardPaintOrder()) {
+      final card = field[i];
       final center = tokenCenter(i);
+      final paintAt = _cardPaintCenter(i, center);
       final selected = selectedIndex == i;
       final isEnemy = i < fieldIsEnemy.length
           ? fieldIsEnemy[i]
@@ -1491,16 +1561,6 @@ class TaisenGame extends FlameGame {
               t.s1 == S1Phase.dragGuide ||
               t.s1 == S1Phase.waitAura ||
               t.s1 == S1Phase.hitCharge);
-
-      // Aura rings bind to the 影子行軍, never the 落點釘.
-      _drawFieldTelegraph(
-        canvas,
-        chargeRingAnchor(i),
-        card,
-        i,
-        isOwn: !isEnemy && tutorialOwnIndex == i,
-        isEnemy: isEnemy,
-      );
 
       final inCastle = i < fieldInCastle.length && fieldInCastle[i];
       final pinned = pinnedMarchAt(i);
@@ -1523,7 +1583,7 @@ class TaisenGame extends FlameGame {
         // 影子行軍: ash 5:8 frame + weapon corner only. kMarchShadowFullColor stays false.
         _drawMarchShadow(
           canvas,
-          shadowAt(i),
+          paintAt,
           cardW: tokenSize.width,
           cardH: tokenSize.height,
           opacity: marchShadowOpacityAt(i),
@@ -1537,9 +1597,9 @@ class TaisenGame extends FlameGame {
           _drawText(
             canvas,
             tip,
-            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
+            debugLifeTipOrigin(center),
             const Color(0xFFFFF59D),
-            11,
+            kRetreatTipFont,
           );
         }
         final cause = debugRetreatCause(i);
@@ -1555,7 +1615,7 @@ class TaisenGame extends FlameGame {
       } else {
         _drawCardLikeToken(
           canvas,
-          center,
+          paintAt,
           card,
           index: i,
           cardW: tokenSize.width,
@@ -1568,25 +1628,25 @@ class TaisenGame extends FlameGame {
 
         // Facing follows travel direction every frame (own while selected; enemy always).
         if (isEnemy) {
-          _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
+          _drawFacingArrow(canvas, paintAt, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
         } else if (selected || tutorialOwnIndex == i) {
-          _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+          _drawFacingArrow(canvas, paintAt, ownFacing, FactionColors.gold);
         }
 
-        final labelY = center.dy + tokenSize.height / 2 + 4;
+        final labelY = paintAt.dy + tokenSize.height / 2 + 4;
         _drawText(
           canvas,
           card.nameZh,
-          Offset(center.dx - 18, labelY),
+          Offset(paintAt.dx - 18, labelY),
           dim ? FactionColors.gold.withValues(alpha: 0.35) : FactionColors.gold,
           11,
         );
-        _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
+        _drawCostStars(canvas, Offset(paintAt.dx - 18, labelY + 16), card.cost);
         if (debugCastleChipAt(i)) {
           _drawText(
             canvas,
             '城傷',
-            Offset(center.dx - 14, center.dy - tokenSize.height / 2 - 18),
+            Offset(paintAt.dx - 14, paintAt.dy - tokenSize.height / 2 - 18),
             const Color(0xFFFFF59D),
             12,
           );
@@ -1596,13 +1656,13 @@ class TaisenGame extends FlameGame {
           _drawText(
             canvas,
             tip,
-            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 28),
+            Offset(paintAt.dx - 36, paintAt.dy - tokenSize.height / 2 - 28),
             const Color(0xFFFFF59D),
             12,
           );
           final hp01 = (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0);
           final bar = Rect.fromCenter(
-            center: Offset(center.dx, center.dy - tokenSize.height / 2 - 12),
+            center: Offset(paintAt.dx, paintAt.dy - tokenSize.height / 2 - 12),
             width: tokenSize.width,
             height: 5,
           );
@@ -1644,6 +1704,11 @@ class TaisenGame extends FlameGame {
       final labelY = cardAt.dy + tokenSize.height / 2 + 4;
       _drawText(canvas, card.nameZh, Offset(cardAt.dx - 18, labelY), FactionColors.gold, 11);
       _drawCostStars(canvas, Offset(cardAt.dx - 18, labelY + 16), card.cost);
+    }
+
+    // After the cards, so a bottom-edge 「落點」 is not covered or clipped.
+    if (selectedIndex != null && pinnedMarchAt(selectedIndex!) && dragTo != null) {
+      _drawLandingLabel(canvas, dragTo!);
     }
 
     // 亂戰 is a local stamp + HP chip. Never a full-screen cut-in.
@@ -1717,9 +1782,9 @@ class TaisenGame extends FlameGame {
         _drawFatFloatText(
           canvas,
           _hitFlashLabel,
-          Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78)),
+          Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? kRetreatSplashLift : 78)),
           alpha: 1,
-          fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? 32 : 22,
+          fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? kRetreatSplashFont : 22,
         );
         final punchCyan = (isChargePunch || _hitFlashLabel == '迎擊') &&
             _chargeCyanOnUnit(_hitFlashIndex!);
@@ -1849,9 +1914,20 @@ class TaisenGame extends FlameGame {
       );
       canvas.drawCircle(to, 5, Paint()..color = gold.withValues(alpha: 0.85));
       if (labelLanding) {
-        _drawText(canvas, '落點', Offset(to.dx - 14, to.dy + 22), gold.withValues(alpha: 0.75), 12);
+        _drawLandingLabel(canvas, to);
       }
     }
+  }
+
+  void _drawLandingLabel(Canvas canvas, Offset anchor, {double drop = kLandingLabelDrop}) {
+    final at = debugLandingLabelOrigin(anchor, drop: drop);
+    _drawText(
+      canvas,
+      '落點',
+      at,
+      FactionColors.gold.withValues(alpha: 0.85),
+      kLandingLabelFont,
+    );
   }
 
 
@@ -3378,7 +3454,7 @@ class TaisenGame extends FlameGame {
       if (_pointHitsToken(i, local, hitR)) hits.add(i);
     }
     if (hits.isEmpty) return null;
-    // Stacked 亂戰 draws the enemy on top. The ally under the finger is the drag.
+    // Stacked contact paints the own card above the enemy. The ally is the drag.
     for (final i in hits) {
       if (!isEnemyAt(i)) return i;
     }
@@ -3826,14 +3902,62 @@ class TaisenGame extends FlameGame {
   }
 
   /// Keep a 5:8 card fully inside the game canvas so its face is not clipped
-  /// by the bottom edge of the 歸城區.
+  /// by the bottom edge of the 歸城區. Extra reserve leaves room for 「落點」.
   Offset _onScreenCardCenter(Offset at) {
     final card = tokenCardSize;
     final minX = card.width / 2 + 2;
     final maxX = math.max(minX, size.x - card.width / 2 - 2);
     final minY = (size.y > 0 ? watchH : 0) + card.height / 2 + 2;
-    final maxY = math.max(minY, size.y - card.height / 2 - 2);
+    final maxY = math.max(minY, size.y - card.height / 2 - 2 - kLandingLabelReserve);
     return Offset(at.dx.clamp(minX, maxX), at.dy.clamp(minY, maxY));
+  }
+
+  /// Own card shifts off the enemy face while bodies overlap. Enemy stays put.
+  /// Rings, 「突撃」, and 「亂戰」 keep using [tokenCenter].
+  Offset _cardPaintCenter(int i, Offset center) {
+    if (isEnemyAt(i) || _lifeAt(i) != UnitLife.alive) return center;
+    if (!_occludedByLivingEnemy(i, center)) return center;
+    final card = tokenCardSize;
+    final shifted = center +
+        Offset(
+          -card.width * kContactOwnCardShiftXFrac,
+          card.height * kContactOwnCardShiftYFrac,
+        );
+    return _onScreenCardCenter(shifted);
+  }
+
+  bool _occludedByLivingEnemy(int i, Offset center) {
+    for (var e = 0; e < field.length; e++) {
+      if (!isEnemyAt(e) || _lifeAt(e) != UnitLife.alive) continue;
+      if (inMeleeContact(center, tokenCenter(e))) return true;
+    }
+    return false;
+  }
+
+  double _fatGlyphHalfHeight(String text) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          fontSize: kRetreatSplashFont,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.2,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.height / 2;
+  }
+
+  double _plainGlyphHeight(String text, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.height;
   }
 
   /// Reviving inside 己城: grey card, countdown centred on the face. Full colour

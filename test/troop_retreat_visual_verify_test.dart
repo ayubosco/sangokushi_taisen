@@ -24,6 +24,17 @@ void main() {
       },
       hold: (shot) async {
         shots.add(shot);
+        if (shot.id == 'CAV') {
+          expect(g.tokenCenter(0), g.tokenCenter(1));
+          final order = g.debugFieldCardPaintOrder();
+          expect(order.indexOf(0), greaterThan(order.indexOf(1)));
+          final ownPaint = g.debugCardPaintCenter(0);
+          expect(ownPaint, isNot(g.tokenCenter(0)));
+          expect(g.debugCardPaintCenter(1), g.tokenCenter(1));
+          expect(g.debugHitLabel, '突撃');
+          expect(g.debugInRansen(0), isTrue);
+          expect(g.debugInRansen(1), isTrue);
+        }
       },
     );
     await script.run();

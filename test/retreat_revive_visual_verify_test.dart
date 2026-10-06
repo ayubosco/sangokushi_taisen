@@ -84,9 +84,18 @@ void main() {
         if (shot.id == 'R1') {
           expect(g.debugHitLabel, '撤退');
           expect(g.castleBandRect.contains(g.tokenCenter(0)), isFalse);
+          final splash = g.debugRetreatSplashCenter(g.tokenCenter(0));
+          final tip = g.debugLifeTipOrigin(g.tokenCenter(0));
+          expect(tip.dy, greaterThan(splash.dy + g.debugRetreatSplashHalfHeight()));
+          expect(shot.tip, '散咗拖返城先復活');
         }
         if (shot.id == 'R2') {
           expect(g.debugUnitLife(0), UnitLife.inCastleReviving);
+          final anchor = g.dragTo ?? g.tokenCenter(0);
+          final label = g.debugLandingLabelOrigin(anchor);
+          final face = g.debugOnScreenCardCenter(g.tokenCenter(0));
+          expect(label.dy + 12, lessThanOrEqualTo(g.size.y));
+          expect(face.dy + g.tokenCardSize.height / 2, lessThanOrEqualTo(g.size.y - TaisenGame.kLandingLabelReserve + 0.01));
           expect(
             g.fieldInCastle[0] || g.castleBandRect.contains(g.tokenCenter(0)),
             isTrue,

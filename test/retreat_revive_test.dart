@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
@@ -116,6 +117,65 @@ void main() {
     expect(g.debugShowsSkull(0), isFalse);
     expect(g.debugReviveLeft(0), 0);
   });
+
+  test('R1 retreat tip sits below the 撤退 splash', () {
+    final g = readyGame();
+    final at = Offset(g.size.x * 0.42, g.watchH + g.fieldH * 0.38);
+    _place(g, 'zhaoyun', at);
+    g.debugForceHpZero(0);
+
+    final splash = g.debugRetreatSplashCenter(g.tokenCenter(0));
+    final tip = g.debugLifeTipOrigin(g.tokenCenter(0));
+    final splashBottom = splash.dy + _fatHalf('撤退', TaisenGame.kRetreatSplashFont);
+    final oldTipY = g.tokenCenter(0).dy - g.tokenCardSize.height / 2 - 16;
+
+    expect(g.debugLifeTipAt(0), '散咗拖返城先復活');
+    expect(g.debugHitLabel, '撤退');
+    expect(tip.dy, greaterThanOrEqualTo(splashBottom));
+    expect(tip.dy, greaterThan(oldTipY + 8));
+    expect((splashBottom - tip.dy).abs(), greaterThanOrEqualTo(TaisenGame.kRetreatTipClearance - 0.5));
+  });
+
+  test('R2 落點 stays on screen when the castle card sits on the bottom edge', () {
+    final g = readyGame();
+    final band = g.castleBandRect;
+    final onEdge = Offset(band.center.dx, band.bottom - 1);
+    final label = g.debugLandingLabelOrigin(onEdge);
+    final labelH = _plainHeight('落點', TaisenGame.kLandingLabelFont);
+    expect(label.dy, greaterThanOrEqualTo(TaisenGame.kScreenEdgePad));
+    expect(label.dy + labelH, lessThanOrEqualTo(g.size.y - TaisenGame.kScreenEdgePad + 0.01));
+    expect(label.dy, lessThan(onEdge.dy + TaisenGame.kLandingLabelDrop));
+
+    final face = g.debugOnScreenCardCenter(onEdge);
+    final cardBottom = face.dy + g.tokenCardSize.height / 2;
+    expect(cardBottom, lessThanOrEqualTo(g.size.y - TaisenGame.kLandingLabelReserve + 0.01));
+
+    final mid = Offset(g.size.x * 0.5, g.watchH + g.fieldH * 0.40);
+    final midLabel = g.debugLandingLabelOrigin(mid);
+    expect(midLabel.dy, closeTo(mid.dy + TaisenGame.kLandingLabelDrop, 0.01));
+  });
+}
+
+double _fatHalf(String text, double fontSize) {
+  final tp = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w900, letterSpacing: 1.2),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  return tp.height / 2;
+}
+
+double _plainHeight(String text, double fontSize) {
+  final tp = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  return tp.height;
 }
 
 void _place(TaisenGame g, String id, Offset at) {
