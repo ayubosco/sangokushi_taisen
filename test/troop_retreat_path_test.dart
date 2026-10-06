@@ -35,6 +35,42 @@ void main() {
     expect(g.debugUnitLife(1), UnitLife.alive);
     expect(g.debugInRansen(0), isTrue);
     expect(g.debugInRansen(1), isTrue);
+
+    expect(g.tokenCenter(0), g.tokenCenter(1));
+    expect(g.inMeleeContact(g.tokenCenter(0), g.tokenCenter(1)), isTrue);
+    final order = g.debugFieldCardPaintOrder();
+    expect(order.indexOf(0), greaterThan(order.indexOf(1)));
+    final ownPaint = g.debugCardPaintCenter(0);
+    final enemyPaint = g.debugCardPaintCenter(1);
+    expect(enemyPaint, g.tokenCenter(1));
+    expect(ownPaint.dx, lessThan(g.tokenCenter(0).dx));
+    expect(ownPaint.dy, greaterThan(g.tokenCenter(0).dy));
+    expect((ownPaint - g.tokenCenter(0)).distance, greaterThan(g.tokenCardSize.width * 0.4));
+  });
+
+  test('cavalry burst that crosses 0 retreats with cause 突撃', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.18, g.watchH + g.fieldH * 0.70);
+    _placeOwn(g, start, TroopType.cavalry);
+    _addEnemy(g, Offset(start.dx + 280, start.dy - 220));
+    g.panStart(start);
+    g.panEnd(Offset(start.dx + 260, start.dy));
+    const dt = 1 / 60.0;
+    var guard = 0;
+    while (!g.auraActive && g.dragTo != null && guard < 600) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.auraActive, isTrue);
+    g.dragTo = null;
+    g.debugSetUnitHp(1, TaisenGame.kChargeBurstSec * TaisenGame.kRansenTickPerSec);
+    g.fieldPos[1] = g.fieldPos[0];
+    g.debugStepPursuit(dt);
+    expect(g.debugHitLabel, '撤退');
+    expect(g.debugRetreatCause(1), '突撃');
+    expect(g.debugUnitHp(1), 0);
+    expect(g.debugUnitLife(1), UnitLife.retreating);
+    expect(g.debugInRansen(1), isFalse);
   });
 
   test('spear tip is not body 亂戰 and a cavalry on the tip retreats', () {
@@ -103,6 +139,19 @@ void main() {
     moving.debugStepPursuit(0.2);
     expect(moving.debugBowWinding, isFalse);
     expect(moving.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+
+    final kill = readyGame();
+    final shotAt = Offset(kill.size.x * 0.30, kill.watchH + kill.fieldH * 0.50);
+    _placeOwn(kill, shotAt, TroopType.bow);
+    _addEnemy(kill, shotAt + const Offset(180, 0));
+    kill.debugSetUnitHp(1, TaisenGame.kBowShotBurstSec * TaisenGame.kRansenTickPerSec);
+    kill.selectOrDetailAt(shotAt);
+    kill.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
+    kill.selectOrDetailAt(shotAt);
+    expect(kill.debugHitLabel, '撤退');
+    expect(kill.debugRetreatCause(1), '射');
+    expect(kill.debugUnitHp(1), 0);
+    expect(kill.debugUnitLife(1), UnitLife.retreating);
   });
 
   test('infantry only trades the overlap tick and never flashes 突撃', () {
@@ -115,6 +164,15 @@ void main() {
     expect(g.debugUnitHp(0), closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.05));
     expect(g.debugUnitHp(1), closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.05));
     expect(g.debugUnitLife(1), UnitLife.alive);
+
+    g.debugSetUnitHp(1, TaisenGame.kRansenTickPerSec * 0.5);
+    g.debugStepPursuit(1);
+    expect(g.debugHitLabel, '撤退');
+    expect(g.debugHitLabel, isNot('突撃'));
+    expect(g.debugRetreatCause(1), '亂戰');
+    expect(g.debugUnitHp(1), 0);
+    expect(g.debugUnitLife(1), UnitLife.retreating);
+    expect(g.debugUnitLife(0), UnitLife.alive);
   });
 
   test('siege 亂戰 barely chips the enemy; castle-band contact still hurts the siege', () {
@@ -146,6 +204,16 @@ void main() {
     expect(castle.debugUnitHp(0), closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.05));
     expect(castle.debugUnitHp(1), TaisenGame.kRansenMaxHp);
     expect(castle.debugInRansen(0), isFalse);
+
+    castle.debugSetUnitHp(0, 0.05);
+    castle.debugStepPursuit(1 / 60);
+    expect(castle.debugRetreatCause(0), '城傷');
+    expect(castle.debugUnitHp(0), 0);
+    expect(castle.debugHitLabel, '撤退');
+    expect(
+      castle.debugUnitLife(0),
+      anyOf(UnitLife.retreating, UnitLife.inCastleReviving),
+    );
   });
 }
 
