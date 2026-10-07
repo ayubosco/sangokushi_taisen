@@ -17,7 +17,7 @@ import 'unit_life.dart';
 enum AWindowKind { charge, intercept, bow, stratagem }
 
 /// Offline 1v1 CPU stub — short watch (read-only) + large flat 2D field.
-/// Design B: Watch ≤15% of the game band; draggable field is the hero.
+/// H0 A: Watch 0.12–0.13 of the game band; draggable field ≥0.87. Ortho 1:1.
 /// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
 class TaisenGame extends FlameGame {
   TaisenGame({this.tutorial});
@@ -320,10 +320,32 @@ class TaisenGame extends FlameGame {
     return frame.image;
   }
 
-  /// Design B: watch fraction of [GameWidget] height.
-  /// HUD (~36px) + 計略 bar (~62px) sit outside this widget. At 0.15 of the
-  /// game band, Watch is ≤15% of a phone screen and the drag field stays ≥62%.
-  static const double kWatchFractionOfGame = 0.15;
+  /// H0 A: Watch fraction of [GameWidget] height. Midpoint of the 0.12–0.13 gate
+  /// so the draggable field is 0.875 (≥0.87). HUD (~36px) + 計略 bar (~62px)
+  /// sit outside this widget. Ortho bird’s-eye only — no perspective field.
+  static const double kWatchFractionOfGame = 0.125;
+
+  /// Clear edge-to-edge gap between cards in a rank, in token-widths.
+  static const double kMinLaneGapMulOfToken = 1.3;
+
+  /// Card face stays at least one token short of the bezel (Feel edge-stuck).
+  static const double kEdgeDeadZoneMulOfToken = 1.0;
+
+  /// Drag hit may be 1.2× the visual card, and never under ~12mm (64dp).
+  static const double kHitVisualScale = 1.20;
+  static const double kMinHitExtentPx = 64.0;
+
+  /// Soft 釘 primary zone starts here (lower ~70% of the field). Not the Watch.
+  static const double kSoftPinPrimaryTopFrac = 0.30;
+
+  /// Prior Soft Lock tip→pin, then Design’s +25% world-travel path.
+  static const double kPriorSoftPinPathPx = 240.0;
+  static const double kSoftPinPathScale = 1.25;
+  static const double kSoftPinPathPx = kPriorSoftPinPathPx * kSoftPinPathScale;
+
+  /// JL3 parchment stain. Mid fillers use this brown — never a grey unit oval.
+  static const Color kParchmentStain = Color(0xFF6A4E32);
+  static const Color kTroopContactShadow = Color(0xFF5C4030);
 
   /// 影子行軍 while the full-color card stays on 落點 (落點釘).
   /// A second full-color card is a Fail — the march body is this silhouette only.
@@ -341,7 +363,9 @@ class TaisenGame extends FlameGame {
   /// Flat operable field below watch (excludes watch; castle sits on divider).
   double get fieldH => (size.y - watchH).clamp(0.0, double.infinity);
 
-  /// Own-castle bottom band ≈12% of drag field (Bosco: 10–14%).
+  /// Own-castle bottom band. Design band is 0.10–0.12 (≤+10% → 0.132).
+  /// Kept at 0.12: R2 grey + centred countdown already fit, and a thicker
+  /// rail would not add march depth.
   static const double kCastleBandFracOfField = 0.12;
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
@@ -372,11 +396,14 @@ class TaisenGame extends FlameGame {
     return Size(w, w / kTokenAspectWH);
   }
 
-  double get tokenHitR {
+  /// Hit rect: 1.2× the visual card, with the short side at least ~12mm.
+  Size get tokenHitSize {
     final s = tokenCardSize;
-    // Transparent hit ≥48dp diameter — may exceed smaller 0.10 art.
-    final halfDiag = 0.5 * math.sqrt(s.width * s.width + s.height * s.height);
-    return math.max(halfDiag + 4, 24.0);
+    var w = s.width * kHitVisualScale;
+    var h = s.height * kHitVisualScale;
+    if (w < kMinHitExtentPx) w = kMinHitExtentPx;
+    if (h < kMinHitExtentPx) h = kMinHitExtentPx;
+    return Size(w, h);
   }
 
   /// Debug metrics for H0 gate (printed once when size known).
@@ -400,12 +427,12 @@ class TaisenGame extends FlameGame {
   }
 
   /// Cavalry base march in field-widths per second (wiki 騎 1.1).
-  /// Half the operable field depth (fieldH/2) on the 390×844 reference is ~2.57s,
-  /// including the 1.32 aura after [kChargeTravelNeed] px (band 1.5–3.0s). Aura stays
-  /// travel-distance gated — this scale does not turn it into a wall clock.
-  /// 0.62·W glued onto a normal drag (Bosco teleport Fail); do not raise this
-  /// without re-measuring that half-field run.
-  static const double kCavalryPursuitWidthsPerSec = 0.32;
+  /// On the 390×844 reference with Watch 0.125, half the field (fieldH/2) is
+  /// ~2.45s including the 1.32 aura after [kChargeTravelNeed] px (gate 1.8–2.5s).
+  /// Aura stays travel-distance gated. The Soft釘 tip→pin itself is
+  /// [kSoftPinPathPx] (1.25× the prior 240px). 0.62·W glued onto a normal drag
+  /// (Bosco teleport Fail).
+  static const double kCavalryPursuitWidthsPerSec = 0.343;
 
   /// Body rests on the waypoint once it is this close, then [dragTo] clears.
   static const double kArrivalEpsilon = 2.0;
@@ -461,12 +488,66 @@ class TaisenGame extends FlameGame {
   /// Hard cap so a dt hitch cannot consume the whole waypoint in one frame.
   static const double kPursuitMinFps = 24.0;
 
-  Offset _clampFieldPos(Offset p) {
-    final minY = watchH + 36;
-    final maxY = size.y > 0 ? size.y - 16 : minY + 400;
-    final maxX = size.x > 0 ? size.x - 36 : 360.0;
-    return Offset(p.dx.clamp(36.0, maxX), p.dy.clamp(minY, maxY));
+  /// Token width in px. Size stays [kTokenWidthFracOfField] of the field width.
+  double get tokenWidthPx =>
+      (size.x > 0 ? size.x : 390.0) * kTokenWidthFracOfField;
+
+  /// Keep a card face one token off the bezel and out of the Watch.
+  Offset clampPlayableCenter(Offset at) {
+    final card = tokenCardSize;
+    final dead = tokenWidthPx * kEdgeDeadZoneMulOfToken;
+    final minX = dead + card.width / 2;
+    final maxX = math.max(minX, (size.x > 0 ? size.x : 390.0) - dead - card.width / 2);
+    final minY = (size.y > 0 ? watchH : 0) + card.height / 2;
+    final maxY = math.max(
+      minY,
+      (size.y > 0 ? size.y : minY + 400) - dead - card.height / 2,
+    );
+    return Offset(at.dx.clamp(minX, maxX), at.dy.clamp(minY, maxY));
   }
+
+  /// Lower ~70% of the field. Soft釘 drops land here; Watch stays above it.
+  Rect get softPinPrimaryRect {
+    final top = watchH + fieldH * kSoftPinPrimaryTopFrac;
+    return Rect.fromLTWH(0, top, size.x, math.max(0.0, size.y - top));
+  }
+
+  /// Tip→pin of [kSoftPinPathPx], aimed up-field so the taller rect carries it.
+  Offset softPinLandingFrom(Offset start) {
+    final dx = tokenCardSize.width * 0.35;
+    final dy = -math.sqrt(math.max(1.0, kSoftPinPathPx * kSoftPinPathPx - dx * dx));
+    return clampPlayableCenter(Offset(start.dx + dx, start.dy + dy));
+  }
+
+  /// How many max-5 cards fit in one rank with [kMinLaneGapMulOfToken] and the bezel inset.
+  int get maxPerRank {
+    final tokenW = tokenWidthPx;
+    final minC = tokenW * kEdgeDeadZoneMulOfToken + tokenW / 2;
+    final room = math.max(0.0, (size.x > 0 ? size.x : 390.0) - 2 * minC);
+    final step = tokenW * (1 + kMinLaneGapMulOfToken);
+    if (step <= 0) return 1;
+    var n = 1;
+    while (n < fieldMax && n * step <= room + 0.01) {
+      n++;
+    }
+    return n.clamp(1, fieldMax);
+  }
+
+  /// Centers for [count] cards in one rank. Edge gap ≥ 1.3× token when they fit.
+  List<double> rankCenterXs(int count) {
+    final w = size.x > 0 ? size.x : 390.0;
+    final tokenW = tokenWidthPx;
+    final minGap = tokenW * kMinLaneGapMulOfToken;
+    final minC = tokenW * kEdgeDeadZoneMulOfToken + tokenW / 2;
+    final maxC = w - minC;
+    if (count <= 1) return [(minC + maxC) / 2];
+    final room = math.max(0.0, maxC - minC);
+    final minStep = tokenW + minGap;
+    final step = math.max(minStep, room / (count - 1));
+    return [for (var i = 0; i < count; i++) minC + step * i];
+  }
+
+  Offset _clampFieldPos(Offset p) => clampPlayableCenter(p);
 
   /// Facing 0 = up (−Y). Movement (dx,dy) → atan2(dx, −dy).
   double _facingFromDelta(Offset delta) {
@@ -896,19 +977,21 @@ class TaisenGame extends FlameGame {
       Cost6Roster.all.firstWhere((c) => c.id == 'caoren'),
     ];
     final wh = size.y > 0 ? watchH : 200.0;
-    final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
+    // Own line sits in the lower ~70%. Enemy stays on the far side of a long lane.
+    final ownXs = rankCenterXs(ownCards.length);
+    final enemyXs = rankCenterXs(enemyCards.length);
     for (var i = 0; i < ownCards.length; i++) {
       field.add(ownCards[i]);
       fieldIsEnemy.add(false);
       fieldInCastle.add(false);
-      fieldPos.add(Offset(w * (0.22 + i * 0.22), wh + fh * 0.62));
+      fieldPos.add(Offset(ownXs[i], wh + fh * 0.70));
     }
     for (var i = 0; i < enemyCards.length; i++) {
       field.add(enemyCards[i]);
       fieldIsEnemy.add(true);
       fieldInCastle.add(false);
-      fieldPos.add(Offset(w * (0.35 + i * 0.28), wh + fh * 0.22));
+      fieldPos.add(Offset(enemyXs[i], wh + fh * 0.22));
     }
     // Cap visual stack: never more than fieldMax total, no stack-shadow.
     while (field.length > fieldMax) {
@@ -1508,6 +1591,7 @@ class TaisenGame extends FlameGame {
       if (revivingHere) {
         // Grey card in 歸城區. The full-color 落點釘 stays hidden until 出陣.
         final face = _onScreenCardCenter(center);
+        _drawTroopContactShadow(canvas, face, tokenSize.width, tokenSize.height);
         _drawRevivingCard(canvas, face, i, tokenSize);
         final cause = debugRetreatCause(i);
         if (cause.isNotEmpty) {
@@ -1521,6 +1605,7 @@ class TaisenGame extends FlameGame {
         }
       } else if (pinned) {
         // 影子行軍: ash 5:8 frame + weapon corner only. kMarchShadowFullColor stays false.
+        _drawTroopContactShadow(canvas, shadowAt(i), tokenSize.width, tokenSize.height);
         _drawMarchShadow(
           canvas,
           shadowAt(i),
@@ -1531,6 +1616,7 @@ class TaisenGame extends FlameGame {
           troop: card.troop,
         );
       } else if (_lifeAt(i) != UnitLife.alive) {
+        _drawTroopContactShadow(canvas, center, tokenSize.width, tokenSize.height);
         _drawRetreatToken(canvas, center, tokenSize);
         final tip = _lifeTipAt(i);
         if (tip.isNotEmpty) {
@@ -1553,6 +1639,7 @@ class TaisenGame extends FlameGame {
           );
         }
       } else {
+        _drawTroopContactShadow(canvas, center, tokenSize.width, tokenSize.height);
         _drawCardLikeToken(
           canvas,
           center,
@@ -1629,6 +1716,7 @@ class TaisenGame extends FlameGame {
       final i = selectedIndex!;
       final card = field[i];
       final cardAt = dragTo!;
+      _drawTroopContactShadow(canvas, cardAt, tokenSize.width, tokenSize.height);
       _drawCardLikeToken(
         canvas,
         cardAt,
@@ -1877,6 +1965,7 @@ class TaisenGame extends FlameGame {
       canvas.drawLine(Offset(field.left, y), Offset(field.right, y), fiber);
     }
     _drawPaperWear(canvas, field);
+    _drawMidLaneFillers(canvas, field);
     final splitY = field.top + field.height * 0.46;
     final ink = Paint()
       ..color = kEnemyBand.withValues(alpha: 0.38)
@@ -1907,6 +1996,43 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
+  /// Empty-lane parchment. Flat brown stains only — not grey unit ovals,
+  /// not silhouettes, and not added to [field] (max-5 cards stay the only tokens).
+  void _drawMidLaneFillers(Canvas canvas, Rect field) {
+    final tokenW = field.width * kTokenWidthFracOfField;
+    final top = field.top + field.height * 0.16;
+    final bottom = castleBandRect.top - 8;
+    if (bottom <= top + 8) return;
+    final xs = rankCenterXs(3);
+    final stain = Paint()..color = kParchmentStain.withValues(alpha: 0.09);
+    for (var i = 0; i < xs.length - 1; i++) {
+      final gapL = xs[i] + tokenW / 2;
+      final gapR = xs[i + 1] - tokenW / 2;
+      final gap = gapR - gapL;
+      if (gap < tokenW) continue;
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset((gapL + gapR) / 2, top + (bottom - top) * (0.42 + 0.08 * i)),
+          width: math.min(gap * 0.72, tokenW * 1.5),
+          height: tokenW * 0.22,
+        ),
+        stain,
+      );
+    }
+  }
+
+  /// Soft oval under a real troop. Parchment brown, flatter than the card.
+  void _drawTroopContactShadow(Canvas canvas, Offset center, double cardW, double cardH) {
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(center.dx, center.dy + cardH * 0.46),
+        width: cardW * 0.92,
+        height: cardH * 0.14,
+      ),
+      Paint()..color = kTroopContactShadow.withValues(alpha: 0.30),
+    );
+  }
+
   /// Deterministic stains so the sheet reads as worn paper, not a painted map.
   void _drawPaperWear(Canvas canvas, Rect field) {
     const stains = <Offset>[
@@ -1916,7 +2042,7 @@ class TaisenGame extends FlameGame {
       Offset(0.80, 0.70),
       Offset(0.50, 0.40),
     ];
-    final paint = Paint()..color = const Color(0xFF6A4E32).withValues(alpha: 0.10);
+    final paint = Paint()..color = kParchmentStain.withValues(alpha: 0.10);
     for (final s in stains) {
       canvas.drawOval(
         Rect.fromCenter(
@@ -3359,12 +3485,18 @@ class TaisenGame extends FlameGame {
 
   bool spawnCard(CardFace card, {bool enemy = false}) {
     if (field.length >= fieldMax) return false;
-    final tw = size.x > 0 ? size.x * kTokenWidthFracOfField : 64.0;
     final i = field.length;
+    final per = maxPerRank;
+    final rank = i ~/ per;
+    final col = i % per;
+    final xs = rankCenterXs(per);
+    final x = xs[math.min(col, xs.length - 1)];
+    final gap = tokenCardSize.width * kMinLaneGapMulOfToken;
+    final y = watchH + fieldH * 0.72 - rank * (tokenCardSize.height + gap);
     field.add(card);
     fieldIsEnemy.add(enemy);
     fieldInCastle.add(false);
-    fieldPos.add(Offset(48.0 + i * (tw * 1.35), watchH + 120));
+    fieldPos.add(clampPlayableCenter(Offset(x, y)));
     return true;
   }
 
@@ -3372,10 +3504,10 @@ class TaisenGame extends FlameGame {
 
   int? hitTokenAt(Offset local) {
     if (local.dy < watchH) return null; // watch band read-only
-    final hitR = tokenHitR;
+    final hit = tokenHitSize;
     final hits = <int>[];
     for (var i = 0; i < field.length; i++) {
-      if (_pointHitsToken(i, local, hitR)) hits.add(i);
+      if (_pointHitsToken(i, local, hit)) hits.add(i);
     }
     if (hits.isEmpty) return null;
     // Stacked 亂戰 draws the enemy on top. The ally under the finger is the drag.
@@ -3385,12 +3517,10 @@ class TaisenGame extends FlameGame {
     return hits.first;
   }
 
-  bool _pointHitsToken(int i, Offset local, double hitR) {
+  bool _pointHitsToken(int i, Offset local, Size hit) {
     if (i < 0 || i >= fieldPos.length) return false;
     bool within(Offset c) {
-      final dx = local.dx - c.dx;
-      final dy = local.dy - c.dy;
-      return dx * dx + dy * dy <= hitR * hitR;
+      return Rect.fromCenter(center: c, width: hit.width, height: hit.height).contains(local);
     }
     if (within(tokenCenter(i))) return true;
     // The 落點釘 is the visible grab target while 影子行軍 catches up.
@@ -3567,18 +3697,17 @@ class TaisenGame extends FlameGame {
   void panUpdate(Offset local) {
     if (!dragging) return;
     // Finger = waypoint only; update() walks at troop speed + aura travel.
-    final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
-    dragTo = Offset(local.dx, y);
+    // Pin stays out of the Watch and one token off the bezel.
+    dragTo = clampPlayableCenter(local);
   }
 
   void panEnd(Offset local) {
     if (!dragging) return;
     dragging = false;
     final t = tutorial;
-    final y = local.dy < watchH + 8 ? watchH + 8 : local.dy;
     // Release COMMITS the waypoint. Body keeps marching at troop speed.
     // Never snap/teleport the body to the finger.
-    dragTo = Offset(local.dx, y);
+    dragTo = clampPlayableCenter(local);
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -3825,16 +3954,9 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Keep a 5:8 card fully inside the game canvas so its face is not clipped
-  /// by the bottom edge of the 歸城區.
-  Offset _onScreenCardCenter(Offset at) {
-    final card = tokenCardSize;
-    final minX = card.width / 2 + 2;
-    final maxX = math.max(minX, size.x - card.width / 2 - 2);
-    final minY = (size.y > 0 ? watchH : 0) + card.height / 2 + 2;
-    final maxY = math.max(minY, size.y - card.height / 2 - 2);
-    return Offset(at.dx.clamp(minX, maxX), at.dy.clamp(minY, maxY));
-  }
+  /// Keep a 5:8 card fully on-screen, one token off the bezel, so R2 grey
+  /// and its centred countdown are not clipped by the 歸城區 edge.
+  Offset _onScreenCardCenter(Offset at) => clampPlayableCenter(at);
 
   /// Reviving inside 己城: grey card, countdown centred on the face. Full colour
   /// returns only once the body is alive again (出陣).

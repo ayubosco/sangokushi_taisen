@@ -1,15 +1,17 @@
 import 'dart:math' as math;
 
+import 'package:flame/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 
 void main() {
-  test('field token width is 0.10 of field, 5:8, hit ≥48dp', () {
+  test('field token width is 0.10 of field, 5:8, hit ≥12mm', () {
     expect(TaisenGame.kTokenWidthFracOfField, 0.10);
     expect(TaisenGame.kTokenAspectWH, 5 / 8);
-    // Design B: Watch ≤15% of the game band. Token art stays 0.10.
-    expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.15));
+    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.12, 0.13));
+    expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.87));
     expect(TaisenGame.kCastleBandFracOfField, 0.12);
+    expect(TaisenGame.kCastleBandFracOfField, lessThanOrEqualTo(0.132));
 
     const fieldW = 390.0;
     const tokenW = fieldW * TaisenGame.kTokenWidthFracOfField;
@@ -17,9 +19,11 @@ void main() {
     expect(tokenW, 39.0);
     expect(tokenH, closeTo(62.4, 0.01));
 
-    final halfDiag = 0.5 * math.sqrt(tokenW * tokenW + tokenH * tokenH);
-    final hitR = math.max(halfDiag + 4, 24.0);
-    expect(hitR, greaterThanOrEqualTo(24.0));
+    final g = TaisenGame()..onGameResize(Vector2(fieldW, 844));
+    final hit = g.tokenHitSize;
+    expect(hit.width, greaterThanOrEqualTo(tokenW * TaisenGame.kHitVisualScale));
+    expect(hit.height, greaterThanOrEqualTo(tokenH * TaisenGame.kHitVisualScale));
+    expect(math.min(hit.width, hit.height), greaterThanOrEqualTo(TaisenGame.kMinHitExtentPx));
   });
 
   test('JL3 table is aged paper plus a red rail, not a black vacuum', () {
