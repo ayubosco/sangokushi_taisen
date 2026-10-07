@@ -39,7 +39,9 @@ void main() {
       await tester.runAsync(() async {
         final fontFile = File('/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf');
         if (fontFile.existsSync()) {
-          await ui.loadFontFromList(await fontFile.readAsBytes());
+          final fontBytes = await fontFile.readAsBytes();
+          await ui.loadFontFromList(fontBytes, fontFamily: TaisenGame.kInkFontFamily);
+          await ui.loadFontFromList(fontBytes, fontFamily: 'Roboto');
         }
         await Future<void>.sync(() => game.onLoad()).timeout(const Duration(seconds: 30));
         await out.create(recursive: true);
@@ -188,6 +190,7 @@ void _paintBottom(Canvas canvas, Rect bar) {
         color: FactionColors.lacquer,
         fontSize: 18,
         fontWeight: FontWeight.w800,
+        fontFamily: TaisenGame.kInkFontFamily,
       ),
     ),
     textDirection: TextDirection.ltr,
@@ -202,7 +205,12 @@ void _label(Canvas canvas, String text, Offset at, Color color, double size, Fon
   final tp = TextPainter(
     text: TextSpan(
       text: text,
-      style: TextStyle(color: color, fontSize: size, fontWeight: weight),
+      style: TextStyle(
+        color: color,
+        fontSize: size,
+        fontWeight: weight,
+        fontFamily: TaisenGame.kInkFontFamily,
+      ),
     ),
     textDirection: TextDirection.ltr,
   )..layout();

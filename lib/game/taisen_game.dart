@@ -49,9 +49,6 @@ class TaisenGame extends FlameGame {
   /// Shot mode: keep 返城 float visible.
   bool holdReturnFlash = false;
 
-  /// v2 chart: 騎 ring+斜槍, 槍 tip, 弓 bow+arrow. Watch, field fallback, and 影子行軍 share this.
-  /// The horseshoe badge sheet is not a troop icon.
-  ui.Image? _weaponCornerSheet;
   ui.Image? _tokenCards58;
   ui.Image? _tokenSpear58;
   ui.Image? _tokenDao58;
@@ -305,7 +302,6 @@ class TaisenGame extends FlameGame {
     final wasRunning = clock.running;
     clock.reset();
     if (!wasRunning) clock.pause();
-    _weaponCornerSheet = await _loadUiImage('assets/icons/cost6-weapon-icons-v2.png');
     _tokenCards58 = await _loadUiImage('assets/ui/token-cards-58-moodboard.png');
     _tokenSpear58 = await _loadUiImage('assets/ui/token-card-spear-58.png');
     _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
@@ -345,6 +341,10 @@ class TaisenGame extends FlameGame {
 
   /// JL3 parchment grain. Mid field does not paint decorative placement ovals.
   static const bool kMidPlacementOvals = false;
+
+  /// Ink face for 敵陣／自陣 and troop names. Headless dumps load this family
+  /// so camp labels are parchment ink, not missing-glyph boxes.
+  static const String kInkFontFamily = 'SangokushiInk';
   static const Color kParchmentStain = Color(0xFF6A4E32);
   static const Color kTroopContactShadow = Color(0xFF5C4030);
 
@@ -2070,6 +2070,7 @@ class TaisenGame extends FlameGame {
           fontSize: fontSize,
           fontWeight: FontWeight.w700,
           letterSpacing: fontSize * 0.18,
+          fontFamily: kInkFontFamily,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -2414,12 +2415,7 @@ class TaisenGame extends FlameGame {
     );
   }
 
-  /// Wei-column crops from cost6-weapon-icons-v2. Same weapon shape in every faction.
-  static const Rect _kCornerCavSrc = Rect.fromLTWH(273, 191, 141, 141);
-  static const Rect _kCornerSpearSrc = Rect.fromLTWH(321, 381, 45, 149);
-  static const Rect _kCornerBowSrc = Rect.fromLTWH(292, 612, 115, 113);
-
-  /// 影子行軍. Ash 5:8 frame plus one weapon corner copied from the v2 chart.
+  /// 影子行軍. Ash 5:8 frame plus a procedural weapon corner.
   /// Black-gold paints sit in opacity 0.35–0.50 while the gap is open, then
   /// fade with [opacity] as 部隊追上. 騎 is the chart's ring + oblique spear,
   /// never a horseshoe and never a bare 騎 glyph. No human figure.
@@ -2438,17 +2434,17 @@ class TaisenGame extends FlameGame {
     final ink = (0.46 * presence).clamp(0.0, 0.50);
     final rect = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cardW * 0.1));
-    // Ash fill has to read on parchment. Black-gold weapon ink stays ≤0.50.
+    // Ash wash, not a light-grey card brick. Weapon ink stays in the 0.35–0.50 band.
     canvas.drawRRect(
       rrect,
-      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.85),
+      Paint()..color = const Color(0xFF4A3B2E).withValues(alpha: opacity * 0.55),
     );
     canvas.drawRRect(
       rrect,
       Paint()
         ..color = const Color(0xFF1A140C).withValues(alpha: ink)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.6,
+        ..strokeWidth = 1.6,
     );
     canvas.drawRRect(
       rrect,
@@ -2478,7 +2474,7 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
-  /// Weapon-only stamps along tip→pin. Stroke frame, no filled unit blob, no horseshoe.
+  /// Weapon-only stamps along tip→pin. No card brick, no sheet glyph.
   void _drawAshWeaponGhostTrail(
     Canvas canvas,
     Offset from,
@@ -2489,19 +2485,12 @@ class TaisenGame extends FlameGame {
     final points = ashWeaponGhostTrailPoints(from, to, cardH: card.height);
     for (final at in points) {
       final rect = Rect.fromCenter(center: at, width: card.width, height: card.height);
-      final rrect = RRect.fromRectAndRadius(rect, Radius.circular(card.width * 0.1));
-      canvas.drawRRect(
-        rrect,
-        Paint()
-          ..color = const Color(0xFF3A342C).withValues(alpha: 0.78)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4,
-      );
-      _drawMarchWeapon(canvas, rect, troop, alpha: 0.50);
+      _drawMarchWeapon(canvas, rect, troop, alpha: 0.92);
     }
   }
 
-  /// Weapon corner only. Upright so the troop reads; the chevron carries facing.
+  /// Weapon corner only. Procedural, so a sheet crop cannot paint a grey card
+  /// or a circle-slash null glyph over the ring and spear.
   void _drawMarchWeapon(
     Canvas canvas,
     Rect card,
@@ -2514,23 +2503,17 @@ class TaisenGame extends FlameGame {
     final h = card.height;
     switch (troop) {
       case TroopType.cavalry:
-        if (!_drawCornerSheet(canvas, card, _kCornerCavSrc, alpha)) {
-          _drawCavRingSpear(canvas, c, w, h, alpha);
-        }
+        _drawCavRingSpear(canvas, c, w, h, alpha);
       case TroopType.spear:
-        if (!_drawCornerSheet(canvas, card, _kCornerSpearSrc, alpha)) {
-          _drawLance(
-            canvas,
-            from: Offset(c.dx, c.dy + h * 0.16),
-            to: Offset(c.dx, c.dy - h * 0.30),
-            head: w * 0.26,
-            alpha: alpha,
-          );
-        }
+        _drawLance(
+          canvas,
+          from: Offset(c.dx, c.dy + h * 0.28),
+          to: Offset(c.dx, c.dy - h * 0.36),
+          head: w * 0.28,
+          alpha: alpha,
+        );
       case TroopType.bow:
-        if (!_drawCornerSheet(canvas, card, _kCornerBowSrc, alpha)) {
-          _drawBowCorner(canvas, c, w, h, alpha);
-        }
+        _drawBowCorner(canvas, c, w, h, alpha);
       case TroopType.infantry:
         _drawShortBlade(canvas, c, w, h, alpha);
       case TroopType.siege:
@@ -2538,66 +2521,62 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Gold strokes from the v2 chart. Near-black chart fill stays transparent.
-  bool _drawCornerSheet(Canvas canvas, Rect card, Rect src, double alpha) {
-    final sheet = _weaponCornerSheet;
-    if (sheet == null || alpha <= 0.02) return false;
-    final inset = card.deflate(card.width * 0.08);
-    final scale = math.min(inset.width / src.width, inset.height / src.height);
-    final dst = Rect.fromCenter(
-      center: inset.center,
-      width: src.width * scale,
-      height: src.height * scale,
-    );
-    final k = alpha;
-    canvas.drawImageRect(
-      sheet,
-      src,
-      dst,
-      Paint()
-        ..filterQuality = FilterQuality.medium
-        ..colorFilter = ColorFilter.matrix(<double>[
-          k, 0, 0, 0, 0,
-          0, k, 0, 0, 0,
-          0, 0, k, 0, 0,
-          0.85 * k, 0.55 * k, 0.20 * k, 0, -28 * k,
-        ]),
-    );
-    return true;
-  }
-
-  /// Sheet fallback: ring + oblique spear + small loop. Not a horseshoe.
+  /// Ring plus a slanted spear whose head and tail sit outside the ring.
+  /// A slash that stops at the circle reads as a null glyph; this does not.
   void _drawCavRingSpear(Canvas canvas, Offset c, double w, double h, double alpha) {
     final gold = FactionColors.gold.withValues(alpha: alpha);
-    final black = const Color(0xFF1A140C).withValues(alpha: alpha);
-    final rad = math.min(w, h) * 0.32;
+    final ink = const Color(0xFF1A140C).withValues(alpha: alpha);
+    final rad = math.min(w, h) * 0.18;
+    final ringC = Offset(c.dx - w * 0.02, c.dy + h * 0.06);
     final ring = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = rad * 0.14
-      ..color = black;
+      ..strokeWidth = math.max(1.8, rad * 0.28)
+      ..color = ink;
     final ringGold = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = rad * 0.06
+      ..strokeWidth = math.max(0.9, rad * 0.12)
       ..color = gold;
-    canvas.drawCircle(c, rad, ring);
-    canvas.drawCircle(c, rad, ringGold);
-    final tail = Offset(c.dx - rad * 0.55, c.dy + rad * 0.55);
-    final tip = Offset(c.dx + rad * 0.78, c.dy - rad * 0.78);
-    final shaft = Paint()
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = rad * 0.12
-      ..color = black;
-    canvas.drawLine(tail, tip, shaft);
+    canvas.drawCircle(ringC, rad, ring);
+    canvas.drawCircle(ringC, rad, ringGold);
+
+    final tail = Offset(c.dx - w * 0.34, c.dy + h * 0.30);
+    final tip = Offset(c.dx + w * 0.32, c.dy - h * 0.32);
+    final delta = tip - tail;
+    final len = delta.distance;
+    if (len < 1) return;
+    final dir = delta / len;
+    final n = Offset(-dir.dy, dir.dx);
+    final headLen = math.min(w, h) * 0.20;
+    final neck = tip - dir * headLen;
     canvas.drawLine(
       tail,
-      tip,
+      neck,
       Paint()
-        ..strokeCap = StrokeCap.round
-        ..strokeWidth = rad * 0.05
-        ..color = gold,
+        ..color = ink
+        ..strokeWidth = math.max(2.4, rad * 0.34)
+        ..strokeCap = StrokeCap.round,
     );
-    canvas.drawCircle(tip, rad * 0.16, ring..strokeWidth = rad * 0.08);
-    canvas.drawCircle(tip, rad * 0.16, ringGold..strokeWidth = rad * 0.035);
+    canvas.drawLine(
+      tail,
+      neck,
+      Paint()
+        ..color = gold
+        ..strokeWidth = math.max(1.1, rad * 0.14)
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(neck.dx + n.dx * headLen * 0.55, neck.dy + n.dy * headLen * 0.55)
+      ..lineTo(neck.dx - n.dx * headLen * 0.55, neck.dy - n.dy * headLen * 0.55)
+      ..close();
+    canvas.drawPath(head, Paint()..color = ink);
+    canvas.drawPath(
+      head,
+      Paint()
+        ..color = gold
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
   }
 
   /// Black shaft under a gold core, gold tip edged in black.
@@ -3116,6 +3095,7 @@ class TaisenGame extends FlameGame {
       fontSize: fontSize,
       fontWeight: FontWeight.w900,
       letterSpacing: 1.2,
+      fontFamily: kInkFontFamily,
       shadows: [
         Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(-1.5, 0)),
         Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(1.5, 0)),
@@ -4409,7 +4389,12 @@ class TaisenGame extends FlameGame {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(color: color, fontSize: fontSize, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w600,
+          fontFamily: kInkFontFamily,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: size.x - at.dx - 8);
