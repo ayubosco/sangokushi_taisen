@@ -74,9 +74,24 @@ void main() {
     }
     expect(g.spawnCard(card), isFalse);
     expect(g.field.length, TaisenGame.fieldMax);
-    // Parchment stains are brown, not a grey unit oval (R≈G≈B).
+    expect(TaisenGame.kMidPlacementOvals, isFalse);
     expect(TaisenGame.kParchmentStain.r, greaterThan(TaisenGame.kParchmentStain.b + 0.05));
     expect(TaisenGame.kTroopContactShadow.r, greaterThan(TaisenGame.kTroopContactShadow.b + 0.05));
+  });
+
+  test('Soft釘 tip→pin carries ash weapon ghost stamps, not only the endpoints', () {
+    final g = sized();
+    final from = Offset(g.size.x * 0.50, g.watchH + g.fieldH * 0.78);
+    final to = g.softPinLandingFrom(from);
+    expect((to - from).distance, closeTo(TaisenGame.kSoftPinPathPx, 1));
+    final stamps = g.ashWeaponGhostTrailPoints(from, to, cardH: g.tokenCardSize.height);
+    expect(stamps.length, greaterThanOrEqualTo(3));
+    for (final at in stamps) {
+      final along = (at - from).distance;
+      expect(along, greaterThan(8));
+      expect(along, lessThan((to - from).distance - 8));
+    }
+    expect(TaisenGame.kMarchShadowFullColor, isFalse);
   });
 
   test('edge dead-zone and R2 grey card stay fully on-screen', () {

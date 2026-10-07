@@ -343,7 +343,8 @@ class TaisenGame extends FlameGame {
   static const double kSoftPinPathScale = 1.25;
   static const double kSoftPinPathPx = kPriorSoftPinPathPx * kSoftPinPathScale;
 
-  /// JL3 parchment stain. Mid fillers use this brown — never a grey unit oval.
+  /// JL3 parchment grain. Mid field does not paint decorative placement ovals.
+  static const bool kMidPlacementOvals = false;
   static const Color kParchmentStain = Color(0xFF6A4E32);
   static const Color kTroopContactShadow = Color(0xFF5C4030);
 
@@ -510,6 +511,19 @@ class TaisenGame extends FlameGame {
   Rect get softPinPrimaryRect {
     final top = watchH + fieldH * kSoftPinPrimaryTopFrac;
     return Rect.fromLTWH(0, top, size.x, math.max(0.0, size.y - top));
+  }
+
+  /// Ash 5:8 weapon ghosts strictly between [from] and [to]. Endpoints stay the
+  /// body ghost and the 落點釘. A +25% path (300px) gets several stamps.
+  List<Offset> ashWeaponGhostTrailPoints(Offset from, Offset to, {required double cardH}) {
+    final delta = to - from;
+    final len = delta.distance;
+    if (len < cardH * 0.55 || cardH <= 1) return const [];
+    final step = cardH * 0.85;
+    final n = math.min(5, math.max(2, (len / step).floor()));
+    return [
+      for (var i = 1; i <= n; i++) from + delta * (i / (n + 1)),
+    ];
   }
 
   /// Tip→pin of [kSoftPinPathPx], aimed up-field so the taller rect carries it.
@@ -1516,6 +1530,7 @@ class TaisenGame extends FlameGame {
 
     final t = tutorial;
 
+    final pinMarch = selectedIndex != null && pinnedMarchAt(selectedIndex!);
     // Session1 / feel: drop guide + dashed path (not after tipNext / hit)
     if (t != null &&
         t.session == TutorialSession.session1 &&
@@ -1539,20 +1554,35 @@ class TaisenGame extends FlameGame {
       );
       canvas.drawCircle(drop, 6, Paint()..color = FactionColors.gold.withValues(alpha: 0.9));
       _drawText(canvas, '落點', Offset(drop.dx - 14, drop.dy + 28), FactionColors.gold.withValues(alpha: 0.85), 12);
-      if (tutorialOwnIndex != null) {
+      if (tutorialOwnIndex != null && tutorialOwnIndex! < field.length) {
         final from = tokenCenter(tutorialOwnIndex!);
         _drawGoldWaypointGuide(canvas, from, drop, drawLanding: false);
+        if (!pinMarch) {
+          _drawAshWeaponGhostTrail(
+            canvas,
+            from,
+            drop,
+            troop: field[tutorialOwnIndex!].troop,
+          );
+        }
       }
     }
 
     // Low-opacity trail from 影子行軍 to the 落點釘. Not a second card.
-    if (selectedIndex != null && pinnedMarchAt(selectedIndex!)) {
+    // Ash 5:8 weapon ghosts sit on that same tip→pin, not only the gold dash.
+    if (pinMarch && selectedIndex! < field.length) {
       _drawGoldWaypointGuide(
         canvas,
         shadowAt(selectedIndex!),
         dragTo!,
         ghostTrail: true,
         labelLanding: true,
+      );
+      _drawAshWeaponGhostTrail(
+        canvas,
+        shadowAt(selectedIndex!),
+        dragTo!,
+        troop: field[selectedIndex!].troop,
       );
     }
 
@@ -1964,8 +1994,7 @@ class TaisenGame extends FlameGame {
       final y = field.top + (i + 0.5) * field.height / 28;
       canvas.drawLine(Offset(field.left, y), Offset(field.right, y), fiber);
     }
-    _drawPaperWear(canvas, field);
-    _drawMidLaneFillers(canvas, field);
+    _drawParchmentGrain(canvas, field);
     final splitY = field.top + field.height * 0.46;
     final ink = Paint()
       ..color = kEnemyBand.withValues(alpha: 0.38)
@@ -1996,28 +2025,27 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
-  /// Empty-lane parchment. Flat brown stains only — not grey unit ovals,
-  /// not silhouettes, and not added to [field] (max-5 cards stay the only tokens).
-  void _drawMidLaneFillers(Canvas canvas, Rect field) {
-    final tokenW = field.width * kTokenWidthFracOfField;
-    final top = field.top + field.height * 0.16;
-    final bottom = castleBandRect.top - 8;
-    if (bottom <= top + 8) return;
-    final xs = rankCenterXs(3);
-    final stain = Paint()..color = kParchmentStain.withValues(alpha: 0.09);
-    for (var i = 0; i < xs.length - 1; i++) {
-      final gapL = xs[i] + tokenW / 2;
-      final gapR = xs[i + 1] - tokenW / 2;
-      final gap = gapR - gapL;
-      if (gap < tokenW) continue;
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset((gapL + gapR) / 2, top + (bottom - top) * (0.42 + 0.08 * i)),
-          width: math.min(gap * 0.72, tokenW * 1.5),
-          height: tokenW * 0.22,
-        ),
-        stain,
-      );
+  /// Short ink fibers. Empty lanes stay empty — no placement ovals.
+  void _drawParchmentGrain(Canvas canvas, Rect field) {
+    final grain = Paint()
+      ..color = kParchmentStain.withValues(alpha: 0.18)
+      ..strokeWidth = 1.1
+      ..strokeCap = StrokeCap.round;
+    const ticks = <Offset>[
+      Offset(0.08, 0.18),
+      Offset(0.16, 0.33),
+      Offset(0.24, 0.52),
+      Offset(0.31, 0.71),
+      Offset(0.44, 0.27),
+      Offset(0.57, 0.46),
+      Offset(0.63, 0.64),
+      Offset(0.74, 0.22),
+      Offset(0.81, 0.58),
+      Offset(0.88, 0.36),
+    ];
+    for (final s in ticks) {
+      final o = Offset(field.left + field.width * s.dx, field.top + field.height * s.dy);
+      canvas.drawLine(o, o + Offset(field.width * 0.045, 0.4), grain);
     }
   }
 
@@ -2031,28 +2059,6 @@ class TaisenGame extends FlameGame {
       ),
       Paint()..color = kTroopContactShadow.withValues(alpha: 0.30),
     );
-  }
-
-  /// Deterministic stains so the sheet reads as worn paper, not a painted map.
-  void _drawPaperWear(Canvas canvas, Rect field) {
-    const stains = <Offset>[
-      Offset(0.18, 0.22),
-      Offset(0.72, 0.18),
-      Offset(0.30, 0.62),
-      Offset(0.80, 0.70),
-      Offset(0.50, 0.40),
-    ];
-    final paint = Paint()..color = kParchmentStain.withValues(alpha: 0.10);
-    for (final s in stains) {
-      canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(field.left + field.width * s.dx, field.top + field.height * s.dy),
-          width: field.width * 0.22,
-          height: field.height * 0.06,
-        ),
-        paint,
-      );
-    }
   }
 
   void _drawInkLabel(Canvas canvas, String text, Offset center, double fontSize) {
@@ -2432,9 +2438,10 @@ class TaisenGame extends FlameGame {
     final ink = (0.46 * presence).clamp(0.0, 0.50);
     final rect = Rect.fromCenter(center: center, width: cardW, height: cardH);
     final rrect = RRect.fromRectAndRadius(rect, Radius.circular(cardW * 0.1));
+    // Ash fill has to read on parchment. Black-gold weapon ink stays ≤0.50.
     canvas.drawRRect(
       rrect,
-      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.34),
+      Paint()..color = const Color(0xFFC8C2B8).withValues(alpha: opacity * 0.85),
     );
     canvas.drawRRect(
       rrect,
@@ -2469,6 +2476,29 @@ class TaisenGame extends FlameGame {
       Paint()..color = FactionColors.gold.withValues(alpha: ink),
     );
     canvas.restore();
+  }
+
+  /// Weapon-only stamps along tip→pin. Stroke frame, no filled unit blob, no horseshoe.
+  void _drawAshWeaponGhostTrail(
+    Canvas canvas,
+    Offset from,
+    Offset to, {
+    required TroopType troop,
+  }) {
+    final card = tokenCardSize;
+    final points = ashWeaponGhostTrailPoints(from, to, cardH: card.height);
+    for (final at in points) {
+      final rect = Rect.fromCenter(center: at, width: card.width, height: card.height);
+      final rrect = RRect.fromRectAndRadius(rect, Radius.circular(card.width * 0.1));
+      canvas.drawRRect(
+        rrect,
+        Paint()
+          ..color = const Color(0xFF3A342C).withValues(alpha: 0.78)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4,
+      );
+      _drawMarchWeapon(canvas, rect, troop, alpha: 0.50);
+    }
   }
 
   /// Weapon corner only. Upright so the troop reads; the chevron carries facing.
