@@ -286,9 +286,13 @@ class TaisenGame extends FlameGame {
   double _bowWindupC = 0;
   bool _bowShotReady = false;
   bool _bowDidShoot = false;
-  /// One aimed shot per finger-down. Reset in [panStart].
-  bool _bowAimShotThisDrag = false;
-  double _bowAimHoldSec = 0;
+  /// Current touch aim. Updated whenever the finger moves, not glued to +X.
+  Offset? _bowAimDir;
+  double _bowAimCooldown = 0;
+  double _bowAttackLeft = 0;
+  int? _bowAttackIndex;
+  /// Repeat window so a swept aim can shoot again. Not the 1C still windup.
+  static const double kBowAimRepeatSec = 0.45;
   /// Half-angle 45°. Nearest living enemy inside this cone, not the global nearest.
   static const double kBowAimConeCos = 0.7071067811865476;
   /// A held aim fires without waiting out the 1C still windup.
@@ -490,14 +494,13 @@ class TaisenGame extends FlameGame {
     return math.atan2(delta.dx, -delta.dy);
   }
 
-  /// Finger is down and the 落點釘 has not overlapped the 影子行軍.
-  /// That gap must not wipe a cavalry 突撃 wave (sharp turn included).
-  bool _keepOpenGapCharge() {
-    if (!dragging || selectedIndex == null || dragTo == null) return false;
+  /// Finger-down cavalry keeps the 突撃 wave, including once the 落點釘
+  /// overlaps the body / 影子行軍. A sharp turn after finger-up still clears.
+  bool _keepChargeWhileDragging() {
+    if (!dragging || selectedIndex == null) return false;
     final i = selectedIndex!;
-    if (i < 0 || i >= field.length || i >= fieldPos.length) return false;
-    if (isEnemyAt(i) || field[i].troop != TroopType.cavalry) return false;
-    return (fieldPos[i] - dragTo!).distance > meleeContactDist;
+    if (i < 0 || i >= field.length) return false;
+    return !isEnemyAt(i) && field[i].troop == TroopType.cavalry;
   }
 
   bool _chargeWaveVisibleAt(int i) {
@@ -534,9 +537,9 @@ class TaisenGame extends FlameGame {
     if (_lastDragDir != null) {
       final dot = (_lastDragDir!.dx * dir.dx + _lastDragDir!.dy * dir.dy).clamp(-1.0, 1.0);
       final ang = math.acos(dot);
-      // ~70° still drops the meter after finger-up. A finger-down retarget
-      // whose 落點釘 has not met the 影子行軍 must keep the 突撃 wave.
-      if (ang > 1.22 && !_keepOpenGapCharge()) {
+      // ~70° still drops the meter after finger-up. A finger-down cavalry
+      // retarget keeps the 突撃 wave even when the 落點釘 overlaps the body.
+      if (ang > 1.22 && !_keepChargeWhileDragging()) {
         _dragTravelDist = 0;
         if (coach != null && coach.session == TutorialSession.session1) {
           coach.auraReady = false;
@@ -648,7 +651,12 @@ class TaisenGame extends FlameGame {
               !isEnemyAt(selectedIndex!))
           ? selectedIndex!
           : (tutorialOwnIndex ?? 0);
-      if (_hitFlashLabel != '突撃') {
+      // 氣勢 is the cavalry aura snap. Archers and other troops must not pop it.
+      final cavalry = idx >= 0 &&
+          idx < field.length &&
+          !isEnemyAt(idx) &&
+          field[idx].troop == TroopType.cavalry;
+      if (cavalry && _hitFlashLabel != '突撃') {
         flashHit(idx, '氣勢');
       }
     }
@@ -720,6 +728,7 @@ class TaisenGame extends FlameGame {
   /// Stop-fade stays in [debugDecayStoppedCharge] so arrival-frame travel stays lit.
   void debugStepPursuit(double dt) {
     _pulse += dt;
+    _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
     _tickRansen(dt);
     _tickSpearTips();
@@ -1313,6 +1322,7 @@ class TaisenGame extends FlameGame {
     // Aura from continuous straight travel. Waypoint retarget keeps the meter.
     // Clear travel to 0 on arrive or stop. Sharp turn (~70°) and 突撃 still clear.
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
+    _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
     _tickRansen(dt);
     _tickSpearTips();
@@ -1373,20 +1383,13 @@ class TaisenGame extends FlameGame {
 
     // Free-match charge fade is driven by _dragTravelDist decay above (no wait-auto 突撃).
 
-    // Free-match: enemy charge aura visible; after ≥1C tip-hit → auto 迎擊 (no button).
+    // 迎擊 is tip contact, not a 1C timer. The charging enemy closes in
+    // (_advanceChargingEnemy); the flash and the HP drop happen in _tickSpearTips.
     if (tutorial == null && _matchEnemyChargeIndex != null) {
       _matchEnemyChargeC += dt / CClock.secondsPerC;
       if (_matchEnemyChargeC >= FxWindows.interceptTurnAfterAuraC && !_matchTurnWindowOpen) {
         _matchTurnWindowOpen = true;
-        _matchFacingCorrect = true; // spear tip always on toward threat
-      }
-      if (_matchTurnWindowOpen &&
-          _matchFacingCorrect &&
-          _matchSpearIndex != null &&
-          _matchEnemyChargeIndex != null) {
-        flashHit(_matchSpearIndex!, '迎擊');
-        _matchEnemyChargeIndex = null;
-        _matchTurnWindowOpen = false;
+        _matchFacingCorrect = true;
       }
     }
 
@@ -1433,7 +1436,9 @@ class TaisenGame extends FlameGame {
       } else {
         ownFacing = 0.9; // wrong facing until player turns
       }
-    } else if (tutorial == null && _matchSpearIndex != null) {
+    } else if (tutorial == null &&
+        _matchSpearIndex != null &&
+        _matchEnemyChargeIndex == null) {
       if (_matchFacingCorrect) {
         ownFacing = -0.35;
       } else {
@@ -1639,25 +1644,9 @@ class TaisenGame extends FlameGame {
             const Color(0xFFFFF59D),
             12,
           );
-          final hp01 = (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0);
-          final bar = Rect.fromCenter(
-            center: Offset(center.dx, center.dy - tokenSize.height / 2 - 12),
-            width: tokenSize.width,
-            height: 5,
-          );
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(bar, const Radius.circular(2)),
-            Paint()..color = const Color(0xFF3E2723),
-          );
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromLTWH(bar.left, bar.top, bar.width * hp01, bar.height),
-              const Radius.circular(2),
-            ),
-            Paint()..color = const Color(0xFFEF9A9A),
-          );
         }
       }
+      _drawUnitHpBar(canvas, center, tokenSize, i);
     }
 
     // Full-color 落點釘. On arrive the troop body coincides with this card (部隊追上).
@@ -1683,6 +1672,7 @@ class TaisenGame extends FlameGame {
       final labelY = cardAt.dy + tokenSize.height / 2 + 4;
       _drawText(canvas, card.nameZh, Offset(cardAt.dx - 18, labelY), FactionColors.gold, 11);
       _drawCostStars(canvas, Offset(cardAt.dx - 18, labelY + 16), card.cost);
+      _drawUnitHpBar(canvas, cardAt, tokenSize, i);
     }
 
     // 亂戰 is a local stamp + HP chip. Never a full-screen cut-in.
@@ -1731,7 +1721,10 @@ class TaisenGame extends FlameGame {
           (selectedIndex != null && selectedIndex! < field.length && !isEnemyAt(selectedIndex!)
               ? selectedIndex
               : null);
-      if (travel01 > kChargeRingShowTravel01 && captionIdx != null) {
+      if (travel01 > kChargeRingShowTravel01 &&
+          captionIdx != null &&
+          captionIdx < field.length &&
+          field[captionIdx].troop == TroopType.cavalry) {
         final oc = chargeRingAnchor(captionIdx);
         _drawText(
           canvas,
@@ -2074,7 +2067,10 @@ class TaisenGame extends FlameGame {
         final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
         final live01 = math.max(travel01, match01);
         // BINARY: Watch mirrors field. Charging = ZERO cyan. Lit = SNAP rings on a living body.
-        if (auraActive && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
+        final ownIsCavalry = ownSafe != null &&
+            ownSafe < field.length &&
+            field[ownSafe].troop == TroopType.cavalry;
+        if (auraActive && ownIsCavalry && _chargeCyanOnUnit(ownSafe)) {
           _drawWatchChargeRings(
             canvas,
             ownC,
@@ -2084,8 +2080,9 @@ class TaisenGame extends FlameGame {
             whiteCore: true,
             facing: ownFacing,
           );
-        } else if (live01 > kChargeRingShowTravel01 &&
-            (ownSafe == null || _chargeCyanOnUnit(ownSafe))) {
+        } else if (ownIsCavalry &&
+            live01 > kChargeRingShowTravel01 &&
+            _chargeCyanOnUnit(ownSafe)) {
           _drawText(
             canvas,
             '蓄緊 ${(live01 * 100).round()}%',
@@ -2919,6 +2916,7 @@ class TaisenGame extends FlameGame {
     if (debugForcePose != null && debugForcePoseIndex == index) {
       return debugForcePose!;
     }
+    if (_bowAttackLeft > 0 && _bowAttackIndex == index) return TroopAnimPose.attack;
     // March pose while a waypoint is committed, not only while the finger is down.
     if (dragTo != null && selectedIndex == index) return TroopAnimPose.move;
     if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
@@ -3105,17 +3103,20 @@ class TaisenGame extends FlameGame {
       case TroopType.bow:
         // 亂戰: stop the shot vocabulary for as long as the bodies overlap.
         if (_ransenUnits.contains(index)) break;
-        if (!isEnemy && selectedIndex == index && dragTo != null) {
-          _drawBowAimRay(canvas, c, dragTo!);
-        }
         // FEEL bow-idle: show sheet only (no 蓄勢 clutter).
         if (debugForcePoseIndex == index && debugForcePose == TroopAnimPose.idle) {
           break;
         }
+        final aim = _bowAimDir;
+        if (!isEnemy && selectedIndex == index && aim != null && aim.distance > 1) {
+          final dir = aim / aim.distance;
+          _drawBowAimRay(canvas, c, c + dir * 110);
+          break;
+        }
         final winding = _bowWindupIndex == index;
-        final prog = winding ? (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0) : 0.35;
-        final ready = winding && _bowShotReady;
-        // Amber-cyan 蓄勢 (≠ gold select ring).
+        if (!winding) break;
+        final prog = (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0);
+        final ready = _bowShotReady;
         _drawBowWindup(
           canvas,
           c,
@@ -3530,7 +3531,8 @@ class TaisenGame extends FlameGame {
     }
 
     if (isEnemyAt(i)) {
-      // Can highlight enemy for read, but no gold ownership ring actions
+      // Living enemies can be read. Skulls get no selection ring and no drag.
+      if (_lifeAt(i) != UnitLife.alive) return;
       selectedIndex = i;
       return;
     }
@@ -3603,8 +3605,7 @@ class TaisenGame extends FlameGame {
       i = ally;
     }
     if (!_playerMayDrag(i)) return;
-    _bowAimShotThisDrag = false;
-    _bowAimHoldSec = 0;
+    _bowAimDir = null;
     if (t != null) {
       if (t.session != TutorialSession.session1) return;
       // Allow waitAura/hitCharge so stop→fade→drag-again rebuilds travel/aura.
@@ -3665,7 +3666,17 @@ class TaisenGame extends FlameGame {
     if (!dragging) return;
     // Finger = waypoint only; update() walks at troop speed + aura travel.
     // Clamp into the field so a bezel coordinate cannot wedge the march.
-    dragTo = _clampFieldPos(local);
+    final next = _clampFieldPos(local);
+    if (selectedIndex != null) _noteBowAim(selectedIndex!, next);
+    dragTo = next;
+  }
+
+  /// Aim is the touch relative to the bow, so a new finger position retargets.
+  void _noteBowAim(int i, Offset touch) {
+    if (i < 0 || i >= field.length || field[i].troop != TroopType.bow) return;
+    if (isEnemyAt(i)) return;
+    final aim = touch - tokenCenter(i);
+    if (aim.distance >= 24) _bowAimDir = aim;
   }
 
   /// Bezel PointerCancel. Release the finger-down latch and keep the last
@@ -3687,6 +3698,7 @@ class TaisenGame extends FlameGame {
     // Release COMMITS the waypoint. Body keeps marching at troop speed.
     // Never snap/teleport the body to the finger. Off-board points clamp in.
     dragTo = _clampFieldPos(local);
+    if (selectedIndex != null) _noteBowAim(selectedIndex!, dragTo!);
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -3819,6 +3831,7 @@ class TaisenGame extends FlameGame {
   String _lifeTipAt(int i) {
     switch (_lifeAt(i)) {
       case UnitLife.retreating:
+        if (isEnemyAt(i)) return '';
         return '散咗拖返城先復活';
       case UnitLife.alive:
         final parked = i < fieldInCastle.length && fieldInCastle[i];
@@ -3857,6 +3870,7 @@ class TaisenGame extends FlameGame {
       dragging = false;
       _lastDragDir = null;
       _clearTravelMeterOnStop();
+      if (isEnemyAt(i)) selectedIndex = null;
     }
     if (_matchChargeIndex == i) {
       _matchChargeIndex = null;
@@ -4091,7 +4105,76 @@ class TaisenGame extends FlameGame {
     if (_unitHp[i] <= 0) _enterRetreat(i);
   }
 
+  /// Always-on HP so 回城 is a read, not a guess. Same stub as castle heal.
+  void _drawUnitHpBar(Canvas canvas, Offset center, Size tokenSize, int i) {
+    final hp01 = (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0);
+    final bar = Rect.fromCenter(
+      center: Offset(center.dx, center.dy - tokenSize.height / 2 - 10),
+      width: tokenSize.width,
+      height: 5,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+      Paint()..color = const Color(0xFF3E2723),
+    );
+    final fill = hp01 > 0.66
+        ? const Color(0xFF81C784)
+        : hp01 > 0.33
+            ? const Color(0xFFFFF59D)
+            : const Color(0xFFEF9A9A);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * hp01, bar.height),
+        const Radius.circular(2),
+      ),
+      Paint()..color = fill,
+    );
+    _drawText(
+      canvas,
+      '${debugUnitHp(i).round()}',
+      Offset(bar.left, bar.top - 12),
+      const Color(0xFFF3E6D0),
+      10,
+    );
+  }
+
+  /// 迎擊: the designated enemy cavalry (free-match demo) walks onto the own
+  /// spear tip and holds there. The tip turns to that approach. Contact inside
+  /// [kSpearTipHitR] is the counter — a distant aura or a 1C timer is not.
+  /// Not a new DPS table. A body already in 亂戰 does not keep charging.
+  void _advanceChargingEnemy(double dt) {
+    if (tutorial?.shotPassMode == true) return;
+    final e = _matchEnemyChargeIndex;
+    final s = _matchSpearIndex;
+    if (e == null || s == null) return;
+    if (e >= fieldPos.length || s >= fieldPos.length) return;
+    if (_lifeAt(e) != UnitLife.alive || _lifeAt(s) != UnitLife.alive) return;
+    final from = fieldPos[e];
+    final spearAt = fieldPos[s];
+    final fromSpear = from - spearAt;
+    if (fromSpear.distance < 1) return;
+    // Facing 0 = up. Tip stays on the line from the spear to this enemy.
+    ownFacing = math.atan2(fromSpear.dx, -fromSpear.dy);
+    enemyFacing = math.atan2(-fromSpear.dx, fromSpear.dy);
+    final tip = spearTipAt(s);
+    final delta = tip - from;
+    final dist = delta.distance;
+    // In spear range: hold so the tip can counter. Do not dive into the body.
+    if (dist <= kSpearTipHitR || dt <= 0 || _ransenUnits.contains(e)) return;
+    final speed = _worldSpeedPx(e);
+    final dtCap = speed / kPursuitMinFps;
+    final step = math.min(dist, math.min(speed * dt, dtCap));
+    if (step <= 0 || dist < 1) return;
+    final dir = delta / dist;
+    fieldPos[e] = from + dir * step;
+  }
+
+  /// Test hook: the enemy cavalry that is walking onto the spear, if any.
+  int? get debugChargingEnemyIndex => _matchEnemyChargeIndex;
+  int? get debugSpearIndex => _matchSpearIndex;
+
   /// 槍尖 contact is not body 亂戰. A cavalry on the tip takes the full HP bar.
+  /// The enemy has to reach the tip; a distant aura does not flash 迎擊.
   void _tickSpearTips() {
     _ensureLifeSlots();
     final still = <String>{};
@@ -4137,17 +4220,15 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Held aim fires without the 1C still windup. Release also fires (see panEnd).
+  /// Held aim fires without the 1C still windup. The touch can retarget between shots.
   void _tickBowAim(double dt) {
-    if (!dragging || dt <= 0 || selectedIndex == null || dragTo == null) return;
+    if (_bowAttackLeft > 0) _bowAttackLeft = math.max(0, _bowAttackLeft - dt);
+    if (_bowAimCooldown > 0) _bowAimCooldown = math.max(0, _bowAimCooldown - dt);
+    if (!dragging || dt <= 0 || selectedIndex == null) return;
     final i = selectedIndex!;
     if (i < 0 || i >= field.length || field[i].troop != TroopType.bow) return;
-    if ((dragTo! - tokenCenter(i)).distance < kBowAimMinPx) {
-      _bowAimHoldSec = 0;
-      return;
-    }
-    _bowAimHoldSec += dt;
-    if (_bowAimHoldSec >= kBowQuickAimSec) _maybeFireAimedBow(i);
+    if (_bowAimCooldown > 0 || _bowAimDir == null) return;
+    _maybeFireAimedBow(i);
   }
 
   /// Drag aim: nearest living enemy inside the aim cone. Not the global nearest.
@@ -4174,16 +4255,17 @@ class TaisenGame extends FlameGame {
   }
 
   void _maybeFireAimedBow(int i) {
-    if (_bowAimShotThisDrag || tutorial != null) return;
+    if (_bowAimCooldown > 0 || tutorial != null) return;
     if (i < 0 || i >= field.length || field[i].troop != TroopType.bow) return;
     if (isEnemyAt(i) || _ransenUnits.contains(i) || _lifeAt(i) != UnitLife.alive) return;
-    if (dragTo == null) return;
-    final aim = dragTo! - tokenCenter(i);
-    if (aim.distance < kBowAimMinPx) return;
+    final aim = _bowAimDir ?? (dragTo == null ? null : dragTo! - tokenCenter(i));
+    if (aim == null || aim.distance < 8) return;
     final target = _bowTargetInCone(i, aim);
-    _bowAimShotThisDrag = true;
-    _cancelBowWindup();
     if (target == null) return;
+    _bowAimCooldown = kBowAimRepeatSec;
+    _bowAttackLeft = 0.40;
+    _bowAttackIndex = i;
+    _cancelBowWindup();
     flashHit(i, '射');
     _applyHpLoss(target, kBowShotBurstSec * kRansenTickPerSec, cause: '射');
   }

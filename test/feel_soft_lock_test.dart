@@ -178,6 +178,9 @@ void main() {
     g.debugForceHpZero(1);
     expect(g.debugUnitLife(1), UnitLife.retreating);
     expect(g.debugShowsSkull(1), isTrue);
+    expect(g.debugLifeTipAt(1), isEmpty, reason: 'enemy skull has no 入城 hint');
+    g.selectOrDetailAt(g.tokenCenter(1));
+    expect(g.selectedIndex, isNot(1), reason: 'enemy skull takes no selection ring');
     final skullAt = g.tokenCenter(1);
     g.panStart(skullAt);
     expect(g.dragging, isFalse);
@@ -195,5 +198,118 @@ void main() {
     expect(g.selectedIndex, 0);
     expect(g.dragTo, isNotNull);
     expect(g.fieldPos[1], skullAt);
+    expect(g.debugLifeTipAt(0), '散咗拖返城先復活');
+  });
+
+  test('cavalry wave stays when the pin overlaps the body during the drag', () {
+    final g = readyGame();
+    final start = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.55);
+    g.debugRestageOwnEnemy(
+      ownId: 'zhaoyun',
+      ownAt: start,
+      enemyAt: start + const Offset(0, -260),
+    );
+    g.panStart(start);
+    g.panUpdate(start + const Offset(220, 0));
+    const dt = 1 / 60.0;
+    for (var i = 0; i < 40; i++) {
+      g.debugStepPursuit(dt);
+    }
+    expect(g.debugChargeWaveVisible, isTrue);
+    final kept = g.debugTravel01;
+    final body = g.tokenCenter(0);
+    g.panUpdate(body + const Offset(-6, 4));
+    expect((g.fieldPos[0] - g.dragTo!).distance, lessThan(g.meleeContactDist));
+    g.debugStepPursuit(dt);
+    g.debugStepPursuit(dt);
+    expect(g.dragging, isTrue);
+    expect(g.debugChargeWaveVisible, isTrue);
+    expect(g.debugTravel01, greaterThan(kept - 0.02));
+    expect(g.debugHitLabel, isNot('突撃'));
+  });
+
+  test('a charging enemy closes on the spear and 迎擊 is the tip hit', () {
+    final g = readyGame();
+    g.setupMatchDemoField();
+    int? spear;
+    int? cav;
+    for (var i = 0; i < g.field.length; i++) {
+      if (spear == null &&
+          !g.fieldIsEnemy[i] &&
+          g.field[i].troop == TroopType.spear) {
+        spear = i;
+      }
+      if (cav == null &&
+          g.fieldIsEnemy[i] &&
+          g.field[i].troop == TroopType.cavalry) {
+        cav = i;
+      }
+    }
+    expect(spear, isNotNull);
+    expect(cav, isNotNull);
+    expect(g.debugChargingEnemyIndex, cav);
+    expect(g.debugSpearIndex, spear);
+    final before = (g.fieldPos[cav!] - g.fieldPos[spear!]).distance;
+    var guard = 0;
+    while (g.debugRetreatCause(cav) != '迎擊' &&
+        g.debugHitLabel != '迎擊' &&
+        guard < 500) {
+      g.debugStepPursuit(1 / 60);
+      guard++;
+    }
+    expect((g.fieldPos[cav] - g.fieldPos[spear]).distance, lessThan(before - 30));
+    expect(
+      g.debugRetreatCause(cav) == '迎擊' || g.debugHitLabel == '迎擊',
+      isTrue,
+    );
+    expect(g.inMeleeContact(g.tokenCenter(spear), g.tokenCenter(cav)), isFalse);
+    expect(g.debugUnitHp(cav), 0);
+  });
+
+  test('bow aim follows the touch and a moving archer does not pop 氣勢', () {
+    final g = readyGame();
+    final at = Offset(g.size.x * 0.34, g.watchH + g.fieldH * 0.40);
+    g.debugRestageOwnEnemy(
+      ownId: 'sunquan',
+      ownAt: at,
+      enemyAt: at + const Offset(210, 0),
+    );
+    final below = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
+    g.field.add(below);
+    g.fieldIsEnemy.add(true);
+    g.fieldInCastle.add(false);
+    g.fieldPos.add(at + const Offset(0, 200));
+
+    g.panStart(at);
+    g.panUpdate(at + const Offset(180, 0));
+    g.debugStepPursuit(1 / 60);
+    const shot = TaisenGame.kBowShotBurstSec * TaisenGame.kRansenTickPerSec;
+    expect(g.debugHitLabel, '射');
+    expect(TaisenGame.kRansenMaxHp - g.debugUnitHp(1), closeTo(shot, 0.001));
+    expect(g.debugUnitHp(2), TaisenGame.kRansenMaxHp);
+
+    g.debugSetUnitHp(1, TaisenGame.kRansenMaxHp);
+    g.panUpdate(at + const Offset(0, 190));
+    g.debugStepPursuit(TaisenGame.kBowAimRepeatSec);
+    expect(TaisenGame.kRansenMaxHp - g.debugUnitHp(2), closeTo(shot, 0.001));
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(g.debugHitLabel, isNot('氣勢'));
+
+    final march = readyGame();
+    final from = Offset(march.size.x * 0.25, march.watchH + march.fieldH * 0.50);
+    march.debugRestageOwnEnemy(
+      ownId: 'sunquan',
+      ownAt: from,
+      enemyAt: from + const Offset(0, -240),
+    );
+    march.panStart(from);
+    march.panEnd(from + const Offset(260, 0));
+    var guard = 0;
+    while (!march.auraActive && march.dragTo != null && guard < 500) {
+      march.debugStepPursuit(1 / 60);
+      guard++;
+    }
+    expect(march.auraActive, isTrue);
+    expect(march.debugHitLabel, isNot('氣勢'));
   });
 }
