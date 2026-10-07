@@ -298,8 +298,9 @@ class TroopRetreatVisualVerify {
     await _place('sunquan', from, from + const Offset(180, 0));
     game.selectOrDetailAt(from);
     await _advance(_bowWindupSec);
+    // Off the enemy ray (+x). An aimed drag would shoot; this one must not.
     game.panStart(from);
-    game.panEnd(from + const Offset(140, 0));
+    game.panEnd(from + const Offset(0, 140));
     game.selectOrDetailAt(from);
     return game.debugUnitHp(1) == TaisenGame.kRansenMaxHp && game.debugRetreatCause(1).isEmpty;
   }

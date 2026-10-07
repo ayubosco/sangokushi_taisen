@@ -97,7 +97,8 @@ void main() {
     moving.selectOrDetailAt(from);
     moving.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
     moving.panStart(from);
-    moving.panEnd(from + const Offset(140, 0));
+    // Enemy sits on +x. A downward march is outside the aim cone, so no arrow.
+    moving.panEnd(from + const Offset(0, 140));
     moving.selectOrDetailAt(from);
     expect(moving.debugUnitHp(1), TaisenGame.kRansenMaxHp);
     moving.debugStepPursuit(0.2);

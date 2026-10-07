@@ -835,6 +835,10 @@ class _TutorialShellState extends State<TutorialShell> {
                       _game.panEnd(d.localPosition);
                       setState(() {});
                     },
+                    onPanCancel: () {
+                      _game.panCancel();
+                      setState(() {});
+                    },
                     child: GameWidget(game: _game),
                   ),
                   if (_showSessionBanner &&
@@ -1313,6 +1317,10 @@ class _MatchShellState extends State<MatchShell> {
                 },
                 onPanEnd: (d) {
                   _game.panEnd(d.localPosition);
+                  setState(() {});
+                },
+                onPanCancel: () {
+                  _game.panCancel();
                   setState(() {});
                 },
                 child: RepaintBoundary(
