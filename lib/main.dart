@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 
 import 'game/faction_colors.dart';
 import 'game/ransen_visual_verify.dart';
+import 'game/retreat_revive_visual_verify.dart';
+import 'game/soft_pin_visual_verify.dart';
+import 'game/troop_retreat_visual_verify.dart';
 import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
@@ -39,6 +42,17 @@ const bool kSpeedCompareVerify =
 
 // dart-define: RANSEN_VISUAL_VERIFY=true — free-match frames A–D.
 // Not DEMO_SHOT and not shotPassMode. See [kRansenVisualVerify].
+//
+// dart-define: SOFT_PIN_VISUAL_VERIFY=true — place, release, then
+// ① 落點釘＋部隊追上 / ④ 零青 / ④ SNAP / ② カード先・部隊追いつき.
+// See [kSoftPinVisualVerify].
+//
+// dart-define: RETREAT_REVIVE_VISUAL_VERIFY=true — free-match holds R1–R4
+// (撤退 frozen / castle tick / HP100 redeploy / 返城回血). Not a device run
+// from Cloud. See [kRetreatReviveVisualVerify].
+//
+// dart-define: TROOP_RETREAT_VISUAL_VERIFY=true — playtest paths
+// 騎 突撃 / 槍 迎擊 / 弓 射 / 歩 亂戰 / 攻城 城傷. See [kTroopRetreatVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -108,7 +122,7 @@ class _AppRootState extends State<AppRoot> {
         kFeelShot == 'bow-attack' ||
         kFeelShot == 'cav-idle' ||
         kFeelShot == 'cav-attack';
-    if (kRansenVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
+    if (kSoftPinVisualVerify || kRansenVisualVerify || kRetreatReviveVisualVerify || kTroopRetreatVisualVerify || kLiveVerify == 'bow' || kDemoShot == 'match' || feelMatch) {
       _selectedBingfa = '火計';
       _pickedFaction = Faction.shu;
     } else if (kSpeedCompareVerify || kChargeAutoVerify || kLiveVerify == 's2' || kDemoShot == 's1' || kTutorialShot.isNotEmpty || kFeelShot.isNotEmpty) {
@@ -117,7 +131,9 @@ class _AppRootState extends State<AppRoot> {
   }
 
   _AppStage _initialStage() {
-    if (kRansenVisualVerify) return _AppStage.match;
+    if (kSoftPinVisualVerify || kRansenVisualVerify || kRetreatReviveVisualVerify || kTroopRetreatVisualVerify) {
+      return _AppStage.match;
+    }
     if (kLiveVerify == 'bow') return _AppStage.match;
     if (kLiveVerify == 's2') return _AppStage.tutorial;
     if (kDemoShot == 'splash') return _AppStage.splash;
@@ -819,6 +835,10 @@ class _TutorialShellState extends State<TutorialShell> {
                       _game.panEnd(d.localPosition);
                       setState(() {});
                     },
+                    onPanCancel: () {
+                      _game.panCancel();
+                      setState(() {});
+                    },
                     child: GameWidget(game: _game),
                   ),
                   if (_showSessionBanner &&
@@ -1004,7 +1024,10 @@ class _MatchShellState extends State<MatchShell> {
     _game = TaisenGame();
     _game.onRequestDetail = (card) => showCardDetailSheet(context, card);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (kRansenVisualVerify) {
+      if (kSoftPinVisualVerify ||
+          kRansenVisualVerify ||
+          kRetreatReviveVisualVerify ||
+          kTroopRetreatVisualVerify) {
         // Free match. Clock runs. No FEEL/DEMO freeze and no shotPassMode.
         _game.setupMatchDemoField();
         _game.clock.reset();
@@ -1012,7 +1035,15 @@ class _MatchShellState extends State<MatchShell> {
         setState(() {});
         Future<void>.delayed(const Duration(milliseconds: 500), () {
           if (!mounted) return;
-          _runRansenVisualVerify();
+          if (kSoftPinVisualVerify) {
+            _runSoftPinVisualVerify();
+          } else if (kRansenVisualVerify) {
+            _runRansenVisualVerify();
+          } else if (kRetreatReviveVisualVerify) {
+            _runRetreatReviveVisualVerify();
+          } else {
+            _runTroopRetreatVisualVerify();
+          }
         });
         return;
       }
@@ -1064,6 +1095,137 @@ class _MatchShellState extends State<MatchShell> {
     });
   }
 
+  /// Place, release, march. Pauses on ① / ④ / ② and writes app-tmp PNGs.
+  Future<void> _runSoftPinVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY run '
+      'flutter run --dart-define=SOFT_PIN_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY capture '
+      'xcrun simctl io booted screenshot <name>.png '
+      'during each HOLD line (~4s). '
+      'PNGs also land in the app tmp/soft-pin-visual/ '
+      '(xcrun simctl get_app_container booted com.bosco.sangokushiTaisen data).',
+    );
+    final script = SoftPinVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdSoftPinFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdSoftPinFrame(SoftPinVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _writeVerifyPng('SOFT_PIN_VISUAL_VERIFY', 'soft-pin-visual', shot.id);
+    // ignore: avoid_print
+    print(
+      'SOFT_PIN_VISUAL_VERIFY HOLD ${shot.id} '
+      'screenshot now — paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
+  /// Pauses on R1–R4. Writes a PNG only when this define is actually run.
+  Future<void> _runRetreatReviveVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY run '
+      'flutter run --dart-define=RETREAT_REVIVE_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY checks '
+      'R1 HP0 skull+撤退 reviveLeft frozen 3s outside; '
+      'R2 drag into castleBand ticks; '
+      'R3 HP=100 can leave; '
+      'R4 alive park no skull no 復活 bell. '
+      'PNGs land in app tmp/retreat-revive-visual/ during each HOLD (~4s).',
+    );
+    final script = RetreatReviveVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdRetreatReviveFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdRetreatReviveFrame(RetreatReviveVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    if (mounted) setState(() {});
+    // pauseEngine stops the ticker. Capturing immediately writes the previous
+    // frame, so an R1 「撤退」 re-flash never reaches the PNG. Paint it first.
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 48));
+    await _writeVerifyPng('RETREAT_REVIVE_VISUAL_VERIFY', 'retreat-revive-visual', shot.id);
+    // ignore: avoid_print
+    print(
+      'RETREAT_REVIVE_VISUAL_VERIFY HOLD ${shot.id} '
+      'paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
+  /// Pauses on each troop path. Writes a PNG only when this define is actually run.
+  Future<void> _runTroopRetreatVisualVerify() async {
+    if (!mounted) return;
+    if (_game.tutorial != null) return;
+    // ignore: avoid_print
+    print(
+      'TROOP_RETREAT_VISUAL_VERIFY run '
+      'flutter run --dart-define=TROOP_RETREAT_VISUAL_VERIFY=true -d <udid>',
+    );
+    // ignore: avoid_print
+    print(
+      'TROOP_RETREAT_VISUAL_VERIFY checks '
+      'CAV 突撃 drop; CAVK 突撃 retreat; SPEAR 迎擊; '
+      'BOW stopped 射; INF 亂戰; SIEGE 城傷. '
+      'PNGs land in app tmp/troop-retreat-visual/ during each HOLD (~4s).',
+    );
+    final script = TroopRetreatVisualVerify(
+      game: _game,
+      step: () => Future<void>.delayed(const Duration(milliseconds: 16)),
+      hold: _holdTroopRetreatFrame,
+    );
+    await script.run();
+  }
+
+  Future<void> _holdTroopRetreatFrame(TroopRetreatVisualShot shot) async {
+    _game.visualVerifyCaption = shot.caption;
+    _game.pauseEngine();
+    if (mounted) setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await _writeVerifyPng('TROOP_RETREAT_VISUAL_VERIFY', 'troop-retreat-visual', shot.id);
+    // ignore: avoid_print
+    print(
+      'TROOP_RETREAT_VISUAL_VERIFY HOLD ${shot.id} '
+      'paused ${shot.hold.inMilliseconds}ms',
+    );
+    await Future<void>.delayed(shot.hold);
+    if (!mounted) return;
+    _game.resumeEngine();
+  }
+
   /// Pauses on each prove frame, writes a PNG, and holds for simctl.
   Future<void> _runRansenVisualVerify() async {
     if (!mounted) return;
@@ -1095,7 +1257,7 @@ class _MatchShellState extends State<MatchShell> {
     if (mounted) setState(() {});
     await WidgetsBinding.instance.endOfFrame;
     await Future<void>.delayed(const Duration(milliseconds: 80));
-    await _writeRansenPng(shot.id);
+    await _writeVerifyPng('RANSEN_VISUAL_VERIFY', 'ransen-visual', shot.id);
     // ignore: avoid_print
     print(
       'RANSEN_VISUAL_VERIFY HOLD ${shot.id} '
@@ -1106,28 +1268,28 @@ class _MatchShellState extends State<MatchShell> {
     _game.resumeEngine();
   }
 
-  Future<void> _writeRansenPng(String id) async {
+  Future<void> _writeVerifyPng(String logTag, String folder, String id) async {
     try {
       final boundary = _shotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) {
         // ignore: avoid_print
-        print('RANSEN_VISUAL_VERIFY PNG skip $id (no boundary)');
+        print('$logTag PNG skip $id (no boundary)');
         return;
       }
       final image = await boundary.toImage(pixelRatio: 2);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) return;
-      final dir = Directory('${Directory.systemTemp.path}/ransen-visual');
+      final dir = Directory('${Directory.systemTemp.path}/$folder');
       await dir.create(recursive: true);
       final file = File('${dir.path}/$id.png');
       await file.writeAsBytes(
         data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
       );
       // ignore: avoid_print
-      print('RANSEN_VISUAL_VERIFY PNG ${file.path}');
+      print('$logTag PNG ${file.path}');
     } catch (e) {
       // ignore: avoid_print
-      print('RANSEN_VISUAL_VERIFY PNG fail $id $e');
+      print('$logTag PNG fail $id $e');
     }
   }
 
@@ -1155,6 +1317,10 @@ class _MatchShellState extends State<MatchShell> {
                 },
                 onPanEnd: (d) {
                   _game.panEnd(d.localPosition);
+                  setState(() {});
+                },
+                onPanCancel: () {
+                  _game.panCancel();
                   setState(() {});
                 },
                 child: RepaintBoundary(
@@ -1275,24 +1441,33 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const minTap = 48.0;
+    // 12mm at Material density is about 64dp. 48dp is under that.
+    const stratH = 64.0;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       color: FactionColors.lacquer,
       child: Row(
         children: [
+          const Text(
+            'Cost 6',
+            style: TextStyle(
+              color: FactionColors.gold,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
           const Spacer(),
           SizedBox(
-            width: minTap * 1.8,
-            height: minTap,
+            width: stratH * 1.6,
+            height: stratH,
             child: ElevatedButton(
               onPressed: onStrategy,
               style: ElevatedButton.styleFrom(
                 backgroundColor: FactionColors.gold,
                 foregroundColor: FactionColors.lacquer,
-                minimumSize: const Size(minTap * 1.8, minTap),
+                minimumSize: const Size(stratH * 1.6, stratH),
               ),
-              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
             ),
           ),
         ],
