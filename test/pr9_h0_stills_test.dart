@@ -81,7 +81,7 @@ void main() {
         expect(game.fieldH / game.size.y, closeTo(0.875, 0.001));
         expect(game.tokenCardSize.width / game.size.x, closeTo(0.10, 0.001));
         expect(TaisenGame.kSoftPinPathPx, 300);
-        await shoot('pr9-h0-9c028c0-fullscreen-idle.png');
+        await shoot('pr9-h0-e09bd07-fullscreen-idle.png');
 
         final start = Offset(game.size.x * 0.42, game.watchH + game.fieldH * 0.78);
         game.fieldPos[0] = start;
@@ -97,7 +97,7 @@ void main() {
         expect(game.pinnedMarchAt(0), isTrue, reason: 'mid still must be a committed Soft釘');
         expect(game.field[0].troop, TroopType.cavalry);
         expect(game.dragging, isFalse);
-        await shoot('pr9-h0-9c028c0-fullscreen-softpin-mid.png');
+        await shoot('pr9-h0-e09bd07-fullscreen-softpin-mid.png');
 
         var guard = 0;
         while (game.dragTo != null && guard < 60 * 12) {
@@ -106,7 +106,7 @@ void main() {
         }
         expect(game.dragTo, isNull, reason: 'arrive still needs the body on the pin');
         expect(game.pinnedMarchAt(0), isFalse);
-        await shoot('pr9-h0-9c028c0-fullscreen-arrive.png');
+        await shoot('pr9-h0-e09bd07-fullscreen-arrive.png');
       });
     },
     skip: Platform.environment['PR9_H0_STILLS'] != '1',
