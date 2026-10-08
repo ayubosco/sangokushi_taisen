@@ -50,17 +50,17 @@ class SoftPinVisualShot {
   final double shadowOpacity;
   final double pinGap;
   final bool ringOnShadow;
-  /// Watch height ÷ game band. Gate is ≤0.18, and ≤0.20 of a phone screen.
+  /// Watch height ÷ game band. H0 A gate is 0.12–0.13.
   final double watchOfGame;
   /// Drag field ÷ game band. Fail when this would put 可拖／屏 under 0.55.
   final double fieldOfGame;
   final double tokenOfField;
 
-  /// H0 ruler: Watch stays in the 0.15–0.18 game band, drag field stays ≥0.55, token is 0.10.
+  /// H0 A: Watch 0.12–0.13, drag field ≥0.87, token is 0.10.
   bool get h0Pass =>
-      watchOfGame > 0 &&
-      watchOfGame <= 0.18 &&
-      fieldOfGame >= 0.55 &&
+      watchOfGame >= 0.12 &&
+      watchOfGame <= 0.13 &&
+      fieldOfGame >= 0.87 &&
       (tokenOfField - TaisenGame.kTokenWidthFracOfField).abs() < 0.001 &&
       (TaisenGame.kTokenAspectWH - 5 / 8).abs() < 0.001;
 
@@ -127,8 +127,8 @@ class SoftPinVisualVerify {
   final Future<void> Function() step;
   final Future<void> Function(SoftPinVisualShot shot) hold;
 
-  /// Straight release long enough to light the aura before 部隊追上.
-  static const double kReleasePx = 240;
+  /// Tip→pin. Design field-depth: 1.25× the prior 240px Soft Lock path.
+  static const double kReleasePx = TaisenGame.kSoftPinPathPx;
 
   Future<void> run() async {
     if (game.tutorial != null) {
@@ -158,7 +158,7 @@ class SoftPinVisualVerify {
   /// panEnd commits the 落點. The body marches; the finger does not stay down.
   Future<void> _releaseAndMarch() async {
     final start = _marchStart();
-    final landing = Offset(start.dx + kReleasePx, start.dy);
+    final landing = game.softPinLandingFrom(start);
     game.debugRestageOwnEnemy(
       ownId: 'zhaoyun',
       ownAt: start,
@@ -285,7 +285,8 @@ class SoftPinVisualVerify {
     final w = game.size.x > 0 ? game.size.x : 390.0;
     final top = game.size.y > 0 ? game.watchH : 120.0;
     final fh = game.size.y > 0 ? game.fieldH : 500.0;
-    return Offset(w * 0.16, top + fh * 0.48);
+    // Low in the lower ~70% so the +25% up-field path still lands in that zone.
+    return Offset(w * 0.50, top + fh * 0.78);
   }
 
   Offset _enemyFar() {
