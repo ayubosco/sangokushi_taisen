@@ -324,7 +324,7 @@ void main() {
     final g = readyGame();
     final band = g.castleBandRect;
     final outside = Offset(g.size.x * 0.42, band.top - 90);
-    final inBand = Offset(outside.dx, band.top + band.height * 0.45);
+    final inBand = Offset(outside.dx, band.top + band.height * 0.72);
     _placeOwn(g, outside, TroopType.cavalry);
     g.panStart(outside);
     g.panEnd(inBand);
@@ -335,7 +335,7 @@ void main() {
 
     final parked = readyGame();
     final parkedBand = parked.castleBandRect;
-    final alreadyIn = Offset(parked.size.x * 0.42, parkedBand.top + parkedBand.height * 0.4);
+    final alreadyIn = Offset(parked.size.x * 0.42, parkedBand.top + parkedBand.height * 0.72);
     _placeOwn(parked, alreadyIn, TroopType.cavalry);
     parked.panStart(alreadyIn);
     parked.panEnd(Offset(alreadyIn.dx + 12, alreadyIn.dy));

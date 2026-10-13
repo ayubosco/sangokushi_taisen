@@ -34,7 +34,7 @@ void main() {
     expect(g.debugUnitHp(0), 0);
     expect(g.debugShowsSkull(0), isTrue);
     expect(g.debugHitLabel, '撤退');
-    expect(g.debugLifeTipAt(0), '散咗拖返城先復活');
+    expect(g.debugLifeTipAt(0), '返城');
     expect(g.matchMorale, 5);
     expect(g.debugReviveLeft(0), closeTo(15, 0.001));
     expect(g.dragTo, isNull);
@@ -53,7 +53,7 @@ void main() {
     final frozen = g.debugReviveLeft(0);
 
     final band = g.castleBandRect;
-    g.fieldPos[0] = Offset(band.center.dx, band.top + band.height * 0.5);
+    g.fieldPos[0] = Offset(band.center.dx, band.top + band.height * 0.72);
     g.debugStepPursuit(1);
     expect(g.debugUnitLife(0), UnitLife.inCastleReviving);
     expect(g.debugReviveLeft(0), closeTo(frozen - 1, 0.05));
@@ -96,7 +96,7 @@ void main() {
   test('alive return heals in castle with no skull and no revive bell', () {
     final g = readyGame();
     final band = g.castleBandRect;
-    final at = Offset(band.center.dx, band.top + band.height * 0.4);
+    final at = Offset(band.center.dx, band.top + band.height * 0.72);
     _place(g, 'zhaoyun', at);
     g.debugSetUnitHp(0, 40);
     g.panStart(at);

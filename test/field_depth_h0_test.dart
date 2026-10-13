@@ -102,15 +102,20 @@ void main() {
     final dead = g.tokenWidthPx * TaisenGame.kEdgeDeadZoneMulOfToken;
     expect(face.left, greaterThanOrEqualTo(dead - 0.5));
     expect(g.size.x - face.right, greaterThanOrEqualTo(dead - 0.5));
-    expect(g.size.y - face.bottom, greaterThanOrEqualTo(dead - 0.5));
+    // Bottom bezel yields to 己城 park depth so 歸城 / 返城 stays reachable.
     expect(face.top, greaterThanOrEqualTo(g.watchH));
     expect(face.bottom, lessThanOrEqualTo(g.size.y));
+    final enterY = (g.size.y - g.castleBandH) + g.castleBandH * TaisenGame.kCastleEnterDepth;
+    expect(shoved.dy, greaterThanOrEqualTo(enterY - 0.5));
 
-    final parked = g.clampPlayableCenter(g.castleBandRect.center);
+    final parked = g.clampPlayableCenter(
+      Offset(g.castleBandRect.center.dx, enterY),
+    );
     final r2 = Rect.fromCenter(center: parked, width: card.width, height: card.height);
     expect(r2.top, greaterThanOrEqualTo(0));
     expect(r2.bottom, lessThanOrEqualTo(g.size.y));
     expect(r2.height, greaterThan(26), reason: 'centred countdown font fits on the grey face');
+    expect(g.castleGateContains(parked, currentlyIn: false), isTrue);
   });
 
   test('hit box is ≥1.2× visual and ≥12mm on the short side', () {

@@ -72,7 +72,7 @@ class RetreatReviveVisualShot {
             splash == '撤退' &&
             hp == 0 &&
             (reviveLeft - reviveMark).abs() < 0.05 &&
-            tip == '散咗拖返城先復活' &&
+            tip == '返城' &&
             morale == moraleMark;
       case 'R2':
         return life == UnitLife.inCastleReviving &&
@@ -335,7 +335,7 @@ class RetreatReviveVisualVerify {
 
   Offset _castlePoint() {
     final band = game.castleBandRect;
-    return Offset(band.center.dx, band.top + band.height * 0.55);
+    return Offset(band.center.dx, band.top + band.height * 0.72);
   }
 
   Offset _enemyFar() {

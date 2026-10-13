@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
+import 'package:sangokushi_taisen/game/fx_windows.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 import 'package:sangokushi_taisen/game/unit_life.dart';
 
@@ -114,54 +115,53 @@ void main() {
     expect(g.debugTravel01, greaterThan(kept - 0.02));
   });
 
-  test('bow drag hits the nearest enemy in the aim cone and misses off-aim', () {
+  test('standing bow auto-fires in range; drag/move stays silent', () {
     final g = readyGame();
     final at = Offset(g.size.x * 0.30, g.watchH + g.fieldH * 0.46);
     g.debugRestageOwnEnemy(
       ownId: 'sunquan',
       ownAt: at,
-      enemyAt: at + const Offset(220, 0),
+      enemyAt: at + const Offset(120, -40),
     );
-    final off = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
-    g.field.add(off);
-    g.fieldIsEnemy.add(true);
-    g.fieldInCastle.add(false);
-    g.fieldPos.add(at + const Offset(36, 120));
-    expect((g.tokenCenter(2) - at).distance, lessThan((g.tokenCenter(1) - at).distance));
-
-    g.panStart(at);
-    g.panEnd(at + const Offset(180, 0));
     const shot = TaisenGame.kBowShotBurstSec * TaisenGame.kRansenTickPerSec;
+    final windupSec = FxWindows.toSeconds(FxWindows.bowStopBeforeShotC);
+    // Stopped + in range → 蓄勢 → auto 射.
+    var guard = 0;
+    while (g.debugHitLabel != '射' && guard < 400) {
+      g.debugStepPursuit(1 / 60);
+      guard++;
+    }
     expect(g.debugHitLabel, '射');
     expect(TaisenGame.kRansenMaxHp - g.debugUnitHp(1), closeTo(shot, 0.001));
-    expect(g.debugUnitHp(2), TaisenGame.kRansenMaxHp);
+    expect(guard / 60.0, greaterThan(windupSec * 0.8));
 
-    final away = readyGame();
-    away.debugRestageOwnEnemy(
+    // Drag / committed march must not fire (走射 OFF).
+    final moving = readyGame();
+    moving.debugRestageOwnEnemy(
       ownId: 'sunquan',
       ownAt: at,
-      enemyAt: at + const Offset(220, 0),
+      enemyAt: at + const Offset(120, -40),
     );
-    away.panStart(at);
-    away.panEnd(at + const Offset(0, 150));
-    expect(away.debugHitLabel, isNot('射'));
-    expect(away.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    moving.panStart(at);
+    moving.panUpdate(at + const Offset(160, 0));
+    for (var i = 0; i < 90; i++) {
+      moving.debugStepPursuit(1 / 60);
+    }
+    expect(moving.dragging, isTrue);
+    expect(moving.debugHitLabel, isNot('射'));
+    expect(moving.debugUnitHp(1), TaisenGame.kRansenMaxHp);
 
-    final held = readyGame();
-    held.debugRestageOwnEnemy(
+    // Waypoint commit also silent until the body stops.
+    final march = readyGame();
+    march.debugRestageOwnEnemy(
       ownId: 'sunquan',
       ownAt: at,
-      enemyAt: at + const Offset(200, 0),
+      enemyAt: at + const Offset(120, -40),
     );
-    held.panStart(at);
-    held.panUpdate(at + const Offset(160, 0));
-    held.debugStepPursuit(TaisenGame.kBowQuickAimSec);
-    expect(held.dragging, isTrue);
-    expect(held.debugHitLabel, '射');
-    expect(
-      TaisenGame.kRansenMaxHp - held.debugUnitHp(1),
-      closeTo(shot, 0.001),
-    );
+    march.panStart(at);
+    march.panEnd(at + const Offset(180, 0));
+    expect(march.debugHitLabel, isNot('射'));
+    expect(march.debugBowWinding, isFalse);
   });
 
   test('enemy cards and enemy skulls are not draggable; own skull is', () {
@@ -193,12 +193,12 @@ void main() {
     expect(g.dragging, isTrue);
     expect(g.selectedIndex, 0);
     final band = g.castleBandRect;
-    g.panEnd(Offset(ownAt.dx, band.top + band.height * 0.45));
+    g.panEnd(Offset(ownAt.dx, band.top + band.height * 0.72));
     expect(g.dragging, isFalse);
     expect(g.selectedIndex, 0);
     expect(g.dragTo, isNotNull);
     expect(g.fieldPos[1], skullAt);
-    expect(g.debugLifeTipAt(0), '散咗拖返城先復活');
+    expect(g.debugLifeTipAt(0), '返城');
   });
 
   test('cavalry wave stays when the pin overlaps the body during the drag', () {
@@ -249,15 +249,28 @@ void main() {
     expect(cav, isNotNull);
     expect(g.debugChargingEnemyIndex, cav);
     expect(g.debugSpearIndex, spear);
-    final before = (g.fieldPos[cav!] - g.fieldPos[spear!]).distance;
+    // Soft Lock: face tip by MOVE toward the cav — idle auto-face is gone.
+    final spearAt = g.fieldPos[spear!];
+    final cavAt = g.fieldPos[cav!];
+    final toward = cavAt - spearAt;
+    final aim = spearAt + toward * (40 / toward.distance);
+    g.panStart(spearAt);
+    g.panEnd(aim);
+    var settle = 0;
+    while (g.dragTo != null && settle < 180) {
+      g.debugStepPursuit(1 / 60);
+      settle++;
+    }
+    expect(g.spearTipExtendedAt(spear), isTrue);
+    final before = (g.fieldPos[cav] - g.fieldPos[spear]).distance;
     var guard = 0;
     while (g.debugRetreatCause(cav) != '迎擊' &&
         g.debugHitLabel != '迎擊' &&
-        guard < 500) {
+        guard < 800) {
       g.debugStepPursuit(1 / 60);
       guard++;
     }
-    expect((g.fieldPos[cav] - g.fieldPos[spear]).distance, lessThan(before - 30));
+    expect((g.fieldPos[cav] - g.fieldPos[spear]).distance, lessThan(before - 10));
     expect(
       g.debugRetreatCause(cav) == '迎擊' || g.debugHitLabel == '迎擊',
       isTrue,
@@ -266,50 +279,49 @@ void main() {
     expect(g.debugUnitHp(cav), 0);
   });
 
-  test('bow aim follows the touch and a moving archer does not pop 氣勢', () {
+  test('moving bow does not pop 氣勢; stop then auto-fires', () {
     final g = readyGame();
     final at = Offset(g.size.x * 0.34, g.watchH + g.fieldH * 0.40);
     g.debugRestageOwnEnemy(
       ownId: 'sunquan',
       ownAt: at,
-      enemyAt: at + const Offset(210, 0),
+      enemyAt: at + const Offset(100, -30),
     );
-    final below = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
-    g.field.add(below);
-    g.fieldIsEnemy.add(true);
-    g.fieldInCastle.add(false);
-    g.fieldPos.add(at + const Offset(0, 200));
-
     g.panStart(at);
     g.panUpdate(at + const Offset(180, 0));
-    g.debugStepPursuit(1 / 60);
-    const shot = TaisenGame.kBowShotBurstSec * TaisenGame.kRansenTickPerSec;
-    expect(g.debugHitLabel, '射');
-    expect(TaisenGame.kRansenMaxHp - g.debugUnitHp(1), closeTo(shot, 0.001));
-    expect(g.debugUnitHp(2), TaisenGame.kRansenMaxHp);
-
-    g.debugSetUnitHp(1, TaisenGame.kRansenMaxHp);
-    g.panUpdate(at + const Offset(0, 190));
-    g.debugStepPursuit(TaisenGame.kBowAimRepeatSec);
-    expect(TaisenGame.kRansenMaxHp - g.debugUnitHp(2), closeTo(shot, 0.001));
-    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    for (var i = 0; i < 60; i++) {
+      g.debugStepPursuit(1 / 60);
+    }
+    expect(g.dragging, isTrue);
+    expect(g.debugHitLabel, isNot('射'));
     expect(g.debugHitLabel, isNot('氣勢'));
 
-    final march = readyGame();
-    final from = Offset(march.size.x * 0.25, march.watchH + march.fieldH * 0.50);
-    march.debugRestageOwnEnemy(
-      ownId: 'sunquan',
-      ownAt: from,
-      enemyAt: from + const Offset(0, -240),
-    );
-    march.panStart(from);
-    march.panEnd(from + const Offset(260, 0));
+    // Release far from enemy so march continues silent; then stop and shoot.
+    g.panEnd(at + const Offset(40, 0));
+    var settle = 0;
+    while (g.dragTo != null && settle < 300) {
+      g.debugStepPursuit(1 / 60);
+      settle++;
+    }
+    expect(g.debugHitLabel, isNot('氣勢'));
     var guard = 0;
-    while (!march.auraActive && march.dragTo != null && guard < 500) {
-      march.debugStepPursuit(1 / 60);
+    while (g.debugHitLabel != '射' && guard < 400) {
+      g.debugStepPursuit(1 / 60);
       guard++;
     }
-    expect(march.auraActive, isTrue);
-    expect(march.debugHitLabel, isNot('氣勢'));
+    expect(g.debugHitLabel, '射');
+  });
+
+  test('clampPlayableCenter reaches 己城 enter depth for 歸城', () {
+    final g = readyGame();
+    final band = g.castleBandRect;
+    final want = Offset(band.center.dx, band.top + band.height * TaisenGame.kCastleEnterDepth);
+    final clamped = g.clampPlayableCenter(Offset(band.center.dx, g.size.y + 200));
+    expect(clamped.dy, greaterThanOrEqualTo(want.dy - 0.5));
+    expect(
+      g.castleGateContains(clamped, currentlyIn: false),
+      isTrue,
+      reason: 'bottom clamp must allow park depth ≥ enter',
+    );
   });
 }

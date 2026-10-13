@@ -40,7 +40,7 @@ void main() {
     expect(frozen.hp, 0);
     expect(frozen.reviveLeft, closeTo(frozen.reviveMark, 0.05));
     expect(frozen.reviveMark, closeTo(TaisenGame.kReviveBaseSec, 0.001));
-    expect(frozen.tip, '散咗拖返城先復活');
+    expect(frozen.tip, '返城');
     expect(frozen.morale, frozen.moraleMark);
 
     final ticking = shots[1];
