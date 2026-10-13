@@ -10,6 +10,7 @@ import '../data/card_models.dart';
 import 'c_clock.dart';
 import 'faction_colors.dart';
 import 'fx_windows.dart';
+import 'soft_lock_cues.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 import 'unit_life.dart';
@@ -53,6 +54,7 @@ class TaisenGame extends FlameGame {
   ui.Image? _tokenSpear58;
   ui.Image? _tokenDao58;
   ui.Image? _tokenBow58;
+  final SoftLockCueBank softLockCues = SoftLockCueBank();
   /// Flame SpriteAnimation bank (spear/dao/bow/cavalry sheets).
   final TroopSpriteBank troopSprites = TroopSpriteBank();
   /// Shot / debug: force SpriteAnimation pose on [debugForcePoseIndex] (FEEL sheets).
@@ -339,6 +341,7 @@ class TaisenGame extends FlameGame {
     _tokenDao58 = await _loadUiImage('assets/ui/token-card-dao-58.png');
     _tokenBow58 = await _loadUiImage('assets/ui/token-card-bow-58.png');
     await troopSprites.loadAll();
+    await softLockCues.loadAll();
   }
 
   Future<ui.Image> _loadUiImage(String assetPath) async {
@@ -1740,16 +1743,11 @@ class TaisenGame extends FlameGame {
       } else if (_lifeAt(i) != UnitLife.alive) {
         _drawTroopContactShadow(canvas, center, tokenSize.width, tokenSize.height);
         _drawRetreatToken(canvas, center, tokenSize);
-        final tip = _lifeTipAt(i);
-        if (tip.isNotEmpty) {
-          _drawText(
-            canvas,
-            tip,
-            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
-            const Color(0xFFFFF59D),
-            11,
-          );
-        }
+        _drawLifeFlyTip(
+          canvas,
+          i,
+          Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
+        );
         final cause = debugRetreatCause(i);
         if (cause.isNotEmpty) {
           _drawText(
@@ -1800,16 +1798,11 @@ class TaisenGame extends FlameGame {
             12,
           );
         }
-        final tip = _lifeTipAt(i);
-        if (tip.isNotEmpty) {
-          _drawText(
-            canvas,
-            tip,
-            Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 28),
-            const Color(0xFFFFF59D),
-            12,
-          );
-        }
+        _drawLifeFlyTip(
+          canvas,
+          i,
+          Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 28),
+        );
       }
       _drawUnitHpBar(canvas, center, tokenSize, i);
     }
@@ -1912,14 +1905,27 @@ class TaisenGame extends FlameGame {
         final isChargePunch = _hitFlashLabel == '突撃';
         final isKisei = _hitFlashLabel == '氣勢';
         final isRetreatSplash = _hitFlashLabel == '撤退';
-        _drawFatFloatText(
-          canvas,
-          _hitFlashLabel,
-          Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78)),
-          alpha: 1,
-          fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? 32 : 22,
-        );
-        final punchCyan = (isChargePunch || _hitFlashLabel == '迎擊') &&
+        final isGeigeki = _hitFlashLabel == '迎擊';
+        final flyAt = Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78));
+        // Soft note: single fat 「迎撃」 — sprite OR canvas text, never stamp+fly stack.
+        var drewGeigekiFly = false;
+        if (isGeigeki) {
+          final tipIdx = _hitFlashIndex!;
+          if (tipIdx < field.length && field[tipIdx].troop == TroopType.spear) {
+            softLockCues.draw(canvas, 'tip-scrape', spearTipAt(tipIdx), alpha: (_hitFlashLeft / 0.9).clamp(0.35, 1.0));
+          }
+          drewGeigekiFly = softLockCues.draw(canvas, 'fly-geigeki', flyAt);
+        }
+        if (!drewGeigekiFly) {
+          _drawFatFloatText(
+            canvas,
+            _hitFlashLabel,
+            flyAt,
+            alpha: 1,
+            fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? 32 : 22,
+          );
+        }
+        final punchCyan = (isChargePunch || isGeigeki) &&
             _chargeCyanOnUnit(_hitFlashIndex!);
         if (punchCyan) {
           // 氣勢 uses snapped charge rings. 撤退 / 歸城 / revive draw no cyan.
@@ -1967,7 +1973,10 @@ class TaisenGame extends FlameGame {
         Rect.fromLTWH(0, fieldTop, w, h - fieldTop),
         Paint()..color = FactionColors.gold.withValues(alpha: 0.10 * a),
       );
-      _drawFatFloatText(canvas, '返城', Offset(w * 0.5, fieldTop + 56), alpha: a);
+      final flyAt = Offset(w * 0.5, fieldTop + 56);
+      if (!softLockCues.draw(canvas, 'fly-fancheng', flyAt, alpha: a)) {
+        _drawFatFloatText(canvas, '返城', flyAt, alpha: a);
+      }
     }
 
     if (_shakeLeft > 0) {
@@ -2165,6 +2174,10 @@ class TaisenGame extends FlameGame {
       band,
       Paint()..color = kOwnBand.withValues(alpha: castleBandHot ? 0.95 : 0.88),
     );
+    if (castleBandHot) {
+      // Design drop-target glow (歸城/返城). Stretches to the live band.
+      softLockCues.drawRect(canvas, 'castle-glow', band, alpha: 0.92);
+    }
     final edge = Paint()
       ..color = FactionColors.gold.withValues(alpha: castleBandHot ? 0.95 : 0.40)
       ..strokeWidth = castleBandHot ? 2.6 : 1.2;
@@ -2293,6 +2306,14 @@ class TaisenGame extends FlameGame {
             !spearTipExtendedAt(ownSafe);
         if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
           _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
+          // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
+          softLockCues.draw(
+            canvas,
+            'watch-tip',
+            ownC + Offset(0, -22 * ownScale),
+            alpha: 0.95,
+            scale: ownScale,
+          );
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
           _drawWatchChargeRings(
@@ -2309,10 +2330,43 @@ class TaisenGame extends FlameGame {
       case AWindowKind.bow:
         if (ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
           _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
+          // VFX-01 Watch bow 蓄勢 mirror plate.
+          softLockCues.draw(
+            canvas,
+            'watch-bow',
+            ownC + Offset(18 * ownScale, -16 * ownScale),
+            alpha: 0.95,
+            scale: ownScale,
+          );
         }
         break;
       case AWindowKind.stratagem:
         break;
+    }
+
+    // VFX-01 live field→Watch mirrors (same-frame), even when demo cycle kind differs.
+    if (ownSafe != null && ownSafe < field.length && _lifeAt(ownSafe) == UnitLife.alive) {
+      final troop = field[ownSafe].troop;
+      if (troop == TroopType.spear && spearTipExtendedAt(ownSafe) && kind != AWindowKind.intercept) {
+        softLockCues.draw(
+          canvas,
+          'watch-tip',
+          ownC + Offset(0, -22 * ownScale),
+          alpha: 0.9,
+          scale: ownScale,
+        );
+      }
+      if (troop == TroopType.bow &&
+          _bowWindupIndex == ownSafe &&
+          kind != AWindowKind.bow) {
+        softLockCues.draw(
+          canvas,
+          'watch-bow',
+          ownC + Offset(18 * ownScale, -16 * ownScale),
+          alpha: 0.9,
+          scale: ownScale,
+        );
+      }
     }
 
     Color ownFill = FactionColors.shu;
@@ -3299,17 +3353,22 @@ class TaisenGame extends FlameGame {
             _drawBowAimRay(canvas, c, tokenCenter(tIdx));
           }
         }
-        if (!winding) break;
-        final prog = (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0);
-        final ready = _bowShotReady;
-        _drawBowWindup(
-          canvas,
-          c,
-          c.dx + 78,
-          const Color(0xFFFFAB40).withValues(alpha: ready ? 0.98 : 0.82),
-          progress01: prog,
-          ready: ready,
-        );
+        if (!winding && !(_bowAttackLeft > 0 && _bowAttackIndex == index)) break;
+        if (winding) {
+          final prog = (_bowWindupC / FxWindows.bowStopBeforeShotC).clamp(0.0, 1.0);
+          final ready = _bowShotReady;
+          _drawBowWindup(
+            canvas,
+            c,
+            c.dx + 78,
+            const Color(0xFFFFAB40).withValues(alpha: ready ? 0.98 : 0.82),
+            progress01: prog,
+            ready: ready,
+          );
+        }
+        if (_bowAttackLeft > 0 && _bowAttackIndex == index) {
+          _drawBowArrowFlight(canvas, index);
+        }
         break;
       default:
         break;
@@ -3421,11 +3480,21 @@ class TaisenGame extends FlameGame {
     if (d.distance < 8) return;
     final dir = d / d.distance;
     final end = from + dir * math.min(d.distance, 96);
+    // Soft Pass: dashed gold aim + chevron (procedural — clearer than fixed sprite length).
     final paint = Paint()
       ..color = const Color(0xFFFFAB40).withValues(alpha: 0.95)
       ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(from, end, paint);
+    final len = (end - from).distance;
+    var walked = 0.0;
+    const dash = 8.0;
+    const gap = 5.0;
+    while (walked < len - 4) {
+      final a = from + dir * walked;
+      final b = from + dir * math.min(walked + dash, len);
+      canvas.drawLine(a, b, paint);
+      walked += dash + gap;
+    }
     final perp = Offset(-dir.dy, dir.dx);
     final head = Path()
       ..moveTo(end.dx, end.dy)
@@ -3465,33 +3534,82 @@ class TaisenGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.2,
     );
-    // Persistent spear tip / 槍尖光 — always on (idle facing too). Cyan-white + gold-lacquer (less neon green).
+    // Persistent spear tip / 槍尖光 — Design sprite when loaded; canvas fallback otherwise.
     final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
     final tipScale = rx >= 40 ? 1.28 : (rx / 36.0).clamp(0.75, 1.05);
     final tip = Offset(c.dx, c.dy - 48 * tipScale);
-    const cyanSoft = Color(0xFFB2EBF2);
-    const cyanCore = Color(0xFFE0F7FA);
-    canvas.drawCircle(tip, 30 * tipScale, Paint()..color = cyanSoft.withValues(alpha: 0.38 * glow));
-    canvas.drawCircle(tip, 20 * tipScale, Paint()..color = cyanCore.withValues(alpha: 0.55 * glow));
-    canvas.drawCircle(tip, 11 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.96));
-    // Thin gold-lacquer rim — A-window palette, not neon green.
-    canvas.drawCircle(
+    // Canvas already rotated by [facing] — tip-up faces the card front edge.
+    // tip-45 stays available for stills / Watch stand-ins drawn without body rotate.
+    const tipName = 'tip-up';
+    final drewTip = softLockCues.draw(
+      canvas,
+      tipName,
       tip,
-      14 * tipScale,
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.42 * glow)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.6 * tipScale,
+      alpha: (0.82 + 0.18 * glow).clamp(0.0, 1.0),
+      scale: tipScale,
     );
-    canvas.drawLine(
-      Offset(c.dx, c.dy + 26 * tipScale),
-      Offset(c.dx, c.dy - 52 * tipScale),
-      Paint()
-        ..color = Color.lerp(color, cyanCore, 0.35)!.withValues(alpha: 0.92)
-        ..strokeWidth = 4.2 * tipScale
-        ..strokeCap = StrokeCap.round,
-    );
+    if (!drewTip) {
+      const cyanSoft = Color(0xFFB2EBF2);
+      const cyanCore = Color(0xFFE0F7FA);
+      canvas.drawCircle(tip, 30 * tipScale, Paint()..color = cyanSoft.withValues(alpha: 0.38 * glow));
+      canvas.drawCircle(tip, 20 * tipScale, Paint()..color = cyanCore.withValues(alpha: 0.55 * glow));
+      canvas.drawCircle(tip, 11 * tipScale, Paint()..color = Colors.white.withValues(alpha: 0.96));
+      canvas.drawCircle(
+        tip,
+        14 * tipScale,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.42 * glow)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6 * tipScale,
+      );
+      canvas.drawLine(
+        Offset(c.dx, c.dy + 26 * tipScale),
+        Offset(c.dx, c.dy - 52 * tipScale),
+        Paint()
+          ..color = Color.lerp(color, cyanCore, 0.35)!.withValues(alpha: 0.92)
+          ..strokeWidth = 4.2 * tipScale
+          ..strokeCap = StrokeCap.round,
+      );
+    }
     canvas.restore();
+  }
+
+  /// In-flight gold arrow after standing auto shot. Sprite when loaded; short gold dash fallback.
+  void _drawBowArrowFlight(Canvas canvas, int bowIndex) {
+    final target = _bowLockedTarget;
+    final from = tokenCenter(bowIndex);
+    final Offset to;
+    if (target != null && target >= 0 && target < fieldPos.length) {
+      to = tokenCenter(target);
+    } else {
+      final facing = isEnemyAt(bowIndex) ? enemyFacing : ownFacing;
+      to = from + Offset(math.sin(facing) * 72, -math.cos(facing) * 72);
+    }
+    final d = to - from;
+    if (d.distance < 4) return;
+    final dir = d / d.distance;
+    // Progress along the shot burst (fresh = near bow, fading = near target).
+    final life = (_bowAttackLeft / 0.40).clamp(0.0, 1.0);
+    final along = from + dir * (24 + (d.distance - 24) * (1.0 - life));
+    final angle = math.atan2(dir.dy, dir.dx);
+    final drew = softLockCues.draw(
+      canvas,
+      'bow-arrow',
+      along,
+      alpha: (0.55 + 0.45 * life).clamp(0.0, 1.0),
+      rotation: angle,
+    );
+    if (!drew) {
+      final tip = along + dir * 18;
+      canvas.drawLine(
+        along - dir * 10,
+        tip,
+        Paint()
+          ..color = const Color(0xFFFFAB40).withValues(alpha: 0.9 * life)
+          ..strokeWidth = 3.0
+          ..strokeCap = StrokeCap.round,
+      );
+    }
   }
 
   /// Bow stop vocabulary: 蓄勢暈 (ground) + arrow aim preview + reticle — NOT gold select ring.
@@ -3501,26 +3619,35 @@ class TaisenGame extends FlameGame {
     final glow = ready ? 1.0 : (0.5 + 0.5 * p);
     final amber = color;
     const cyan = Color(0xFF80DEEA);
-    // Ground 蓄勢暈 — wide oval seal under feet (distinct from card select rect).
-    final sealR = 28.0 + 22.0 * p;
-    for (var i = 0; i < 3; i++) {
-      final expand = i * 10.0 * (0.4 + 0.6 * p);
+    // Design bow-halo (蓄勢) when loaded; else procedural oval seal under feet.
+    final drewHalo = softLockCues.draw(
+      canvas,
+      'bow-halo',
+      Offset(c.dx, c.dy + 8),
+      alpha: (0.55 + 0.45 * glow).clamp(0.0, 1.0),
+      scale: 0.85 + 0.2 * p,
+    );
+    if (!drewHalo) {
+      final sealR = 28.0 + 22.0 * p;
+      for (var i = 0; i < 3; i++) {
+        final expand = i * 10.0 * (0.4 + 0.6 * p);
+        canvas.drawOval(
+          Rect.fromCenter(
+            center: Offset(c.dx, c.dy + 32),
+            width: (sealR + expand) * 2.4,
+            height: (sealR * 0.42 + expand * 0.35),
+          ),
+          Paint()
+            ..color = (i.isEven ? amber : cyan).withValues(alpha: (0.22 - i * 0.05) * glow)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = ready ? 2.8 : (2.0 - i * 0.3),
+        );
+      }
       canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(c.dx, c.dy + 32),
-          width: (sealR + expand) * 2.4,
-          height: (sealR * 0.42 + expand * 0.35),
-        ),
-        Paint()
-          ..color = (i.isEven ? amber : cyan).withValues(alpha: (0.22 - i * 0.05) * glow)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = ready ? 2.8 : (2.0 - i * 0.3),
+        Rect.fromCenter(center: Offset(c.dx, c.dy + 32), width: sealR * 2.1, height: sealR * 0.55),
+        Paint()..color = amber.withValues(alpha: 0.18 * glow),
       );
     }
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(c.dx, c.dy + 32), width: sealR * 2.1, height: sealR * 0.55),
-      Paint()..color = amber.withValues(alpha: 0.18 * glow),
-    );
     // Progress arc (not a fat gold card ring)
     const arcR = 34.0;
     final sweep = (math.pi * 1.6) * p;
@@ -3999,6 +4126,20 @@ class TaisenGame extends FlameGame {
       baseSec: kReviveBaseSec,
       skillMul: kReviveSkillMul,
     );
+  }
+
+  /// Soft Lock fly tip above skull / parked heal. Sprite when loaded; ink fallback.
+  void _drawLifeFlyTip(Canvas canvas, int i, Offset at) {
+    final tip = _lifeTipAt(i);
+    if (tip.isEmpty) return;
+    final life = _lifeAt(i);
+    if (life == UnitLife.retreating) {
+      if (softLockCues.draw(canvas, 'fly-fancheng', at + const Offset(28, 8))) return;
+    } else if (life == UnitLife.alive && tip == '返城回血') {
+      // Living 歸城 heal cue — Design optional 「歸城」.
+      if (softLockCues.draw(canvas, 'fly-guicheng', at + const Offset(28, 8))) return;
+    }
+    _drawText(canvas, tip, at, const Color(0xFFFFF59D), tip == '返城回血' ? 12 : 11);
   }
 
   String _lifeTipAt(int i) {

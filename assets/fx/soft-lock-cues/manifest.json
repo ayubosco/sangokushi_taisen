@@ -1,0 +1,393 @@
+{
+ "note": "槍迎擊 + 弓 + 歸城/撤退 cues, 2026-10-13 HKT. Soft Lock authenticity GATE. Zero Koei/Sega/英傑 pixels. Soft polish ×3 parked.",
+ "provenance": "gen/gen-spear-tip.jpg + gen/gen-bow-aim.jpg (our GenerateImage, key-black). Glyphs = Noto Serif CJK Bold. Reuse: clash-fx seal-geigeki/aura/spark/fan, retreat skull/Soft釘/ring/digits, ground-castle-watch field + tokens.",
+ "gate_ids": [
+  "CHG-01",
+  "CHG-02",
+  "CHG-03",
+  "SPR-01",
+  "SPR-03",
+  "BOW-01",
+  "BOW-02",
+  "RET-01",
+  "RET-03",
+  "VFX-01"
+ ],
+ "sprites": [
+  {
+   "name": "tip-up",
+   "blend": "add",
+   "note": "槍ぶすま always-on tip, facing front",
+   "size_pt": [
+    36,
+    52
+   ],
+   "anchor_pt": [
+    18.0,
+    44.199999999999996
+   ],
+   "size_1x_px": [
+    36,
+    52
+   ],
+   "size_2x_px": [
+    72,
+    104
+   ],
+   "size_3x_px": [
+    108,
+    156
+   ]
+  },
+  {
+   "name": "tip-45",
+   "blend": "add",
+   "note": "tip reoriented ~45° toward charge",
+   "size_pt": [
+    36,
+    52
+   ],
+   "anchor_pt": [
+    12.6,
+    39.0
+   ],
+   "size_1x_px": [
+    36,
+    52
+   ],
+   "size_2x_px": [
+    72,
+    104
+   ],
+   "size_3x_px": [
+    108,
+    156
+   ]
+  },
+  {
+   "name": "tip-scrape",
+   "blend": "add",
+   "note": "tip scrape slash on 迎撃 hit — ≠乱戦 mash",
+   "size_pt": [
+    72,
+    44
+   ],
+   "anchor_pt": [
+    36.0,
+    22.0
+   ],
+   "size_1x_px": [
+    72,
+    44
+   ],
+   "size_2x_px": [
+    144,
+    88
+   ],
+   "size_3x_px": [
+    216,
+    132
+   ]
+  },
+  {
+   "name": "bow-halo",
+   "blend": "normal",
+   "note": "蓄勢 ring while stopped",
+   "size_pt": [
+    72,
+    72
+   ],
+   "anchor_pt": [
+    36.0,
+    36.0
+   ],
+   "size_1x_px": [
+    72,
+    72
+   ],
+   "size_2x_px": [
+    144,
+    144
+   ],
+   "size_3x_px": [
+    216,
+    216
+   ]
+  },
+  {
+   "name": "bow-aim",
+   "blend": "normal",
+   "note": "dashed gold aim+chevron to auto-lock (or use aim_line_drawn)",
+   "size_pt": [
+    18,
+    120
+   ],
+   "anchor_pt": [
+    9.0,
+    120
+   ],
+   "size_1x_px": [
+    18,
+    120
+   ],
+   "size_2x_px": [
+    36,
+    240
+   ],
+   "size_3x_px": [
+    54,
+    360
+   ]
+  },
+  {
+   "name": "bow-aim-drawn",
+   "blend": "normal",
+   "note": "procedural dashed aim+chevron",
+   "size_pt": [
+    16,
+    110
+   ],
+   "anchor_pt": [
+    8,
+    110
+   ],
+   "size_1x_px": [
+    16,
+    110
+   ],
+   "size_2x_px": [
+    32,
+    220
+   ],
+   "size_3x_px": [
+    48,
+    330
+   ]
+  },
+  {
+   "name": "bow-arrow",
+   "blend": "normal",
+   "note": "solid gold arrow in flight",
+   "size_pt": [
+    64,
+    28
+   ],
+   "anchor_pt": [
+    9.6,
+    14.0
+   ],
+   "size_1x_px": [
+    64,
+    28
+   ],
+   "size_2x_px": [
+    128,
+    56
+   ],
+   "size_3x_px": [
+    192,
+    84
+   ]
+  },
+  {
+   "name": "fly-geigeki",
+   "blend": "normal",
+   "note": "「迎撃」飞字 ≤0.3C",
+   "size_pt": [
+    88,
+    44
+   ],
+   "anchor_pt": [
+    44.0,
+    22.0
+   ],
+   "size_1x_px": [
+    88,
+    44
+   ],
+   "size_2x_px": [
+    176,
+    88
+   ],
+   "size_3x_px": [
+    264,
+    132
+   ]
+  },
+  {
+   "name": "watch-tip",
+   "blend": "add",
+   "note": "Watch-strip tip glow mirror",
+   "size_pt": [
+    18,
+    24
+   ],
+   "anchor_pt": [
+    9.0,
+    12.0
+   ],
+   "size_1x_px": [
+    18,
+    24
+   ],
+   "size_2x_px": [
+    36,
+    48
+   ],
+   "size_3x_px": [
+    54,
+    72
+   ]
+  },
+  {
+   "name": "watch-bow",
+   "blend": "normal",
+   "note": "Watch-strip bow 蓄勢 mirror",
+   "size_pt": [
+    22,
+    22
+   ],
+   "anchor_pt": [
+    11,
+    11
+   ],
+   "size_1x_px": [
+    22,
+    22
+   ],
+   "size_2x_px": [
+    44,
+    44
+   ],
+   "size_3x_px": [
+    66,
+    66
+   ]
+  },
+  {
+   "name": "castle-glow",
+   "blend": "normal",
+   "note": "Own castle drop-target glow (歸城/返城)",
+   "size_pt": [
+    402,
+    66.67
+   ],
+   "anchor_pt": [
+    201,
+    33.33
+   ],
+   "size_1x_px": [
+    402,
+    67
+   ],
+   "size_2x_px": [
+    804,
+    133
+   ],
+   "size_3x_px": [
+    1206,
+    200
+   ]
+  },
+  {
+   "name": "fly-fancheng",
+   "blend": "normal",
+   "note": "「返城」 flash tip on waiting skull",
+   "size_pt": [
+    56,
+    28
+   ],
+   "anchor_pt": [
+    28,
+    14
+   ],
+   "size_1x_px": [
+    56,
+    33
+   ],
+   "size_2x_px": [
+    112,
+    64
+   ],
+   "size_3x_px": [
+    168,
+    95
+   ]
+  },
+  {
+   "name": "fly-guicheng",
+   "blend": "normal",
+   "note": "optional 「歸城」 tip on living select near castle",
+   "size_pt": [
+    56,
+    28
+   ],
+   "anchor_pt": [
+    28,
+    14
+   ],
+   "size_1x_px": [
+    56,
+    33
+   ],
+   "size_2x_px": [
+    112,
+    65
+   ],
+   "size_3x_px": [
+    168,
+    95
+   ]
+  },
+  {
+   "name": "fly-fancheng",
+   "size_pt": [
+    56,
+    33
+   ],
+   "anchor_pt": [
+    28.0,
+    16.5
+   ],
+   "blend": "normal",
+   "note": "fly tip label",
+   "size_1x_px": [
+    56,
+    33
+   ],
+   "size_2x_px": [
+    112,
+    64
+   ],
+   "size_3x_px": [
+    168,
+    95
+   ]
+  },
+  {
+   "name": "fly-guicheng",
+   "size_pt": [
+    56,
+    33
+   ],
+   "anchor_pt": [
+    28.0,
+    16.5
+   ],
+   "blend": "normal",
+   "note": "fly tip label",
+   "size_1x_px": [
+    56,
+    33
+   ],
+   "size_2x_px": [
+    112,
+    65
+   ],
+   "size_3x_px": [
+    168,
+    95
+   ]
+  }
+ ]
+}

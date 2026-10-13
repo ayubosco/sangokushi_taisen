@@ -65,6 +65,7 @@ flutter:
     - assets/icons/cost6-weapon-icons-v2.png
     - assets/portraits/
     - assets/fx/
+    - assets/fx/soft-lock-cues/
     - assets/ui/token-weapons-sheet.png
     - assets/ui/token-cards-34-moodboard.png
     - assets/ui/token-card-spear-34.png
