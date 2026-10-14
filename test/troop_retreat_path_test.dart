@@ -141,7 +141,7 @@ void main() {
     expect(g.debugUnitLife(1), UnitLife.alive);
   });
 
-  test('siege 亂戰 barely chips the enemy; castle-band contact still hurts the siege', () {
+  test('siege 亂戰 barely chips the enemy; own-castle band is not an instant chip', () {
     final scramble = readyGame();
     final at = Offset(scramble.size.x * 0.42, scramble.watchH + scramble.fieldH * 0.42);
     expect(scramble.inCastleBand(at), isFalse);
@@ -164,10 +164,13 @@ void main() {
     _addEnemy(castle, enemyAt);
     expect(castle.inCastleBand(siegeAt), isTrue);
     expect(castle.inCastleBand(enemyAt), isTrue);
+    expect(castle.inEnemyCastleZone(0), isFalse);
     expect(castle.inMeleeContact(siegeAt, enemyAt), isFalse);
     castle.debugStepPursuit(1);
-    expect(castle.debugCastleChipAt(0), isTrue);
-    expect(castle.debugUnitHp(0), closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.05));
+    expect(castle.debugSiegePrepVisible(0), isFalse);
+    expect(castle.debugSiegePrep01(0), 0);
+    expect(castle.debugUnitHp(0), TaisenGame.kRansenMaxHp);
+    expect(castle.debugRetreatCause(0), isEmpty);
     expect(castle.debugUnitHp(1), TaisenGame.kRansenMaxHp);
     expect(castle.debugInRansen(0), isFalse);
   });

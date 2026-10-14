@@ -9,7 +9,8 @@ import 'unit_life.dart';
 /// Free-match sequence for the five playtest retreat paths. Never sets
 /// shotPassMode, DEMO_SHOT, or FEEL_SHOT. Cloud does not run this on a device.
 /// Damage numbers stay the existing stubs. The skull keeps the source word
-/// (突撃 / 迎擊 / 射 / 亂戰 / 城傷) after the 「撤退」 splash.
+/// (突撃 / 迎擊 / 射 / 亂戰) after the 「撤退」 splash.
+/// Siege is a prep gauge, not a retreat cause.
 ///
 /// When Air is back:
 /// flutter run --dart-define=TROOP_RETREAT_VISUAL_VERIFY=true -d <udid>
@@ -21,7 +22,8 @@ import 'unit_life.dart';
 ///    (open 1.1 cav does not). The live fly stays「迎擊」until the scrape ends.
 /// 4. BOW  stopped shots reach 撤退 cause 射; march and 亂戰 fire nothing; low HP same power
 /// 5. INF  overlap tick only, cause 亂戰, never 突撃
-/// 6. SIEGE 亂戰 chip is the low stub; castle band shows 城傷 and can retreat the siege
+/// 6. SIEGE 亂戰 chip is the low stub; enemy-castle zone shows a prep gauge and
+///    does not retreat the siege
 const bool kTroopRetreatVisualVerify = bool.fromEnvironment(
   'TROOP_RETREAT_VISUAL_VERIFY',
   defaultValue: false,
@@ -122,11 +124,11 @@ class TroopRetreatVisualShot {
         return dropped > 0 &&
             dropped < TaisenGame.kRansenTickPerSec * 0.5 &&
             chipAlive &&
-            cause == '城傷' &&
-            (ownLife == UnitLife.retreating || ownLife == UnitLife.inCastleReviving) &&
-            ownHp == 0 &&
+            cause.isEmpty &&
+            ownLife == UnitLife.alive &&
+            ownHp == TaisenGame.kRansenMaxHp &&
             enemyHp == TaisenGame.kRansenMaxHp &&
-            label == '撤退';
+            label != '城傷';
       default:
         return false;
     }
@@ -261,26 +263,18 @@ class TroopRetreatVisualVerify {
     await _advance(1);
     final scrambleDealt = before - game.debugUnitHp(1);
 
-    final band = game.castleBandRect;
-    final siegeAt = Offset(
-      band.left + 64,
-      band.top + band.height * TaisenGame.kCastleEnterDepth,
-    );
-    final enemyAt = Offset(band.right - 64, siegeAt.dy);
-    await _place('chenlan', siegeAt, enemyAt);
-    var chipAlive = false;
-    for (var i = 0; i < 5; i++) {
-      await step();
-      if (game.debugCastleChipAt(0) && game.debugUnitLife(0) == UnitLife.alive) {
-        chipAlive = true;
-        break;
-      }
-    }
-    game.debugSetUnitHp(0, 0.05);
+    final zone = game.enemyCastleZoneRect;
+    final siegeAt = Offset(zone.center.dx, zone.top + zone.height * 0.45);
+    await _place('chenlan', siegeAt, at);
     await step();
+    final chipAlive = game.debugSiegePrepVisible(0) &&
+        game.debugSiegePrep01(0) > 0 &&
+        game.debugUnitLife(0) == UnitLife.alive &&
+        game.debugRetreatCause(0).isEmpty &&
+        game.debugUnitHp(0) == TaisenGame.kRansenMaxHp;
     await _emit(
       id: 'SIEGE',
-      caption: 'SIEGE 城傷',
+      caption: 'SIEGE 準備',
       causeIndex: 0,
       dropped: scrambleDealt,
       chipAlive: chipAlive,

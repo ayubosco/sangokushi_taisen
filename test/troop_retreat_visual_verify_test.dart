@@ -67,8 +67,9 @@ void main() {
     final siege = shots[5];
     expect(siege.dropped, lessThan(TaisenGame.kRansenTickPerSec * 0.5));
     expect(siege.chipAlive, isTrue);
-    expect(siege.cause, '城傷');
-    expect(siege.ownLife, UnitLife.inCastleReviving);
+    expect(siege.cause, isEmpty);
+    expect(siege.ownLife, UnitLife.alive);
+    expect(siege.ownHp, TaisenGame.kRansenMaxHp);
     expect(siege.enemyHp, TaisenGame.kRansenMaxHp);
     expect(g.tutorial, isNull);
   });
