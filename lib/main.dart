@@ -806,17 +806,19 @@ class _TutorialShellState extends State<TutorialShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Column(
+      backgroundColor: FactionColors.lacquer,
+      body: SoftPassPlayFrame(
+        hud: _Hud(
+          game: _game,
+          subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
+          bingfaLabel: widget.bingfaLabel,
+        ),
+        onStrategy: () {
+          _game.triggerStrategyFx();
+          setState(() {});
+        },
+        field: Stack(
           children: [
-            _Hud(
-              game: _game,
-              subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
-              bingfaLabel: widget.bingfaLabel,
-            ),
-            Expanded(
-              child: Stack(
-                children: [
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTapUp: (d) {
@@ -887,15 +889,6 @@ class _TutorialShellState extends State<TutorialShell> {
                       child: ColoredBox(color: Colors.black54),
                     ),
                 ],
-              ),
-            ),
-            _BottomBar(
-              onStrategy: () {
-                _game.triggerStrategyFx();
-                setState(() {});
-              },
-            ),
-          ],
         ),
       ),
     );
@@ -1296,12 +1289,15 @@ class _MatchShellState extends State<MatchShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _Hud(game: _game, subtitle: 'Cost6', bingfaLabel: widget.bingfaLabel),
-            Expanded(
-              child: GestureDetector(
+      backgroundColor: FactionColors.lacquer,
+      body: SoftPassPlayFrame(
+        hud: _Hud(game: _game, subtitle: 'Cost6', bingfaLabel: widget.bingfaLabel),
+        onStrategy: () {
+          _game.triggerStrategyFx();
+          // Cosmetic: using 計略 does not consume 兵法; stub only.
+          setState(() {});
+        },
+        field: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapUp: (d) {
                   _game.selectOrDetailAt(d.localPosition);
@@ -1327,16 +1323,6 @@ class _MatchShellState extends State<MatchShell> {
                   key: _shotKey,
                   child: GameWidget(game: _game),
                 ),
-              ),
-            ),
-            _BottomBar(
-              onStrategy: () {
-                _game.triggerStrategyFx();
-                // Cosmetic: using 計略 does not consume 兵法; stub only.
-                setState(() {});
-              },
-            ),
-          ],
         ),
       ),
     );
@@ -1431,46 +1417,106 @@ class _Hud extends StatelessWidget {
   }
 }
 
-/// Field chrome buttons: Design lock keeps ONLY「計略」(morale).
-/// Select card = tap token; 兵法 = once at match start; 歸城/出陣 = drag castle band (no buttons).
-/// Charge/intercept = auto from drag/collide — never floating「突撃」/「迎擊」.
-class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.onStrategy});
+/// Soft Pass play column. The lacquer 計略 seal is 64×64 at (350, 814) on a
+/// 402×874 frame. It is not a gold pill, and it is the only combat seal.
+class SoftPassPlayFrame extends StatelessWidget {
+  const SoftPassPlayFrame({
+    super.key,
+    required this.hud,
+    required this.field,
+    required this.onStrategy,
+  });
 
+  final Widget hud;
+  final Widget field;
   final VoidCallback onStrategy;
 
   @override
   Widget build(BuildContext context) {
-    // 12mm at Material density is about 64dp. 48dp is under that.
-    const stratH = 64.0;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final sx = constraints.maxWidth / TaisenGame.kSoftPassFrameW;
+        final sy = constraints.maxHeight / TaisenGame.kSoftPassFrameH;
+        final scale = sx < sy ? sx : sy;
+        final seal = TaisenGame.kStrategySealPt * scale;
+        final sealLeft = TaisenGame.kStrategySealCenter.dx * sx - seal / 2;
+        final sealTop = TaisenGame.kStrategySealCenter.dy * sy - seal / 2;
+        final footerH = (TaisenGame.kSoftPassFrameH -
+                (TaisenGame.kStrategySealCenter.dy - TaisenGame.kStrategySealPt / 2)) *
+            sy;
+        final topInset = MediaQuery.paddingOf(context).top;
+        return Stack(
+          children: [
+            Column(
+              children: [
+                Padding(
+                  padding: EdgeInsets.only(top: topInset),
+                  child: hud,
+                ),
+                Expanded(child: field),
+                SizedBox(
+                  height: footerH,
+                  child: const ColoredBox(
+                    color: FactionColors.lacquer,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: EdgeInsets.only(left: 12),
+                        child: Text(
+                          'Cost 6',
+                          style: TextStyle(
+                            color: FactionColors.gold,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Positioned(
+              left: sealLeft,
+              top: sealTop,
+              width: seal,
+              height: seal,
+              child: _LacquerStrategySeal(onTap: onStrategy),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Lacquer square seal. Gold hairline, ink「計略」. Not an ElevatedButton pill.
+class _LacquerStrategySeal extends StatelessWidget {
+  const _LacquerStrategySeal({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: const Key('soft-pass-strategy-seal'),
       color: FactionColors.lacquer,
-      child: Row(
-        children: [
-          const Text(
-            'Cost 6',
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(4),
+        side: const BorderSide(color: FactionColors.gold, width: 2),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: const Center(
+          child: Text(
+            '計略',
             style: TextStyle(
               color: FactionColors.gold,
               fontWeight: FontWeight.w800,
-              fontSize: 16,
+              fontSize: 18,
             ),
           ),
-          const Spacer(),
-          SizedBox(
-            width: stratH * 1.6,
-            height: stratH,
-            child: ElevatedButton(
-              onPressed: onStrategy,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: FactionColors.gold,
-                foregroundColor: FactionColors.lacquer,
-                minimumSize: const Size(stratH * 1.6, stratH),
-              ),
-              child: const Text('計略', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

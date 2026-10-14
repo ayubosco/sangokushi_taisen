@@ -77,10 +77,10 @@ void main() {
         game.dragging = false;
         game.dragTo = null;
         game.selectedIndex = null;
-        expect(game.watchH / game.size.y, closeTo(0.16, 0.001));
+        expect(game.watchH / game.size.y, closeTo(0.125, 0.001));
         expect(game.fieldH / game.size.y, closeTo(0.875, 0.001));
-        expect(game.tokenCardSize.width / game.size.x, closeTo(0.085, 0.001));
-        expect(TaisenGame.kSoftPinPathPx, 300);
+        expect(game.tokenCardSize.width / game.size.x, closeTo(0.097, 0.001));
+        expect(TaisenGame.kSoftPinPathPx, 261);
         await shoot('pr9-h0-e09bd07-fullscreen-idle.png');
 
         final start = Offset(game.size.x * 0.42, game.watchH + game.fieldH * 0.78);
@@ -172,33 +172,8 @@ void _paintHud(Canvas canvas, double width, double height, ui.Image? title, int 
 void _paintBottom(Canvas canvas, Rect bar) {
   canvas.drawRect(bar, Paint()..color = FactionColors.lacquer);
   _label(canvas, 'Cost 6', Offset(bar.left + 12, bar.top + 26), FactionColors.gold, 16, FontWeight.w800);
-  const button = Size(102.4, 64);
-  final buttonRect = Rect.fromLTWH(
-    bar.right - 12 - button.width,
-    bar.top + 6,
-    button.width,
-    button.height,
-  );
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(buttonRect, const Radius.circular(4)),
-    Paint()..color = FactionColors.gold,
-  );
-  final tp = TextPainter(
-    text: const TextSpan(
-      text: '計略',
-      style: TextStyle(
-        color: FactionColors.lacquer,
-        fontSize: 18,
-        fontWeight: FontWeight.w800,
-        fontFamily: TaisenGame.kInkFontFamily,
-      ),
-    ),
-    textDirection: TextDirection.ltr,
-  )..layout();
-  tp.paint(
-    canvas,
-    buttonRect.center - Offset(tp.width / 2, tp.height / 2),
-  );
+  // Lacquer seal is painted in screen space by the overnight stills.
+  // This footer only keeps the Cost label; the seal is not a gold pill.
 }
 
 void _label(Canvas canvas, String text, Offset at, Color color, double size, FontWeight weight) {
