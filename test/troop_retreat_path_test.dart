@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
 import 'package:sangokushi_taisen/game/c_clock.dart';
@@ -37,21 +39,33 @@ void main() {
     expect(g.debugInRansen(1), isTrue);
   });
 
-  test('spear tip is not body 亂戰 and a cavalry on the tip retreats', () {
-    final g = readyGame();
-    final at = Offset(g.size.x * 0.45, g.watchH + g.fieldH * 0.55);
-    _placeOwn(g, at, TroopType.spear);
-    final tip = g.spearTipAt(0);
-    _addEnemy(g, tip);
-    expect(g.inMeleeContact(g.tokenCenter(0), g.tokenCenter(1)), isFalse);
-    expect((g.spearTipAt(0) - g.tokenCenter(1)).distance, lessThan(TaisenGame.kSpearTipHitR));
+  test('spear tip is not body 亂戰; 迎撃 needs aura or speed and arms tip-scrape', () {
+    final idle = readyGame();
+    final at = Offset(idle.size.x * 0.45, idle.watchH + idle.fieldH * 0.55);
+    _placeOwn(idle, at, TroopType.spear);
+    final tip = idle.spearTipAt(0);
+    _addEnemy(idle, tip);
+    expect(idle.inMeleeContact(idle.tokenCenter(0), idle.tokenCenter(1)), isFalse);
+    expect((idle.spearTipAt(0) - idle.tokenCenter(1)).distance, lessThan(TaisenGame.kSpearTipHitR));
+    idle.enemyFacing = math.pi;
+    idle.debugStepPursuit(1 / 60);
+    expect(idle.debugInRansen(0), isFalse);
+    expect(idle.debugHitLabel, isNot('迎擊'));
+    expect(idle.debugTipScrapeArmed, isFalse);
+    expect(idle.debugUnitHp(1), TaisenGame.kRansenMaxHp);
 
+    final g = readyGame();
+    _placeOwn(g, at, TroopType.spear);
+    _addEnemy(g, g.spearTipAt(0));
+    g.enemyFacing = math.pi;
+    g.debugArmEnemyChargeAura();
+    expect(g.inMeleeContact(g.tokenCenter(0), g.tokenCenter(1)), isFalse);
     g.debugStepPursuit(1 / 60);
     expect(g.debugInRansen(0), isFalse);
     expect(g.debugInRansen(1), isFalse);
-    expect(g.debugHitLabel, '撤退');
+    expect(g.debugHitLabel, '迎擊');
+    expect(g.debugTipScrapeArmed, isTrue);
     expect(g.debugRetreatCause(1), '迎擊');
-    expect(g.debugUnitHp(1), 0);
     expect(g.debugUnitLife(1), UnitLife.retreating);
     expect(g.debugUnitLife(0), UnitLife.alive);
 
@@ -74,19 +88,25 @@ void main() {
     expect(g.inMeleeContact(g.tokenCenter(0), g.tokenCenter(1)), isFalse);
 
     g.selectOrDetailAt(at);
-    g.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
+    // Mid 蓄勢: standing auto has not loosed yet.
+    g.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC * 0.5);
     expect(g.debugBowWinding, isTrue);
-    g.selectOrDetailAt(at);
+    expect(g.debugHitLabel, isNot('射'));
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    g.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC * 0.5 + 0.05);
     final firstDrop = TaisenGame.kRansenMaxHp - g.debugUnitHp(1);
     expect(g.debugHitLabel, '射');
+    expect(g.debugBowWinding, isFalse);
     expect(firstDrop, closeTo(TaisenGame.kBowShotBurstSec * TaisenGame.kRansenTickPerSec, 0.001));
 
     g.debugSetUnitHp(1, TaisenGame.kRansenMaxHp);
     g.debugSetUnitHp(0, 8);
-    g.selectOrDetailAt(at);
-    g.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
-    g.selectOrDetailAt(at);
+    // Repeat cooldown, then another full standing shot. Low HP does not weaken it.
+    g.debugStepPursuit(
+      TaisenGame.kBowAimRepeatSec + CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05,
+    );
     final secondDrop = TaisenGame.kRansenMaxHp - g.debugUnitHp(1);
+    expect(g.debugHitLabel, '射');
     expect(secondDrop, closeTo(firstDrop, 0.001));
     expect(g.debugUnitHp(0), 8);
 
@@ -95,8 +115,11 @@ void main() {
     _placeOwn(moving, from, TroopType.bow);
     _addEnemy(moving, from + const Offset(180, 0));
     moving.selectOrDetailAt(from);
-    moving.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
     moving.panStart(from);
+    // Finger down through a full windup window: 走射 stays off.
+    moving.debugStepPursuit(CClock.secondsPerC * FxWindows.bowStopBeforeShotC + 0.05);
+    expect(moving.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(moving.debugBowWinding, isFalse);
     // Enemy sits on +x. A downward march is outside the aim cone, so no arrow.
     moving.panEnd(from + const Offset(0, 140));
     moving.selectOrDetailAt(from);

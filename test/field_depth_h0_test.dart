@@ -15,22 +15,21 @@ void main() {
     return g;
   }
 
-  test('H0 A Soft Lock: watch 0.16, field 0.84, token 0.085, castle 0.12', () {
+  test('H0 Soft Pass: watch 0.125, field 0.875, token 0.097, castle 0.12', () {
     final g = sized();
-    expect(TaisenGame.kWatchFractionOfGame, closeTo(0.16, 0.0001));
-    expect(g.watchH / g.size.y, closeTo(0.16, 0.0001));
-    expect(g.fieldH / g.size.y, closeTo(0.84, 0.0001));
-    expect(TaisenGame.kTokenWidthFracOfField, 0.085);
-    expect(g.tokenCardSize.width / g.size.x, closeTo(0.085, 0.0001));
+    expect(TaisenGame.kWatchFractionOfGame, closeTo(0.125, 0.0001));
+    expect(g.watchH / g.size.y, closeTo(0.125, 0.0001));
+    expect(g.fieldH / g.size.y, closeTo(0.875, 0.0001));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.097, 0.0001));
+    expect(g.tokenCardSize.width / g.size.x, closeTo(0.097, 0.0001));
     expect(TaisenGame.kCastleBandFracOfField, 0.12);
     expect(g.castleBandH / g.fieldH, closeTo(0.12, 0.0001));
     expect(TaisenGame.kCastleBandFracOfField, lessThanOrEqualTo(0.132));
   });
 
-  test('Soft釘 path is 1.25× the prior 240px and lands in the lower 70%', () {
-    expect(TaisenGame.kSoftPinPathScale, closeTo(1.25, 0.001));
-    expect(TaisenGame.kSoftPinPathPx, closeTo(TaisenGame.kPriorSoftPinPathPx * 1.25, 0.01));
-    expect(TaisenGame.kSoftPinPathPx, closeTo(300, 0.01));
+  test('Soft釘 path is the Soft Pass ≈261px and lands in the lower 70%', () {
+    expect(TaisenGame.kSoftPinPathPx, closeTo(261, 0.01));
+    expect(TaisenGame.kSoftPinPathPx, greaterThan(TaisenGame.kPriorSoftPinPathPx));
 
     final g = sized();
     final start = Offset(g.size.x * 0.50, g.watchH + g.fieldH * 0.78);

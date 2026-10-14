@@ -79,7 +79,9 @@ class TaisenGame extends FlameGame {
   double _dragTravelDist = 0;
   /// Last move dir while dragging — sharp turn fades aura like stop.
   Offset? _lastDragDir;
-  static const double kChargeTravelNeed = 120.0; // px of walked travel to fill charge aura
+  /// Walked px that fills the charge aura. CHG-10 exact px is Unverified —
+  /// leave this knob; do not retune it overnight.
+  static const double kChargeTravelNeed = 120.0;
   /// Travel fraction that counts as "蓄緊 / charging" (gold guide + percent — ZERO cyan).
   /// Rings do NOT use this; cyan exists only while [auraActive].
   static const double kChargeRingShowTravel01 = 0.04;
@@ -284,6 +286,12 @@ class TaisenGame extends FlameGame {
   int? _hitFlashIndex;
   double _hitFlashLeft = 0;
   String _hitFlashLabel = '';
+  /// Armed only by a resolved 迎撃. Drawn even if a later splash takes the fly slot.
+  double _tipScrapeLeft = 0;
+  Offset? _tipScrapeAt;
+  /// Victim whose 「撤退」splash waits until the single「迎撃」window ends.
+  int? _retreatSplashAfterGeigeki;
+  bool get debugTipScrapeArmed => _tipScrapeLeft > 0 && _tipScrapeAt != null;
 
   /// 歸城 flash
   double _returnFlashLeft = 0;
@@ -351,11 +359,11 @@ class TaisenGame extends FlameGame {
     return frame.image;
   }
 
-  /// H0 A: Watch fraction of [GameWidget] height. Midpoint of the 0.12–0.13 gate
-  /// so the draggable field is 0.875 (≥0.87). HUD (~36px) + 計略 bar (~62px)
-  /// sit outside this widget. Ortho bird’s-eye only — no perspective field.
-  /// Soft Lock Feel: enlarge live monitor (Design 15–18% screen → ~0.16 of game band).
-  static const double kWatchFractionOfGame = 0.16;
+  /// H0 Soft Pass: Watch is 0.125 of the game band, so the field is 0.875.
+  /// HUD and the lacquer 計略 seal sit outside this widget.
+  /// Ortho field only — perspective stays in the Watch.
+  /// 14c15fe had enlarged the monitor to 0.16; Gate P1 restores 0.125.
+  static const double kWatchFractionOfGame = 0.125;
 
   /// Clear edge-to-edge gap between cards in a rank, in token-widths.
   static const double kMinLaneGapMulOfToken = 1.3;
@@ -370,10 +378,26 @@ class TaisenGame extends FlameGame {
   /// Soft 釘 primary zone starts here (lower ~70% of the field). Not the Watch.
   static const double kSoftPinPrimaryTopFrac = 0.30;
 
-  /// Prior Soft Lock tip→pin, then Design’s +25% world-travel path.
+  /// Prior Soft Lock tip→pin floor. Soft Pass measured path is [kSoftPinPathPx].
   static const double kPriorSoftPinPathPx = 240.0;
-  static const double kSoftPinPathScale = 1.25;
-  static const double kSoftPinPathPx = kPriorSoftPinPathPx * kSoftPinPathScale;
+  /// Soft Pass tip→pin. Not the 14c15fe 300px (240×1.25) Feel path.
+  static const double kSoftPinPathPx = 261.0;
+
+  /// iPhone 17 logical frame the Soft Pass HUD signoff was measured on.
+  static const double kSoftPassFrameW = 402;
+  static const double kSoftPassFrameH = 874;
+  /// Lacquer 計略 seal. Center (350, 814) → box (318, 782)–(382, 846).
+  static const double kStrategySealPt = 64;
+  static const Offset kStrategySealCenter = Offset(350, 814);
+  /// Watch-strip stamp and banner. Signoff y sits inside Watch bottom 160.667.
+  static const Offset kStrategyStampScreen = Offset(273, 130.33);
+  static const Offset kStrategyBannerScreen = Offset(201, 130.33);
+  static const Size kStrategyBannerPt = Size(200, 48);
+  static const double kWatchBottomScreen = 160.667;
+  /// Timer medallion top, under the Watch. Banner must not overlap it.
+  static const double kGaugeY = 188.667;
+  static const double kGaugeX = 201;
+  static const double kGaugePt = 56;
 
   /// JL3 parchment grain. Mid field does not paint decorative placement ovals.
   static const bool kMidPlacementOvals = false;
@@ -408,8 +432,8 @@ class TaisenGame extends FlameGame {
   static const double kCastleExitDepth = 0.40;
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
-  /// Soft Lock Feel: shrink cards + field density (was 0.10; Bosco still too big).
-  static const double kTokenWidthFracOfField = 0.085;
+  /// Soft Pass Size. 5:8, own＝enemy, hit stays ≥12mm. Not the 0.085 Feel shrink.
+  static const double kTokenWidthFracOfField = 0.097;
 
   /// JL3 card table, redrawn. Aged paper, ink camps, red near-edge. Not a photo and not a gold grid.
   static const Color kDesktopParchment = Color(0xFFC4A882);
@@ -577,7 +601,7 @@ class TaisenGame extends FlameGame {
   }
 
   /// Ash 5:8 weapon ghosts strictly between [from] and [to]. Endpoints stay the
-  /// body ghost and the 落點釘. A +25% path (300px) gets several stamps.
+  /// body ghost and the 落點釘. The Soft Pass path (≈261px) gets several stamps.
   List<Offset> ashWeaponGhostTrailPoints(Offset from, Offset to, {required double cardH}) {
     final delta = to - from;
     final len = delta.distance;
@@ -675,8 +699,8 @@ class TaisenGame extends FlameGame {
     if (_lastDragDir != null) {
       final dot = (_lastDragDir!.dx * dir.dx + _lastDragDir!.dy * dir.dy).clamp(-1.0, 1.0);
       final ang = math.acos(dot);
-      // ~70° still drops the meter after finger-up. A finger-down cavalry
-      // retarget keeps the 突撃 wave even when the 落點釘 overlaps the body.
+      // ~70° (Footage Unverified — do not retune) drops the meter after finger-up.
+      // A finger-down cavalry retarget keeps the 突撃 wave even when the 落點釘 overlaps the body.
       if (ang > 1.22 && !_keepChargeWhileDragging()) {
         _dragTravelDist = 0;
         if (coach != null && coach.session == TutorialSession.session1) {
@@ -861,6 +885,9 @@ class TaisenGame extends FlameGame {
     _hitFlashIndex = null;
     _hitFlashLeft = 0;
     _hitFlashLabel = '';
+    _tipScrapeLeft = 0;
+    _tipScrapeAt = null;
+    _retreatSplashAfterGeigeki = null;
     _matchEnemyChargeIndex = null;
     _matchEnemyChargeC = 0;
     _matchTurnWindowOpen = false;
@@ -897,12 +924,40 @@ class TaisenGame extends FlameGame {
 
   /// Flash timer only, so tests can show 突撃 ending while overlap continues.
   void debugDecayCombatFx(double dt) {
+    _decayHitFlash(dt);
+    _decayTipScrape(dt);
+  }
+
+  void _decayHitFlash(double dt) {
     if (_hitFlashLeft <= 0) return;
     _hitFlashLeft -= dt;
     if (_hitFlashLeft <= 0) {
       _hitFlashLeft = 0;
       _hitFlashIndex = null;
       _hitFlashLabel = '';
+    }
+  }
+
+  void _decayTipScrape(double dt) {
+    if (_tipScrapeLeft <= 0) return;
+    _tipScrapeLeft -= dt;
+    if (_tipScrapeLeft > 0) return;
+    _tipScrapeLeft = 0;
+    _tipScrapeAt = null;
+    final pending = _retreatSplashAfterGeigeki;
+    _retreatSplashAfterGeigeki = null;
+    if (pending != null && _lifeAt(pending) == UnitLife.retreating) {
+      flashHit(pending, '撤退');
+    }
+  }
+
+  /// Test hook: light the enemy cavalry 突撃オーラ without inventing travel px.
+  void debugArmEnemyChargeAura() {
+    for (var i = 0; i < field.length; i++) {
+      if (!isEnemyAt(i) || field[i].troop != TroopType.cavalry) continue;
+      _matchEnemyChargeIndex = i;
+      _matchEnemyChargeC = 1.0;
+      return;
     }
   }
 
@@ -1548,13 +1603,9 @@ class TaisenGame extends FlameGame {
         _stratAt = null;
       }
     }
-    if (_hitFlashLeft > 0 && !holdFx) {
-      _hitFlashLeft -= dt;
-      if (_hitFlashLeft <= 0) {
-        _hitFlashLeft = 0;
-        _hitFlashIndex = null;
-        _hitFlashLabel = '';
-      }
+    if (!holdFx) {
+      _decayHitFlash(dt);
+      _decayTipScrape(dt);
     }
     if (_returnFlashLeft > 0 && !holdFx && !holdReturnFlash) {
       _returnFlashLeft -= dt;
@@ -1678,6 +1729,7 @@ class TaisenGame extends FlameGame {
 
     // Mid divider: thicker dual castle bars + 99C zone edge.
     _drawCastleRaceBars(canvas, w, fieldTop);
+    _drawGaugeMedallion(canvas);
 
     // Flat ortho table (H0 ≥55%). Parchment map + 敵陣／自陣. Not the black + gold vacuum.
     final fieldRect = Rect.fromLTWH(0, fieldTop, w, h - wh);
@@ -1967,13 +2019,10 @@ class TaisenGame extends FlameGame {
         final isRetreatSplash = _hitFlashLabel == '撤退';
         final isGeigeki = _hitFlashLabel == '迎擊';
         final flyAt = Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78));
-        // Soft note: single fat 「迎撃」 — sprite OR canvas text, never stamp+fly stack.
+        // Single fat 「迎撃」 — sprite OR canvas text, never stamp+fly stack.
+        // tip-scrape is drawn once from the resolve timer, not again here.
         var drewGeigekiFly = false;
         if (isGeigeki) {
-          final tipIdx = _hitFlashIndex!;
-          if (tipIdx < field.length && field[tipIdx].troop == TroopType.spear) {
-            softLockCues.draw(canvas, 'tip-scrape', spearTipAt(tipIdx), alpha: (_hitFlashLeft / 0.9).clamp(0.35, 1.0));
-          }
           drewGeigekiFly = softLockCues.draw(canvas, 'fly-geigeki', flyAt);
         }
         if (!drewGeigekiFly) {
@@ -2020,10 +2069,19 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    if (_stratLeft > 0 && _stratAt != null) {
+    if (_tipScrapeLeft > 0 && _tipScrapeAt != null) {
+      softLockCues.draw(
+        canvas,
+        'tip-scrape',
+        _tipScrapeAt!,
+        alpha: (_tipScrapeLeft / math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC))).clamp(0.35, 1.0),
+      );
+    }
+
+    if (_stratLeft > 0) {
       canvas.save();
-      canvas.clipRect(Rect.fromLTWH(0, fieldTop, w, h - fieldTop));
-      _drawStratagemBurst(canvas, _stratAt!, _stratLeft / FxWindows.toSeconds(FxWindows.strategyFxMaxC));
+      canvas.clipRect(_watchFxClip());
+      _drawStrategyWatchStrip(canvas, _stratLeft / FxWindows.toSeconds(FxWindows.strategyFxMaxC));
       canvas.restore();
     }
 
@@ -2287,6 +2345,8 @@ class TaisenGame extends FlameGame {
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
   void _drawWatchFullField(Canvas canvas, Rect band) {
+    canvas.save();
+    canvas.clipRect(band);
     final t = tutorial;
     _drawWatchPerspectiveLane(canvas, band);
 
@@ -2306,15 +2366,11 @@ class TaisenGame extends FlameGame {
     final ownScale = (1.0 - 0.28 * watchDepth01(ownField)).clamp(0.68, 1.0);
     final enemyScale = (0.82 - 0.22 * watchDepth01(enemyField)).clamp(0.55, 0.82);
 
-    var kind = watchKind;
-    if (t != null) {
-      if (t.session == TutorialSession.session1) {
-        kind = AWindowKind.charge;
-      } else if (t.session == TutorialSession.session2) {
-        kind = AWindowKind.intercept;
-      }
-    }
+    // Live field state wins over the demo-cycle poster.
+    final kind = _liveWatchKind(ownSafe);
 
+    canvas.save();
+    canvas.clipRect(_watchFxClip());
     switch (kind) {
       case AWindowKind.charge:
         final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
@@ -2427,7 +2483,20 @@ class TaisenGame extends FlameGame {
           scale: ownScale * 1.35,
         );
       }
+      final lifeTip = _lifeTipAt(ownSafe);
+      if (lifeTip == '返城') {
+        final at = ownC + Offset(0, -16 * ownScale);
+        if (!softLockCues.draw(canvas, 'fly-fancheng', at, scale: ownScale.clamp(0.55, 1.0))) {
+          _drawText(canvas, '返城', at, const Color(0xFFFFF59D), 11);
+        }
+      } else if (lifeTip == '返城回血') {
+        final at = ownC + Offset(0, -16 * ownScale);
+        if (!softLockCues.draw(canvas, 'fly-guicheng', at, scale: ownScale.clamp(0.55, 1.0))) {
+          _drawText(canvas, '歸城', at, const Color(0xFFFFF59D), 11);
+        }
+      }
     }
+    canvas.restore();
 
     Color ownFill = FactionColors.shu;
     Color enemyFill = FactionColors.wei;
@@ -2467,6 +2536,27 @@ class TaisenGame extends FlameGame {
       };
       _drawText(canvas, label, Offset(16, band.top + 42), const Color(0xFF80DEEA), 12);
     }
+    canvas.restore();
+  }
+
+  /// Live Watch plate. Demo-cycle [watchKind] is only the fallback.
+  AWindowKind _liveWatchKind(int? own) {
+    if (own != null && own >= 0 && own < field.length && _lifeAt(own) == UnitLife.alive) {
+      final troop = field[own].troop;
+      if (troop == TroopType.bow &&
+          (_bowWindupIndex == own || (_bowAttackLeft > 0 && _bowAttackIndex == own))) {
+        return AWindowKind.bow;
+      }
+      if (troop == TroopType.spear && spearTipExtendedAt(own)) {
+        return AWindowKind.intercept;
+      }
+      if (troop == TroopType.cavalry &&
+          _chargeCyanOnUnit(own) &&
+          (auraActive || _chargeWaveVisibleAt(own))) {
+        return AWindowKind.charge;
+      }
+    }
+    return watchKind;
   }
 
   /// Simple perspective battlefield lane for top watch (both sides readable).
@@ -3467,7 +3557,9 @@ class TaisenGame extends FlameGame {
     canvas.drawCircle(
       c,
       baseR + 8,
-      Paint()..color = color.withValues(alpha: 0.22),
+      Paint()
+        ..color = const Color(0xFF80DEEA).withValues(alpha: 0.42)
+        ..blendMode = BlendMode.plus,
     );
     for (var i = 0; i < 5; i++) {
       final r = baseR + i * 14 + t * 22;
@@ -3774,47 +3866,93 @@ class TaisenGame extends FlameGame {
     canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 5), shaft);
   }
 
-  void _drawStratagemBurst(Canvas canvas, Offset at, double life01) {
-    // Translucent gold burst ≤1C — canvas paint only (field clip); never blocks 歸城/計略.
-    final a = (life01.clamp(0.0, 1.0));
-    final alpha = a * 0.55;
-    // Fan / cone preview distinct from spear intercept wedge (opens right-up).
-    final cone = Path()
-      ..moveTo(at.dx + 8, at.dy)
-      ..lineTo(at.dx + 110, at.dy - 56)
-      ..lineTo(at.dx + 110, at.dy + 56)
-      ..close();
-    canvas.drawPath(cone, Paint()..color = FactionColors.gold.withValues(alpha: alpha * 0.55));
-    canvas.drawPath(
-      cone,
+  /// Watch-strip 計略 banner. Sits above the castle gauges and the timer medallion.
+  Rect get strategyBannerRect {
+    final w = size.x > 0 ? size.x : kSoftPassFrameW;
+    final sx = w / kSoftPassFrameW;
+    final bw = (kStrategyBannerPt.width * sx).clamp(80.0, w - 8).toDouble();
+    final usable = math.max(20.0, watchH - kCastleStripPx);
+    final bh = math.min(kStrategyBannerPt.height * sx, usable - 6).clamp(12.0, usable - 4).toDouble();
+    final cx = (kStrategyBannerScreen.dx * sx).clamp(bw / 2 + 2, w - bw / 2 - 2).toDouble();
+    final bottom = watchH - kCastleStripPx - 2;
+    final top = math.max(2.0, bottom - bh);
+    return Rect.fromLTWH(cx - bw / 2, top, bw, bottom - top);
+  }
+
+  /// Stamp on the banner. Stays inside the Watch cue clip.
+  Offset get strategyStampAt {
+    final banner = strategyBannerRect;
+    final w = size.x > 0 ? size.x : kSoftPassFrameW;
+    final sx = w / kSoftPassFrameW;
+    final x = (kStrategyStampScreen.dx * sx).clamp(banner.left + 8, banner.right - 8).toDouble();
+    return Offset(x, banner.center.dy);
+  }
+
+  /// 56pt timer under the Watch. Top is the signoff gap below Watch bottom.
+  Rect get gaugeMedallionRect {
+    final w = size.x > 0 ? size.x : kSoftPassFrameW;
+    final sx = w / kSoftPassFrameW;
+    final side = kGaugePt * sx;
+    final left = (kGaugeX * sx).clamp(4.0, math.max(4.0, w - side - 4)).toDouble();
+    final top = watchH + (kGaugeY - kWatchBottomScreen);
+    return Rect.fromLTWH(left, top, side, side);
+  }
+
+  /// Cue plates (tip / bow / aura / 返城 / 計略) stay above the castle-gauge seam.
+  Rect get watchCueClipRect => _watchFxClip();
+
+  void _drawStrategyWatchStrip(Canvas canvas, double life01) {
+    final a = life01.clamp(0.0, 1.0);
+    final banner = strategyBannerRect;
+    final stamp = strategyStampAt;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(banner, const Radius.circular(4)),
+      Paint()..color = FactionColors.lacquer.withValues(alpha: 0.94 * a),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(banner, const Radius.circular(4)),
       Paint()
-        ..color = FactionColors.gold.withValues(alpha: alpha)
+        ..color = FactionColors.gold.withValues(alpha: 0.92 * a)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2,
+        ..strokeWidth = 1.4,
     );
-    for (var i = 0; i < 3; i++) {
-      final r = 22.0 + i * 14 + (1 - a) * 18;
-      canvas.drawCircle(
-        at,
-        r,
-        Paint()
-          ..color = FactionColors.gold.withValues(alpha: alpha * (0.9 - i * 0.22))
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.6 - i * 0.4,
-      );
-    }
-    canvas.drawCircle(
-      at,
-      16,
-      Paint()..color = Colors.white.withValues(alpha: alpha * 0.45),
-    );
-    // Short 飛字 — readable coaching, not a full-screen cut-in.
     _drawText(
       canvas,
       '計略',
-      Offset(at.dx + 36, at.dy - 64),
-      FactionColors.gold.withValues(alpha: 0.55 + 0.45 * a),
+      Offset(banner.left + 12, banner.center.dy - 8),
+      FactionColors.gold.withValues(alpha: a),
       16,
+    );
+    canvas.drawCircle(stamp, 9, Paint()..color = FactionColors.gold.withValues(alpha: 0.9 * a));
+    canvas.drawCircle(
+      stamp,
+      9,
+      Paint()
+        ..color = FactionColors.lacquer
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+  }
+
+  void _drawGaugeMedallion(Canvas canvas) {
+    final med = gaugeMedallionRect;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(med, const Radius.circular(6)),
+      Paint()..color = const Color(0xFF1A120C),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(med, const Radius.circular(6)),
+      Paint()
+        ..color = FactionColors.gold
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
+    _drawText(
+      canvas,
+      '${clock.remainingC}',
+      Offset(med.left + 8, med.center.dy - 8),
+      FactionColors.gold,
+      14,
     );
   }
 
@@ -4313,6 +4451,11 @@ class TaisenGame extends FlameGame {
     _reviveLeft[i] = _reviveSecondsFor(i);
     _ransenUnits.remove(i);
     matchMorale -= kRetreatMoraleCost;
+    if (_tipScrapeLeft > 0 && _hitFlashLabel == '迎擊') {
+      _retreatSplashAfterGeigeki = i;
+    } else {
+      flashHit(i, '撤退');
+    }
     if (selectedIndex == i) {
       dragTo = null;
       dragging = false;
@@ -4324,7 +4467,6 @@ class TaisenGame extends FlameGame {
       _matchChargeIndex = null;
       _matchChargeC = 0;
     }
-    flashHit(i, '撤退');
   }
 
   /// Test hook: set playtest HP without starting retreat. 0 still needs [debugForceHpZero].
@@ -4674,6 +4816,11 @@ class TaisenGame extends FlameGame {
         final heavy = field[o].troop == TroopType.cavalry;
         var dmg = heavy ? kRansenMaxHp : kRansenTickPerSec;
         if (doubleHit) dmg *= 2;
+        // Scrape is armed before HP loss so a same-tick retreat cannot skip it.
+        // Flytext stays a single fat「迎撃」— fly-geigeki OR canvas, never both.
+        // Label stays the locked「迎擊」so the existing fly path and cause rows match.
+        _tipScrapeAt = tip;
+        _tipScrapeLeft = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
         flashHit(s, '迎擊');
         _applyHpLoss(o, dmg, cause: '迎擊');
         final tipCoach = tutorial;
@@ -4733,6 +4880,7 @@ class TaisenGame extends FlameGame {
   }
 
   /// Range ~ half the operable field (wiki center-to-gate feel).
+  /// Board-unit px is Unverified — do not invent a new range.
   double get _bowRangePx {
     final fh = size.y > 0 ? fieldH : 400.0;
     return fh * 0.5;
@@ -4942,17 +5090,16 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// Stratagem FX ≤1C on field; non-blocking (board stays tappable).
+  Offset? get debugStrategyCastAt => _stratAt;
+
+  /// Stratagem FX ≤1C on the Watch strip; non-blocking (board stays tappable).
   /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
   void triggerStrategyFx({bool notifyTutorial = true}) {
     final t = tutorial;
     if (selectedIndex != null && selectedIndex! < field.length) {
       final i = selectedIndex!;
       _stratAt = tokenCenter(i);
-      // Don't flash 迎擊 during pure stratagem coaching shot — tip is strategyOrReturn.
-      if (notifyTutorial && field[i].troop == TroopType.spear) {
-        flashHit(i, '迎擊');
-      }
+      // 計略 is not 迎撃. Never flash a counter from the seal.
     } else if (tutorialOwnIndex != null) {
       _stratAt = tokenCenter(tutorialOwnIndex!);
     } else {

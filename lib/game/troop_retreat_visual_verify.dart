@@ -17,7 +17,8 @@ import 'unit_life.dart';
 /// Holds:
 /// 1. CAV  lit-aura contact drops more than one second of 亂戰 and stays overlapped
 /// 2. CAVK same burst crosses 0 → skull cause 突撃
-/// 3. SPEAR tip is not body 亂戰; cavalry on the tip retreats, cause 迎擊
+/// 3. SPEAR tip is not body 亂戰; aura cavalry on the tip retreats, cause 迎擊
+///    (open 1.1 cav does not). The live fly stays「迎擊」until the scrape ends.
 /// 4. BOW  stopped shots reach 撤退 cause 射; march and 亂戰 fire nothing; low HP same power
 /// 5. INF  overlap tick only, cause 亂戰, never 突撃
 /// 6. SIEGE 亂戰 chip is the low stub; castle band shows 城傷 and can retreat the siege
@@ -94,7 +95,7 @@ class TroopRetreatVisualShot {
             !enemyRansen;
       case 'SPEAR':
         return cause == '迎擊' &&
-            label == '撤退' &&
+            label == '迎擊' &&
             enemyLife == UnitLife.retreating &&
             enemyHp == 0 &&
             ownLife == UnitLife.alive &&
@@ -217,6 +218,9 @@ class TroopRetreatVisualVerify {
     final at = _mid();
     game.debugRestageOwnEnemy(ownId: 'zhangfei', ownAt: at, enemyAt: at);
     game.fieldPos[1] = game.spearTipAt(0);
+    // Open cavalry is 1.1 — no intercept. The prove arms the existing aura.
+    game.enemyFacing = 3.141592653589793;
+    game.debugArmEnemyChargeAura();
     await step();
     await _emit(id: 'SPEAR', caption: 'SPEAR 迎擊', causeIndex: 1);
   }
@@ -258,7 +262,10 @@ class TroopRetreatVisualVerify {
     final scrambleDealt = before - game.debugUnitHp(1);
 
     final band = game.castleBandRect;
-    final siegeAt = Offset(band.left + 64, band.top + band.height * 0.55);
+    final siegeAt = Offset(
+      band.left + 64,
+      band.top + band.height * TaisenGame.kCastleEnterDepth,
+    );
     final enemyAt = Offset(band.right - 64, siegeAt.dy);
     await _place('chenlan', siegeAt, enemyAt);
     var chipAlive = false;
@@ -297,31 +304,37 @@ class TroopRetreatVisualVerify {
     final from = _mid();
     await _place('sunquan', from, from + const Offset(180, 0));
     game.selectOrDetailAt(from);
-    await _advance(_bowWindupSec);
-    // Off the enemy ray (+x). An aimed drag would shoot; this one must not.
     game.panStart(from);
+    // Held drag through the standing window. 走射 stays off.
+    await _advance(_bowWindupSec);
+    final held = game.debugUnitHp(1) == TaisenGame.kRansenMaxHp &&
+        game.debugRetreatCause(1).isEmpty &&
+        !game.debugBowWinding;
     game.panEnd(from + const Offset(0, 140));
-    game.selectOrDetailAt(from);
-    return game.debugUnitHp(1) == TaisenGame.kRansenMaxHp && game.debugRetreatCause(1).isEmpty;
+    await step();
+    return held &&
+        game.debugUnitHp(1) == TaisenGame.kRansenMaxHp &&
+        game.debugRetreatCause(1).isEmpty;
   }
 
   Future<bool> _bowScrambleSilent() async {
     final at = _mid();
     await _place('sunquan', at, at + const Offset(180, 0));
     game.selectOrDetailAt(at);
-    await _advance(_bowWindupSec);
+    await _advance(_bowWindupSec * 0.4);
+    if (game.debugHitLabel == '射') return false;
     game.fieldPos[1] = game.fieldPos[0];
     await step();
     final dropped = TaisenGame.kRansenMaxHp - game.debugUnitHp(1);
-    return dropped < 1 && !game.debugBowWinding;
+    return dropped < 1 && game.debugHitLabel != '射' && !game.debugBowWinding;
   }
 
   Future<double> _bowShot() async {
     final at = game.tokenCenter(0);
     final before = game.debugUnitHp(1);
     game.selectOrDetailAt(at);
-    await _advance(_bowWindupSec);
-    game.selectOrDetailAt(at);
+    // Repeat cooldown, then a full standing 1C. The shot looses on its own.
+    await _advance(TaisenGame.kBowAimRepeatSec + _bowWindupSec);
     return before - game.debugUnitHp(1);
   }
 
