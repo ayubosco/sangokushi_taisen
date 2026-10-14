@@ -160,8 +160,35 @@ class TaisenGame extends FlameGame {
     return _hpCause[i];
   }
 
-  /// True when this siege is taking the castle-band stub this tick.
-  bool debugCastleChipAt(int i) => _castleChip.contains(i);
+  /// Visible yellow prep while this siege's body is inside the enemy castle zone.
+  bool debugSiegePrepVisible(int i) {
+    if (i < 0 || i >= field.length || i >= fieldPos.length) return false;
+    if (field[i].troop != TroopType.siege) return false;
+    if (_lifeAt(i) != UnitLife.alive) return false;
+    return inEnemyCastleZone(i);
+  }
+
+  /// 0–1 prep. 0 when the gauge is down or has just completed and restarted.
+  double debugSiegePrep01(int i) =>
+      (i >= 0 && i < _siegePrep.length) ? _siegePrep[i] : 0;
+
+  /// move / ransen / ally when the last tick held the gauge. Empty if it advanced.
+  String debugSiegePrepPause(int i) =>
+      (i >= 0 && i < _siegePrepPause.length) ? _siegePrepPause[i] : '';
+
+  /// True when an opposing bow inside the existing range slowed the last fill.
+  bool debugSiegePrepSlowed(int i) =>
+      i >= 0 && i < _siegePrepSlowed.length && _siegePrepSlowed[i];
+
+  /// How many times this body's prep has completed.
+  int debugSiegePrepsLanded(int i) =>
+      (i >= 0 && i < _siegePrepsLanded.length) ? _siegePrepsLanded[i] : 0;
+
+  /// gate / wall while the gauge is up. Empty outside the zone.
+  String debugSiegeFace(int i) {
+    if (!debugSiegePrepVisible(i)) return '';
+    return _siegeOnGate(fieldPos[i]) ? 'gate' : 'wall';
+  }
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
@@ -223,10 +250,16 @@ class TaisenGame extends FlameGame {
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
   /// Playtest name of the last stub hit. Shown on the skull when that hit retreats the body.
-  /// 突撃 / 迎擊 / 射 / 亂戰 / 城傷. Not a new DPS table.
+  /// 突撃 / 迎擊 / 射 / 亂戰. Not a new DPS table. Siege is a prep gauge, not a chip cause.
   final List<String> _hpCause = [];
-  /// Siege bodies taking the castle-band stub this tick. Draws 「城傷」. Not a new DPS table.
-  final Set<int> _castleChip = {};
+  /// Prep 0–1 while a siege stands in the enemy castle zone. Leave clears it.
+  final List<double> _siegePrep = [];
+  /// Completed preps. A full gauge nicks the castle race once, then starts over.
+  final List<int> _siegePrepsLanded = [];
+  /// Last tick's pause while the gauge was up: move / ransen / ally. Empty if it filled.
+  final List<String> _siegePrepPause = [];
+  /// Opposing bow inside the existing half-field range slowed this tick's fill.
+  final List<bool> _siegePrepSlowed = [];
   final List<UnitLife> _unitLife = [];
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
@@ -259,8 +292,26 @@ class TaisenGame extends FlameGame {
   static const double kDoubleInterceptSpeed = 2.0;
   /// Retarget needs a large facing swing (radians) — micro-twist keeps lock.
   static const double kBowRetargetFacingRad = 1.0;
-  /// 攻城 outgoing 亂戰 fraction. Incoming castle damage stays on the full stub.
+  /// 攻城 outgoing 亂戰 fraction. Castle pressure is the prep gauge, not this chip.
   static const double kSiegeRansenMul = 0.25;
+
+  /// Playtest prep fill per second while a siege stands in the enemy castle zone.
+  /// Not an Official second. SGE-01..05 lock the rules, not this rate.
+  static const double kSiegePrepFillPerSec = 0.25;
+
+  /// Playtest fill scale while an opposing bow is inside the existing half-field
+  /// range. Not a BOW-05 Official range and not an Official siege multiplier.
+  static const double kSiegePrepBowSlowMul = 0.55;
+
+  /// Qualitative castle-race nicks when one prep completes.
+  /// Exact gate/wall mul is Unverified (AC1「2倍近い」is not a locked number).
+  /// Only the ordering gate > wall ships.
+  static const double kSiegeWallNick = 0.03;
+  static const double kSiegeGateNick = 0.05;
+
+  /// Center opening of the castle face, as a fraction of field width.
+  /// Layout stand-in so gate and wall are different contacts. Not a measured px.
+  static const double kSiegeGateSpanFrac = 1 / 3;
   /// Drawn 槍尖 reach (48 × field tip scale). The hit core is smaller than body overlap.
   static const double kSpearTipReach = 48 * 1.28;
   static const double kSpearTipHitR = 18.0;
@@ -453,6 +504,32 @@ class TaisenGame extends FlameGame {
   }
 
   bool inCastleBand(Offset p) => castleBandRect.contains(p);
+
+  /// Top thin band, same thickness as 己城. Own sieges contact the enemy castle here.
+  /// Height reuses [kCastleBandFracOfField]. Not a new Official measure.
+  Rect get enemyCastleZoneRect {
+    final top = size.y > 0 ? watchH : 0.0;
+    final w = size.x > 0 ? size.x : 390.0;
+    return Rect.fromLTWH(0, top, w, castleBandH);
+  }
+
+  /// Enemy castle face for this body. Own units use the top band. Enemy units
+  /// use the bottom 己城 band, which is their enemy castle. Zone presence is
+  /// the only siege trigger (SGE-08 — no assault button).
+  bool inEnemyCastleZone(int i) {
+    if (i < 0 || i >= fieldPos.length) return false;
+    final p = fieldPos[i];
+    if (isEnemyAt(i)) return inCastleBand(p);
+    return enemyCastleZoneRect.contains(p);
+  }
+
+  /// Center opening vs the flanks. Span is [kSiegeGateSpanFrac], not a measured px.
+  bool _siegeOnGate(Offset p) {
+    final w = size.x > 0 ? size.x : 390.0;
+    final span = w * kSiegeGateSpanFrac;
+    final left = (w - span) / 2;
+    return p.dx >= left && p.dx < left + span;
+  }
 
   /// 0 at band top (field side) → 1 at bottom edge.
   double castleDepth01(Offset p) {
@@ -873,7 +950,10 @@ class TaisenGame extends FlameGame {
       ..clear()
       ..add('')
       ..add('');
-    _castleChip.clear();
+    _siegePrep.clear();
+    _siegePrepsLanded.clear();
+    _siegePrepPause.clear();
+    _siegePrepSlowed.clear();
     _unitLife
       ..clear()
       ..add(UnitLife.alive)
@@ -911,7 +991,7 @@ class TaisenGame extends FlameGame {
     _pursueWaypoint(dt);
     _tickRansen(dt);
     _tickSpearTips();
-    _tickCastleSiegeChip(dt);
+    _tickSiegePrep(dt);
     _tickBowWindup(dt);
     _tickBowAim(dt);
     _tickUnitLife(dt);
@@ -1550,7 +1630,7 @@ class TaisenGame extends FlameGame {
     _pursueWaypoint(dt);
     _tickRansen(dt);
     _tickSpearTips();
-    _tickCastleSiegeChip(dt);
+    _tickSiegePrep(dt);
     _tickUnitLife(dt);
     _decayChargeAfterStop(dt);
 
@@ -1901,15 +1981,6 @@ class TaisenGame extends FlameGame {
           11,
         );
         _drawCostStars(canvas, Offset(center.dx - 18, labelY + 16), card.cost);
-        if (debugCastleChipAt(i)) {
-          _drawText(
-            canvas,
-            '城傷',
-            Offset(center.dx - 14, center.dy - tokenSize.height / 2 - 18),
-            const Color(0xFFFFF59D),
-            12,
-          );
-        }
         _drawLifeFlyTip(
           canvas,
           i,
@@ -1917,6 +1988,18 @@ class TaisenGame extends FlameGame {
         );
       }
       _drawUnitHpBar(canvas, center, tokenSize, i);
+      if (debugSiegePrepVisible(i)) {
+        final anchor = tokenCenter(i);
+        _drawSiegePrepGauge(
+          canvas,
+          Rect.fromCenter(
+            center: Offset(anchor.dx, anchor.dy - tokenSize.height / 2 - 22),
+            width: tokenSize.width,
+            height: 5,
+          ),
+          debugSiegePrep01(i),
+        );
+      }
     }
 
     // Full-color 落點釘. On arrive the troop body coincides with this card (部隊追上).
@@ -2007,7 +2090,7 @@ class TaisenGame extends FlameGame {
       }
     }
 
-    // Design lock: NO floating「突撃」/「迎擊」buttons.
+    // Design lock: NO floating「突撃」/「迎擊」/「攻城」buttons. Siege is zone presence.
     // Charge = drag far → aura → collide (auto flash). Intercept = tip always on × enemy aura (auto).
 
     if (_hitFlashLeft > 0 && _hitFlashIndex != null && _hitFlashIndex! < field.length) {
@@ -2104,7 +2187,8 @@ class TaisenGame extends FlameGame {
     // Verify captions stay in the log. Painting them covers the table.
   }
 
-  /// Removed: floating charge/intercept buttons (Design/UIUX lock).
+  /// Removed: floating charge/intercept/assault buttons (Design/UIUX lock).
+  /// SGE-08: 攻城 is enemy-castle zone presence, not a button.
   Rect floatingActionHitRect(String label) => Rect.zero;
 
   void _drawDashedLine(Canvas canvas, Offset a, Offset b, Color color) {
@@ -2523,6 +2607,28 @@ class TaisenGame extends FlameGame {
       _drawText(canvas, '撤', enemyC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
     }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
+    if (ownSafe != null && debugSiegePrepVisible(ownSafe)) {
+      _drawSiegePrepGauge(
+        canvas,
+        Rect.fromCenter(
+          center: ownC + Offset(0, -16 * ownScale),
+          width: 28 * ownScale,
+          height: 4,
+        ),
+        debugSiegePrep01(ownSafe),
+      );
+    }
+    if (enemySafe != null && debugSiegePrepVisible(enemySafe)) {
+      _drawSiegePrepGauge(
+        canvas,
+        Rect.fromCenter(
+          center: enemyC + Offset(0, -14 * enemyScale),
+          width: 24 * enemyScale,
+          height: 3,
+        ),
+        debugSiegePrep01(enemySafe),
+      );
+    }
     if (ownSafe == null || _chargeCyanOnUnit(ownSafe)) {
       _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
     }
@@ -4721,6 +4827,23 @@ class TaisenGame extends FlameGame {
     );
   }
 
+  /// Yellow prep track. Empty at 0 so entering the zone is visible before fill.
+  void _drawSiegePrepGauge(Canvas canvas, Rect bar, double prep01) {
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+      Paint()..color = const Color(0xFF4E342E),
+    );
+    final fillW = bar.width * prep01.clamp(0.0, 1.0);
+    if (fillW <= 0) return;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, fillW, bar.height),
+        const Radius.circular(2),
+      ),
+      Paint()..color = const Color(0xFFFFD54F),
+    );
+  }
+
   /// 迎擊: the designated enemy cavalry (free-match demo) walks onto the own
   /// spear tip and holds there. The tip turns to that approach. Contact inside
   /// [kSpearTipHitR] is the counter — a distant aura or a 1C timer is not.
@@ -4842,26 +4965,106 @@ class TaisenGame extends FlameGame {
     _tipResolved.removeWhere((key) => !still.contains(key));
   }
 
-  /// 攻城 standing in 己城 loses the shared stub while an enemy is in that band
-  /// and the bodies are not already in 亂戰. Not a second DPS table.
-  void _tickCastleSiegeChip(double dt) {
-    _castleChip.clear();
-    if (dt <= 0) return;
+  void _ensureSiegeSlots() {
+    while (_siegePrep.length < field.length) {
+      _siegePrep.add(0);
+      _siegePrepsLanded.add(0);
+      _siegePrepPause.add('');
+      _siegePrepSlowed.add(false);
+    }
+    if (_siegePrep.length > field.length) {
+      final n = field.length;
+      _siegePrep.removeRange(n, _siegePrep.length);
+      _siegePrepsLanded.removeRange(n, _siegePrepsLanded.length);
+      _siegePrepPause.removeRange(n, _siegePrepPause.length);
+      _siegePrepSlowed.removeRange(n, _siegePrepSlowed.length);
+    }
+  }
+
+  /// SGE-01..05. Enter the enemy castle zone → yellow prep gauge.
+  /// Fills only while stationary and not 亂戰. Ally bump pauses. Leave clears.
+  /// An opposing bow inside the existing half-field range slows the fill.
+  /// A completed prep nicks the castle race once (gate > wall). No assault button.
+  void _tickSiegePrep(double dt) {
+    _ensureSiegeSlots();
+    if (dt < 0) return;
     for (var i = 0; i < field.length; i++) {
-      if (_lifeAt(i) != UnitLife.alive || field[i].troop != TroopType.siege) continue;
-      if (!inCastleBand(fieldPos[i])) continue;
-      var enemyInBand = false;
-      var overlapping = false;
-      for (var e = 0; e < field.length; e++) {
-        if (e == i || isEnemyAt(e) == isEnemyAt(i) || _lifeAt(e) != UnitLife.alive) continue;
-        if (!inCastleBand(fieldPos[e])) continue;
-        enemyInBand = true;
-        if (inMeleeContact(tokenCenter(i), tokenCenter(e))) overlapping = true;
+      _siegePrepPause[i] = '';
+      _siegePrepSlowed[i] = false;
+      final sieging = _lifeAt(i) == UnitLife.alive &&
+          field[i].troop == TroopType.siege &&
+          inEnemyCastleZone(i);
+      if (!sieging) {
+        _siegePrep[i] = 0;
+        continue;
       }
-      if (enemyInBand && !overlapping) {
-        _castleChip.add(i);
-        _applyHpLoss(i, kRansenTickPerSec * dt, cause: '城傷');
+      if (_ransenUnits.contains(i)) {
+        _siegePrepPause[i] = 'ransen';
+        continue;
       }
+      if (_allyBumpsSieger(i)) {
+        _siegePrepPause[i] = 'ally';
+        continue;
+      }
+      if (!_siegeStationary(i)) {
+        _siegePrepPause[i] = 'move';
+        continue;
+      }
+      if (dt == 0) continue;
+      var rate = kSiegePrepFillPerSec;
+      if (_bowOnSieger(i)) {
+        rate *= kSiegePrepBowSlowMul;
+        _siegePrepSlowed[i] = true;
+      }
+      final next = _siegePrep[i] + rate * dt;
+      if (next >= 1.0 - 1e-9) {
+        _siegePrep[i] = 0;
+        _siegePrepsLanded[i] += 1;
+        _nickCastleFromSiege(i);
+      } else {
+        _siegePrep[i] = next;
+      }
+    }
+  }
+
+  bool _siegeStationary(int i) {
+    if (dragging && selectedIndex == i) return false;
+    if (pinnedMarchAt(i)) return false;
+    return true;
+  }
+
+  /// Same-side body contact. Not 亂戰. Holds the gauge where it is.
+  bool _allyBumpsSieger(int i) {
+    final origin = tokenCenter(i);
+    for (var a = 0; a < field.length; a++) {
+      if (a == i || isEnemyAt(a) != isEnemyAt(i)) continue;
+      if (_lifeAt(a) != UnitLife.alive) continue;
+      if (inMeleeContact(origin, tokenCenter(a))) return true;
+    }
+    return false;
+  }
+
+  /// Opposing living bow inside [_bowRangePx]. No new range is introduced.
+  bool _bowOnSieger(int i) {
+    final origin = tokenCenter(i);
+    final range = _bowRangePx;
+    for (var b = 0; b < field.length; b++) {
+      if (b == i || field[b].troop != TroopType.bow) continue;
+      if (_lifeAt(b) != UnitLife.alive) continue;
+      if (isEnemyAt(b) == isEnemyAt(i)) continue;
+      final d = (tokenCenter(b) - origin).distance;
+      if (d >= 1 && d <= range) return true;
+    }
+    return false;
+  }
+
+  /// One qualitative nick. Gate is strictly larger than wall. Not an Official mul.
+  void _nickCastleFromSiege(int i) {
+    final nick = _siegeOnGate(fieldPos[i]) ? kSiegeGateNick : kSiegeWallNick;
+    if (isEnemyAt(i)) {
+      ownCastle = (ownCastle - nick).clamp(0.0, 1.0);
+    } else {
+      enemyCastle = (enemyCastle - nick).clamp(0.0, 1.0);
     }
   }
 

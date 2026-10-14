@@ -52,7 +52,7 @@ const bool kSpeedCompareVerify =
 // from Cloud. See [kRetreatReviveVisualVerify].
 //
 // dart-define: TROOP_RETREAT_VISUAL_VERIFY=true — playtest paths
-// 騎 突撃 / 槍 迎擊 / 弓 射 / 歩 亂戰 / 攻城 城傷. See [kTroopRetreatVisualVerify].
+// 騎 突撃 / 槍 迎擊 / 弓 射 / 歩 亂戰 / 攻城 準備. See [kTroopRetreatVisualVerify].
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1191,7 +1191,7 @@ class _MatchShellState extends State<MatchShell> {
     print(
       'TROOP_RETREAT_VISUAL_VERIFY checks '
       'CAV 突撃 drop; CAVK 突撃 retreat; SPEAR 迎擊; '
-      'BOW stopped 射; INF 亂戰; SIEGE 城傷. '
+      'BOW stopped 射; INF 亂戰; SIEGE 準備. '
       'PNGs land in app tmp/troop-retreat-visual/ during each HOLD (~4s).',
     );
     final script = TroopRetreatVisualVerify(
