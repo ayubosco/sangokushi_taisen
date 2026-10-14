@@ -354,7 +354,8 @@ class TaisenGame extends FlameGame {
   /// H0 A: Watch fraction of [GameWidget] height. Midpoint of the 0.12–0.13 gate
   /// so the draggable field is 0.875 (≥0.87). HUD (~36px) + 計略 bar (~62px)
   /// sit outside this widget. Ortho bird’s-eye only — no perspective field.
-  static const double kWatchFractionOfGame = 0.125;
+  /// Soft Lock Feel: enlarge live monitor (Design 15–18% screen → ~0.16 of game band).
+  static const double kWatchFractionOfGame = 0.16;
 
   /// Clear edge-to-edge gap between cards in a rank, in token-widths.
   static const double kMinLaneGapMulOfToken = 1.3;
@@ -407,7 +408,8 @@ class TaisenGame extends FlameGame {
   static const double kCastleExitDepth = 0.40;
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
-  static const double kTokenWidthFracOfField = 0.10; // Bosco eye: still too big at 0.12; try 0.10
+  /// Soft Lock Feel: shrink cards + field density (was 0.10; Bosco still too big).
+  static const double kTokenWidthFracOfField = 0.085;
 
   /// JL3 card table, redrawn. Aged paper, ink camps, red near-edge. Not a photo and not a gold grid.
   static const Color kDesktopParchment = Color(0xFFC4A882);
@@ -737,7 +739,11 @@ class TaisenGame extends FlameGame {
     // waypoint here froze peels (next update had nothing to walk toward).
     if (dragging) return;
     final wasIn = i < fieldInCastle.length && fieldInCastle[i];
-    final park = tutorial == null &&
+    final coach = tutorial;
+    final softReturn = coach != null &&
+        coach.session == TutorialSession.session2 &&
+        (coach.s2 == S2Phase.returnCity || coach.s2 == S2Phase.strategyOrReturn);
+    final park = (tutorial == null || softReturn) &&
         !isEnemyAt(i) &&
         castleGateContains(rest, currentlyIn: wasIn);
     dragTo = null;
@@ -1053,22 +1059,37 @@ class TaisenGame extends FlameGame {
     fieldInCastle.clear();
     selectedIndex = null;
     final spear = Cost6Roster.all.firstWhere((c) => c.id == 'zhanghe');
+    final bow = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.bow);
     final enemyCav = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
-    field.addAll([spear, enemyCav]);
-    fieldIsEnemy.addAll([false, true]);
-    fieldInCastle.addAll([false, false]);
+    // Second enemy stays after 迎擊 so 弓教學 has a living target (no combat invent).
+    final enemyFoot = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.infantry);
+    // Soft Lock Field1: 槍 → 弓 → 回城. Spear + bow; cav charges tip; foot for bow.
+    field.addAll([spear, bow, enemyCav, enemyFoot]);
+    fieldIsEnemy.addAll([false, false, true, true]);
+    fieldInCastle.addAll([false, false, false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
     fieldPos.addAll([
-      Offset(w * 0.35, wh + fh * 0.58), // own spear
-      Offset(w * 0.70, wh + fh * 0.28), // enemy cavalry
+      Offset(w * 0.32, wh + fh * 0.58), // own spear
+      Offset(w * 0.55, wh + fh * 0.66), // own bow (弓教學)
+      Offset(w * 0.70, wh + fh * 0.28), // enemy cavalry (槍)
+      Offset(w * 0.48, wh + fh * 0.30), // enemy foot (弓 target)
     ]);
     tutorialOwnIndex = 0;
-    tutorialEnemyIndex = 1;
-    ownFacing = 0; // wrong initially until turn
+    tutorialEnemyIndex = 2;
+    _matchSpearIndex = 0;
+    _matchEnemyChargeIndex = 2;
+    _matchEnemyChargeC = 0;
+    _matchTurnWindowOpen = false;
+    _matchFacingCorrect = false;
+    ownFacing = 0.85; // wrong until MOVE aims tip
     enemyFacing = math.pi;
     selectedIndex = 0;
+    _bowWindupIndex = null;
+    _bowWindupC = 0;
+    _bowShotReady = false;
+    _bowDidShoot = false;
   }
 
   void setupMatchDemoField() {
@@ -1497,7 +1518,22 @@ class TaisenGame extends FlameGame {
               (coach.shotPassMode && coach.s1 == S1Phase.waitAura))) {
         watchKind = AWindowKind.charge;
       } else if (coach.session == TutorialSession.session2) {
-        watchKind = AWindowKind.intercept;
+        if (coach.s2 == S2Phase.bowTeach) {
+          watchKind = AWindowKind.bow;
+        } else if (coach.s2 == S2Phase.returnCity ||
+            coach.s2 == S2Phase.strategyOrReturn ||
+            coach.s2 == S2Phase.tipDone) {
+          watchKind = AWindowKind.intercept;
+        } else {
+          watchKind = AWindowKind.intercept;
+        }
+        // Soft Lock Field1: keep match charge lane wired so tip physics can fire.
+        if (tutorialOwnIndex != null) _matchSpearIndex = tutorialOwnIndex;
+        if (tutorialEnemyIndex != null) _matchEnemyChargeIndex = tutorialEnemyIndex;
+        if (coach.enemyAuraVisible) {
+          _matchEnemyChargeC = math.max(_matchEnemyChargeC, coach.turnWindowOpen ? 1.0 : 0.5);
+          _matchTurnWindowOpen = coach.turnWindowOpen;
+        }
       }
     } else if (liveChargeOn) {
       watchKind = AWindowKind.charge;
@@ -1546,18 +1582,8 @@ class TaisenGame extends FlameGame {
 
     // Tutorial S1: 突撃 only on collide while aura ready (handled in walk / panEnd).
 
-    // Tutorial S2: auto 迎擊 when aura hits tip (facingCorrect + turnWindow).
-    if (coach != null &&
-        coach.session == TutorialSession.session2 &&
-        !coach.shotPassMode &&
-        coach.turnWindowOpen &&
-        coach.facingCorrect &&
-        !coach.interceptDone &&
-        (coach.s2 == S2Phase.interceptHit || coach.s2 == S2Phase.waitTurn)) {
-      flashHit(tutorialOwnIndex ?? 0, '迎擊');
-      coach.onAutoIntercept(facingWasCorrect: true);
-      onTutorialChanged?.call();
-    }
+    // Tutorial S2 Soft Lock: 迎擊 comes from tip contact (_tickSpearTips) after MOVE aim.
+    // Do not auto-pass on timer alone — that made 槍教學 unreadable.
 
     // LIVE_VERIFY: HUD C when S2 aura / turn window edge fires.
     if (coach != null && coach.session == TutorialSession.session2) {
@@ -1576,13 +1602,25 @@ class TaisenGame extends FlameGame {
     _tickBowWindup(dt);
     _tickBowAim(dt);
 
-    // Session2 / match: facing drives spear tip — player sets facingCorrect / _matchFacingCorrect.
+    // Soft Lock Session2: MOVE owns tip facing. Only freeze wrong pose while idle
+    // before the player has aimed. Never overwrite a live march facing.
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session2) {
-      if (t.facingCorrect) {
-        ownFacing = -0.35; // tip toward enemy
-      } else {
-        ownFacing = 0.9; // wrong facing until player turns
+      final spearPhases = t.s2 == S2Phase.spearGlow ||
+          t.s2 == S2Phase.enemyApproach ||
+          t.s2 == S2Phase.waitTurn ||
+          t.s2 == S2Phase.interceptHit ||
+          t.s2 == S2Phase.failRetry;
+      final marching = selectedIndex == tutorialOwnIndex && dragTo != null;
+      if (spearPhases && !marching && !t.facingCorrect && !t.shotPassMode) {
+        ownFacing = 0.85; // idle wrong until MOVE
+      }
+      if (spearPhases &&
+          t.turnWindowOpen &&
+          !t.interceptDone &&
+          tutorialOwnIndex != null &&
+          tutorialEnemyIndex != null) {
+        _maybeMarkTutorialSpearAim();
       }
     } else if (tutorial == null &&
         _matchSpearIndex != null &&
@@ -1592,6 +1630,28 @@ class TaisenGame extends FlameGame {
       } else {
         ownFacing = 0.85;
       }
+    }
+  }
+
+  /// Soft Lock Field1: tip facing the charging enemy after MOVE → facingCorrect.
+  void _maybeMarkTutorialSpearAim() {
+    final coach = tutorial;
+    if (coach == null || coach.session != TutorialSession.session2) return;
+    final s = tutorialOwnIndex;
+    final e = tutorialEnemyIndex;
+    if (s == null || e == null) return;
+    if (s >= fieldPos.length || e >= fieldPos.length) return;
+    final tip = spearTipAt(s);
+    final enemy = tokenCenter(e);
+    final toEnemy = enemy - tip;
+    if (toEnemy.distance < 1) return;
+    final facing = ownFacing;
+    final forward = Offset(math.sin(facing), -math.cos(facing));
+    final along = (toEnemy.dx * forward.dx + toEnemy.dy * forward.dy) / toEnemy.distance;
+    // Tip roughly toward threat (MOVE aim). Not a combat invent.
+    if (along > 0.35) {
+      coach.onSpearAimedByMove();
+      onTutorialChanged?.call();
     }
   }
 
@@ -2312,7 +2372,7 @@ class TaisenGame extends FlameGame {
             'watch-tip',
             ownC + Offset(0, -22 * ownScale),
             alpha: 0.95,
-            scale: ownScale,
+            scale: ownScale * 1.35,
           );
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
@@ -2336,7 +2396,7 @@ class TaisenGame extends FlameGame {
             'watch-bow',
             ownC + Offset(18 * ownScale, -16 * ownScale),
             alpha: 0.95,
-            scale: ownScale,
+            scale: ownScale * 1.35,
           );
         }
         break;
@@ -2353,7 +2413,7 @@ class TaisenGame extends FlameGame {
           'watch-tip',
           ownC + Offset(0, -22 * ownScale),
           alpha: 0.9,
-          scale: ownScale,
+          scale: ownScale * 1.35,
         );
       }
       if (troop == TroopType.bow &&
@@ -2364,7 +2424,7 @@ class TaisenGame extends FlameGame {
           'watch-bow',
           ownC + Offset(18 * ownScale, -16 * ownScale),
           alpha: 0.9,
-          scale: ownScale,
+          scale: ownScale * 1.35,
         );
       }
     }
@@ -3838,12 +3898,34 @@ class TaisenGame extends FlameGame {
       if (isEnemyAt(i)) return;
     }
 
-    // Session2: tap own spear to change facing once turn window open (or fail if early).
-    if (t != null && t.session == TutorialSession.session2 && i == tutorialOwnIndex) {
-      selectedIndex = i;
-      t.onTapTurnFacing();
-      onTutorialChanged?.call();
-      return;
+    // Soft Lock Field1 Session2: spear MOVE aims tip; bow select starts 蓄勢; return picks unit.
+    if (t != null && t.session == TutorialSession.session2) {
+      if (t.s2 == S2Phase.bowTeach &&
+          !isEnemyAt(i) &&
+          field[i].troop == TroopType.bow) {
+        selectedIndex = i;
+        t.onSelectBow();
+        onTutorialChanged?.call();
+        return;
+      }
+      if ((t.s2 == S2Phase.returnCity || t.s2 == S2Phase.strategyOrReturn) &&
+          !isEnemyAt(i)) {
+        selectedIndex = i;
+        return;
+      }
+      if (i == tutorialOwnIndex &&
+          (t.s2 == S2Phase.waitTurn ||
+              t.s2 == S2Phase.interceptHit ||
+              t.s2 == S2Phase.enemyApproach ||
+              t.s2 == S2Phase.spearGlow ||
+              t.s2 == S2Phase.failRetry)) {
+        selectedIndex = i;
+        // Early tap still fails the ≥1C gate; MOVE owns facing.
+        t.onTapTurnFacing();
+        onTutorialChanged?.call();
+        return;
+      }
+      if (isEnemyAt(i)) return;
     }
 
     if (isEnemyAt(i)) {
@@ -3915,6 +3997,32 @@ class TaisenGame extends FlameGame {
     }
     if (!_playerMayDrag(i)) return;
     if (t != null) {
+      if (t.session == TutorialSession.session2) {
+        // Soft Lock Field1: 槍 MOVE / 弓 select-stand / 回城 drag must work.
+        final spearOk = (t.s2 == S2Phase.waitTurn ||
+                t.s2 == S2Phase.interceptHit ||
+                t.s2 == S2Phase.enemyApproach ||
+                t.s2 == S2Phase.spearGlow) &&
+            i == tutorialOwnIndex;
+        final bowOk = t.s2 == S2Phase.bowTeach &&
+            field[i].troop == TroopType.bow &&
+            !isEnemyAt(i);
+        final returnOk = (t.s2 == S2Phase.returnCity || t.s2 == S2Phase.strategyOrReturn) &&
+            !isEnemyAt(i);
+        if (!spearOk && !bowOk && !returnOk) return;
+        selectedIndex = i;
+        dragging = true;
+        _resetMeterForFreshMarch();
+        dragFrom = tokenCenter(i);
+        dragTo = _clampFieldPos(local);
+        if (bowOk) {
+          // Dragging bow cancels 蓄勢 — tip already warns 停穩.
+          _cancelBowWindup();
+          t.onSelectBow();
+        }
+        onTutorialChanged?.call();
+        return;
+      }
       if (t.session != TutorialSession.session1) return;
       // Allow waitAura/hitCharge so stop→fade→drag-again rebuilds travel/aura.
       // (1c43843 fade left s1=waitAura; old gate blocked re-drag until full decay.)
@@ -4004,7 +4112,26 @@ class TaisenGame extends FlameGame {
 
       if (t != null && t.session == TutorialSession.session1 && i == tutorialOwnIndex) {
         // Contact resolves in _tickRansen. Shot freeze still drops the waypoint below.
-      } else if (t == null && !isEnemyAt(i)) {
+      } else if (t != null &&
+          t.session == TutorialSession.session2 &&
+          (t.s2 == S2Phase.returnCity || t.s2 == S2Phase.strategyOrReturn) &&
+          !isEnemyAt(i)) {
+        final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
+        while (fieldInCastle.length <= i) {
+          fieldInCastle.add(false);
+        }
+        final gateHot = castleGateContains(at, currentlyIn: wasInCastle);
+        if (gateHot) {
+          _parkInCastle(i, at);
+        } else {
+          castleBandHot = inCastleBand(dragTo!);
+        }
+      } else if ((t == null ||
+              (t.session == TutorialSession.session2 &&
+                  (t.s2 == S2Phase.waitTurn ||
+                      t.s2 == S2Phase.interceptHit ||
+                      t.s2 == S2Phase.bowTeach))) &&
+          !isEnemyAt(i)) {
         final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
         while (fieldInCastle.length <= i) {
           fieldInCastle.add(false);
@@ -4543,6 +4670,20 @@ class TaisenGame extends FlameGame {
         if (doubleHit) dmg *= 2;
         flashHit(s, '迎擊');
         _applyHpLoss(o, dmg, cause: '迎擊');
+        final tipCoach = tutorial;
+        if (tipCoach != null &&
+            tipCoach.session == TutorialSession.session2 &&
+            !tipCoach.interceptDone &&
+            !tipCoach.shotPassMode &&
+            (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn)) {
+          if (!tipCoach.facingCorrect) {
+            tipCoach.onSpearAimedByMove();
+          }
+          if (tipCoach.turnWindowOpen) {
+            tipCoach.onAutoIntercept(facingWasCorrect: true);
+            onTutorialChanged?.call();
+          }
+        }
       }
     }
     _tipResolved.removeWhere((key) => !still.contains(key));
@@ -4645,7 +4786,12 @@ class TaisenGame extends FlameGame {
 
   /// Standing auto: stop → 蓄勢 → shot. Move / 亂戰 / 歸城 cuts aim.
   void _tickBowStanding(double dt) {
-    if (tutorial != null || dt < 0) return;
+    final coach = tutorial;
+    final bowLesson = coach != null &&
+        coach.session == TutorialSession.session2 &&
+        coach.s2 == S2Phase.bowTeach;
+    // Soft Lock Field1 弓教學 needs standing auto. Other tutorial sessions stay silent.
+    if ((coach != null && !bowLesson) || dt < 0) return;
     if (_bowAttackLeft > 0) _bowAttackLeft = math.max(0, _bowAttackLeft - dt);
     if (_bowAimCooldown > 0) _bowAimCooldown = math.max(0, _bowAimCooldown - dt);
 
@@ -4712,6 +4858,13 @@ class TaisenGame extends FlameGame {
     if (target == null) return;
     _bowLockedTarget = target;
     _applyHpLoss(target, _bowDamageTo(target), cause: '射');
+    final coach = tutorial;
+    if (coach != null &&
+        coach.session == TutorialSession.session2 &&
+        coach.s2 == S2Phase.bowTeach) {
+      coach.onBowShot();
+      onTutorialChanged?.call();
+    }
   }
 
   double _bowDamageTo(int target) {

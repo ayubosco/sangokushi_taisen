@@ -304,20 +304,20 @@ void main() {
     expect((g.mapFieldToWatch(g.pinnedCardAt(0), band) - watchPin).distance, lessThan(0.5));
   });
 
-  test('H0 A: watch 0.12–0.13 of the game band, drag field ≥0.87', () {
-    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.12, 0.13));
-    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
+  test('H0 A Soft Lock: watch 0.15–0.17 of the game band, drag field ≥0.83', () {
+    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.15, 0.17));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.085, 0.001));
     final g = readyGame();
-    expect(g.watchH / g.size.y, inInclusiveRange(0.12, 0.13));
-    expect(g.fieldH / g.size.y, greaterThanOrEqualTo(0.87));
+    expect(g.watchH / g.size.y, inInclusiveRange(0.15, 0.17));
+    expect(g.fieldH / g.size.y, greaterThanOrEqualTo(0.83));
     // Chrome outside GameWidget: HUD ~36px, 計略 bar ~62px. No safe-area in this budget.
     const screenH = 844.0;
     const chrome = 36.0 + 62.0;
     const gameH = screenH - chrome;
     const watchOfScreen = TaisenGame.kWatchFractionOfGame * gameH / screenH;
     const dragOfScreen = (1 - TaisenGame.kWatchFractionOfGame) * gameH / screenH;
-    expect(watchOfScreen, lessThanOrEqualTo(0.15));
-    expect(dragOfScreen, greaterThanOrEqualTo(0.62));
+    expect(watchOfScreen, lessThanOrEqualTo(0.18));
+    expect(dragOfScreen, greaterThanOrEqualTo(0.58));
   });
 
   test('castle band parks only when the body is already inside it', () {
@@ -346,8 +346,8 @@ void main() {
 
   test('cavalry half-field straight run is 1.8–2.5s; aura stays distance-gated', () {
     final g = readyGame();
-    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.12, 0.13));
-    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
+    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.15, 0.17));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.085, 0.001));
     final half = g.fieldH * 0.5;
     final landing = Offset(g.size.x * 0.50, g.watchH + 40);
     final start = Offset(landing.dx, landing.dy + half);

@@ -799,7 +799,7 @@ class _TutorialShellState extends State<TutorialShell> {
 
   String get _sessionTitle {
     if (_tutorial.session == TutorialSession.session1) return '教學場1：突撃';
-    if (_tutorial.session == TutorialSession.session2) return '教學場2：迎擊';
+    if (_tutorial.session == TutorialSession.session2) return '教學場2：槍→弓→回城';
     return '教學';
   }
 

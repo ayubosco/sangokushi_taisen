@@ -77,9 +77,9 @@ void main() {
         game.dragging = false;
         game.dragTo = null;
         game.selectedIndex = null;
-        expect(game.watchH / game.size.y, closeTo(0.125, 0.001));
+        expect(game.watchH / game.size.y, closeTo(0.16, 0.001));
         expect(game.fieldH / game.size.y, closeTo(0.875, 0.001));
-        expect(game.tokenCardSize.width / game.size.x, closeTo(0.10, 0.001));
+        expect(game.tokenCardSize.width / game.size.x, closeTo(0.085, 0.001));
         expect(TaisenGame.kSoftPinPathPx, 300);
         await shoot('pr9-h0-e09bd07-fullscreen-idle.png');
 

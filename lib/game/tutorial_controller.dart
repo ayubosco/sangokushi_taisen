@@ -20,6 +20,11 @@ enum S2Phase {
   waitTurn,
   interceptHit,
   failRetry,
+  /// Soft Lock Field1: stand bow → 蓄勢 → 射 (after 槍).
+  bowTeach,
+  /// Soft Lock Field1: drag own into 歸城區 (after 弓). Was strategyOrReturn either/or.
+  returnCity,
+  /// Shot / legacy alias for [returnCity] stratagem stills.
   strategyOrReturn,
   tipDone,
   passed,
@@ -80,7 +85,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '睇住己方槍兵槍尖光（常在）；敵騎氣勢撞到槍尖就自動迎擊';
+    tipText = '場2槍教學：拖己方槍兵向敵騎，槍尖對住敵先迎擊（跟手指轉面，唔好淨等）';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -109,6 +114,8 @@ class TutorialController extends ChangeNotifier {
             s2 == S2Phase.waitTurn ||
             s2 == S2Phase.interceptHit ||
             s2 == S2Phase.failRetry ||
+            s2 == S2Phase.bowTeach ||
+            s2 == S2Phase.returnCity ||
             s2 == S2Phase.strategyOrReturn)) {
       return;
     }
@@ -172,7 +179,7 @@ class TutorialController extends ChangeNotifier {
           phaseC = 0;
           s2 = S2Phase.enemyApproach;
           enemyAuraVisible = true;
-          tipText = '敵騎氣勢出咗 — 唔好急，等氣勢撞到槍尖就自動迎擊';
+          tipText = '敵騎氣勢出咗 — 準備拖槍兵對住敵（槍尖光常在）';
           // ignore: avoid_print
           print('VERIFY_S2 auraVisible phaseC=$phaseC');
           notifyListeners();
@@ -182,17 +189,17 @@ class TutorialController extends ChangeNotifier {
         if (phaseC >= 0.3) {
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '仲要等陣… 槍尖光常在，等敵氣勢夠撞尖';
+          tipText = '仲要等陣… 槍尖光常在；夠鐘就拖槍對敵';
           notifyListeners();
         }
         break;
       case S2Phase.waitTurn:
-        // Aura must stay visible ≥1C before player may turn facing / intercept.
+        // Aura must stay visible ≥1C before player may MOVE-aim tip / intercept.
         if (phaseC >= 1.0 && !turnWindowOpen) {
           turnWindowOpen = true;
-          tipText = '夠喇！敵氣勢撞到槍尖 — 自動迎擊';
+          tipText = '夠喇！拖槍兵向敵騎 — 槍尖對住就迎擊（唔好淨等）';
           tipSkippable = false;
-          facingCorrect = true; // tip always on toward threat
+          // Soft Lock: facingCorrect only after MOVE aim — never auto-pass.
           // ignore: avoid_print
           print('VERIFY_S2 turnWindowOpen phaseC=$phaseC');
           notifyListeners();
@@ -207,7 +214,7 @@ class TutorialController extends ChangeNotifier {
           enemyAuraVisible = true;
           phaseC = 0;
           s2 = S2Phase.waitTurn;
-          tipText = '再嚟過：等敵氣勢撞到槍尖就自動迎擊';
+          tipText = '再嚟過：拖槍兵向敵，槍尖對住先迎擊';
           notifyListeners();
         }
         break;
@@ -333,18 +340,29 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Player taps own spear to change facing once turn window is open.
+  /// Soft Lock Field1: MOVE aims the tip. Tap alone does not grant facing.
+  /// Early tap (before turn window) still fails so the ≥1C gate stays readable.
   void onTapTurnFacing() {
     if (session != TutorialSession.session2) return;
     if (s2 != S2Phase.waitTurn && s2 != S2Phase.interceptHit) return;
     if (!turnWindowOpen) {
-      _failS2('太早喇 — 等敵氣勢夠先郁');
+      _failS2('太早喇 — 等敵氣勢夠先拖槍對敵');
       return;
     }
+    tipText = '拖槍兵向敵騎 — 跟手指轉面，槍尖對住先迎擊';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// Soft Lock: player marched spear so tip faces the charging enemy.
+  void onSpearAimedByMove() {
+    if (session != TutorialSession.session2) return;
+    if (s2 != S2Phase.waitTurn && s2 != S2Phase.interceptHit) return;
+    if (!turnWindowOpen) return;
     if (facingCorrect) return;
     facingCorrect = true;
     s2 = S2Phase.interceptHit;
-    tipText = '槍尖朝敵 — 氣勢撞尖就自動迎擊';
+    tipText = '槍尖對住喇 — 等敵氣勢撞尖就迎擊';
     tipSkippable = false;
     notifyListeners();
   }
@@ -364,12 +382,12 @@ class TutorialController extends ChangeNotifier {
     }
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
-      s2 = S2Phase.strategyOrReturn;
-      tipText = '迎擊成功！撳右下「計略」，或拖返己城帶';
+      s2 = S2Phase.bowTeach;
+      tipText = '槍過關！下一招弓教學：點己方弓兵，停穩蓄勢自動射（唔好拖走）';
       tipSkippable = false;
       notifyListeners();
     } else {
-      _failS2('槍尖未對敵 — 等氣勢撞尖先');
+      _failS2('槍尖未對敵 — 拖槍對住敵先');
     }
   }
 
@@ -386,15 +404,44 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void onStrategy() {
-    if (session != TutorialSession.session2 || s2 != S2Phase.strategyOrReturn) return;
+  void onSelectBow() {
+    if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
+    tipText = '停穩 — 蓄勢亮咗就自動射（郁就取消）';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// Soft Lock Field1: standing bow auto-shot completed.
+  void onBowShot() {
+    if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
     if (!interceptDone) return;
-    strategyOrReturnDone = true;
-    _passS2();
+    s2 = S2Phase.returnCity;
+    tipText = '弓過關！最後回城：拖任一己方入底「歸城區」';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// Legacy stratagem shot / button — Soft Lock Field1 pass is 回城 only.
+  void onStrategy() {
+    if (session != TutorialSession.session2) return;
+    if (s2 == S2Phase.strategyOrReturn) {
+      // Shot stills: stratagem counts as the old either/or gate.
+      if (!interceptDone) return;
+      strategyOrReturnDone = true;
+      _passS2();
+      return;
+    }
+    // Live Soft Lock: 計略 is flavour only — tip stays on 回城.
+    if (s2 == S2Phase.returnCity) {
+      tipText = '計略得，但場2要拖返歸城區先過關';
+      tipSkippable = false;
+      notifyListeners();
+    }
   }
 
   void onReturnCity() {
-    if (session != TutorialSession.session2 || s2 != S2Phase.strategyOrReturn) return;
+    if (session != TutorialSession.session2) return;
+    if (s2 != S2Phase.returnCity && s2 != S2Phase.strategyOrReturn) return;
     if (!interceptDone) return;
     strategyOrReturnDone = true;
     _passS2();
@@ -402,7 +449,7 @@ class TutorialController extends ChangeNotifier {
 
   void _passS2() {
     s2 = S2Phase.tipDone;
-    tipText = '教學搞掂！撳「跳過」去選勢力';
+    tipText = '槍→弓→回城搞掂！撳「跳過」去選勢力';
     tipSkippable = true;
     notifyListeners();
   }
@@ -424,7 +471,7 @@ class TutorialController extends ChangeNotifier {
     shotPassMode = true;
     session = TutorialSession.session2;
     s2 = S2Phase.tipDone;
-    tipText = '教學搞掂！撳「跳過」去選勢力';
+    tipText = '槍→弓→回城搞掂！撳「跳過」去選勢力';
     tipSkippable = true;
     interceptDone = true;
     strategyOrReturnDone = true;
@@ -456,7 +503,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.strategyOrReturn;
     phaseC = 1.0;
-    tipText = '撳右下「計略」，或拖返己城帶搞掂';
+    tipText = '拖返己城帶搞掂（或撳計略・shot）';
     tipSkippable = false;
     interceptDone = true;
     strategyOrReturnDone = false;

@@ -15,13 +15,13 @@ void main() {
     return g;
   }
 
-  test('H0 A ratios: watch 0.125, field 0.875, size 0.10, castle 0.12', () {
+  test('H0 A Soft Lock: watch 0.16, field 0.84, token 0.085, castle 0.12', () {
     final g = sized();
-    expect(TaisenGame.kWatchFractionOfGame, closeTo(0.125, 0.0001));
-    expect(g.watchH / g.size.y, closeTo(0.125, 0.0001));
-    expect(g.fieldH / g.size.y, closeTo(0.875, 0.0001));
-    expect(TaisenGame.kTokenWidthFracOfField, 0.10);
-    expect(g.tokenCardSize.width / g.size.x, closeTo(0.10, 0.0001));
+    expect(TaisenGame.kWatchFractionOfGame, closeTo(0.16, 0.0001));
+    expect(g.watchH / g.size.y, closeTo(0.16, 0.0001));
+    expect(g.fieldH / g.size.y, closeTo(0.84, 0.0001));
+    expect(TaisenGame.kTokenWidthFracOfField, 0.085);
+    expect(g.tokenCardSize.width / g.size.x, closeTo(0.085, 0.0001));
     expect(TaisenGame.kCastleBandFracOfField, 0.12);
     expect(g.castleBandH / g.fieldH, closeTo(0.12, 0.0001));
     expect(TaisenGame.kCastleBandFracOfField, lessThanOrEqualTo(0.132));

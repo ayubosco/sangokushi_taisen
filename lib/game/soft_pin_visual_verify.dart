@@ -56,11 +56,11 @@ class SoftPinVisualShot {
   final double fieldOfGame;
   final double tokenOfField;
 
-  /// H0 A: Watch 0.12–0.13, drag field ≥0.87, token is 0.10.
+  /// H0 Soft Lock: Watch 0.15–0.17, drag field ≥0.83, token is 0.085.
   bool get h0Pass =>
-      watchOfGame >= 0.12 &&
-      watchOfGame <= 0.13 &&
-      fieldOfGame >= 0.87 &&
+      watchOfGame >= 0.15 &&
+      watchOfGame <= 0.17 &&
+      fieldOfGame >= 0.83 &&
       (tokenOfField - TaisenGame.kTokenWidthFracOfField).abs() < 0.001 &&
       (TaisenGame.kTokenAspectWH - 5 / 8).abs() < 0.001;
 

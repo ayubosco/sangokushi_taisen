@@ -5,19 +5,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 
 void main() {
-  test('field token width is 0.10 of field, 5:8, hit ≥12mm', () {
-    expect(TaisenGame.kTokenWidthFracOfField, 0.10);
+  test('field token width is 0.085 of field, 5:8, hit ≥12mm', () {
+    expect(TaisenGame.kTokenWidthFracOfField, 0.085);
     expect(TaisenGame.kTokenAspectWH, 5 / 8);
-    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.12, 0.13));
-    expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.87));
+    expect(TaisenGame.kWatchFractionOfGame, inInclusiveRange(0.15, 0.17));
+    expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.83));
     expect(TaisenGame.kCastleBandFracOfField, 0.12);
     expect(TaisenGame.kCastleBandFracOfField, lessThanOrEqualTo(0.132));
 
     const fieldW = 390.0;
     const tokenW = fieldW * TaisenGame.kTokenWidthFracOfField;
     const tokenH = tokenW / TaisenGame.kTokenAspectWH;
-    expect(tokenW, 39.0);
-    expect(tokenH, closeTo(62.4, 0.01));
+    expect(tokenW, closeTo(33.15, 0.01));
+    expect(tokenH, closeTo(53.04, 0.02));
 
     final g = TaisenGame()..onGameResize(Vector2(fieldW, 844));
     final hit = g.tokenHitSize;
@@ -34,17 +34,17 @@ void main() {
     expect(TaisenGame.kEnemyBand, isNot(TaisenGame.kDesktopParchment));
     expect(TaisenGame.kWatchFractionOfGame, lessThanOrEqualTo(0.18));
     expect(1 - TaisenGame.kWatchFractionOfGame, greaterThanOrEqualTo(0.55));
-    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.10, 0.001));
+    expect(TaisenGame.kTokenWidthFracOfField, closeTo(0.085, 0.001));
   });
 
   test('own and enemy field tokens share identical card size (no enemy scale)', () {
     // Regression: enemy hard-outline used to inflate +20/+12 and read as bigger card.
-    expect(TaisenGame.kTokenWidthFracOfField, 0.10);
+    expect(TaisenGame.kTokenWidthFracOfField, 0.085);
     const fieldW = 402.0;
     const ownW = fieldW * TaisenGame.kTokenWidthFracOfField;
     const enemyW = fieldW * TaisenGame.kTokenWidthFracOfField;
     expect(ownW, enemyW);
-    expect(ownW / fieldW, 0.10);
+    expect(ownW / fieldW, 0.085);
     expect(TaisenGame.kTokenAspectWH, 5 / 8);
   });
 }
