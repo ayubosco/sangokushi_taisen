@@ -4026,10 +4026,14 @@ class TaisenGame extends FlameGame {
       if (t.session != TutorialSession.session1) return;
       // Allow waitAura/hitCharge so stop→fade→drag-again rebuilds travel/aura.
       // (1c43843 fade left s1=waitAura; old gate blocked re-drag until full decay.)
+      // tipNext/failRetry must stay steerable: 突撃 pass used to soft-lock the
+      // board (Feel drag stuck) until Skip / fail timer — arcade needs peel.
       final canSteer = t.s1 == S1Phase.highlightSelect ||
           t.s1 == S1Phase.dragGuide ||
           t.s1 == S1Phase.waitAura ||
-          t.s1 == S1Phase.hitCharge;
+          t.s1 == S1Phase.hitCharge ||
+          t.s1 == S1Phase.tipNext ||
+          t.s1 == S1Phase.failRetry;
       if (!canSteer) return;
       if (i != tutorialOwnIndex) return;
       // Taisen-delta deferred: Research wanted clear-on-redirect.
@@ -4039,6 +4043,8 @@ class TaisenGame extends FlameGame {
         // FEEL/DEMO freezes own coaching — steer only, never reset shot pose.
       } else if (keepMeter) {
         // Mid-march retarget: keep travel, aura, and the coaching percent.
+      } else if (t.s1 == S1Phase.tipNext || t.s1 == S1Phase.failRetry) {
+        // Keep pass / fail tip; do not rewind to dragGuide or wipe skip gate.
       } else if (t.s1 == S1Phase.highlightSelect || t.s1 == S1Phase.dragGuide) {
         t.onSelectOwnCavalry();
       } else {
@@ -4898,6 +4904,12 @@ class TaisenGame extends FlameGame {
     _matchChargeC = 0;
     _dragTravelDist = 0;
     _prevAuraActive = false;
+    // Drop committed 落點 so 突撃 does not auto-peel through the body.
+    // Finger-down still writes a new pin via panUpdate; post-pass can re-steer.
+    if (selectedIndex == ally) {
+      dragTo = null;
+      _lastDragDir = null;
+    }
     // One 突撃 is several seconds of the overlap stub. The pair then stays in 亂戰.
     _applyHpLoss(enemy, kChargeBurstSec * kRansenTickPerSec, cause: '突撃');
   }

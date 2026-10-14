@@ -313,6 +313,85 @@ void main() {
         reason: 'open speed returns once the bodies separate');
     expect(g.debugWorldSpeedPx(1), closeTo(openEnemy, 0.01));
   });
+
+  test('Session1 tipNext after 突撃 still allows drag (no soft-lock)', () {
+    final coach = TutorialController()..resetToSession1();
+    final g = readyGame(tutorial: coach);
+    g.setupSession1Field();
+    coach.onSelectOwnCavalry();
+    final start = g.tokenCenter(0);
+    g.panStart(start);
+    g.panEnd(Offset(start.dx + 220, start.dy - 40));
+    const dt = 1 / 60;
+    var guard = 0;
+    while (!g.auraActive && g.dragTo != null && guard < 600) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.auraActive, isTrue);
+    // March pin past the enemy so pre-fix would auto-peel after 突撃.
+    g.dragTo = g.tokenCenter(1) + const Offset(80, -40);
+    g.fieldPos[0] = g.fieldPos[1];
+    g.debugStepPursuit(dt);
+    expect(g.debugHitLabel, '突撃');
+    expect(coach.s1, S1Phase.tipNext);
+    expect(g.dragTo, isNull, reason: '突撃 drops 落點 so bodies stay in 亂戰');
+    expect(g.debugInRansen(0), isTrue);
+    expect(g.debugUnitHp(1), lessThan(TaisenGame.kRansenMaxHp));
+
+    final body = g.tokenCenter(0);
+    g.panStart(body);
+    expect(g.dragging, isTrue, reason: 'tipNext must not soft-lock pan');
+    expect(coach.s1, S1Phase.tipNext, reason: 're-steer must not rewind pass tip');
+    expect(coach.tipSkippable, isTrue);
+    final away = body + Offset(g.meleeContactDist + g.tokenCardSize.width + 40, 0);
+    g.panUpdate(away);
+    g.panEnd(away);
+    expect(g.dragTo, isNotNull);
+    guard = 0;
+    while (g.debugInRansen(0) && guard < 180) {
+      g.debugStepPursuit(dt);
+      guard++;
+    }
+    expect(g.debugInRansen(0), isFalse, reason: 'post-pass peel still works');
+  });
+
+  test('cavalry vs cavalry 亂戰 drains HP in free Soft Lock and Session1', () {
+    const dt = 1 / 60;
+    final free = readyGame();
+    final at = Offset(free.size.x * 0.42, free.watchH + free.fieldH * 0.50);
+    _placeOwn(free, at, TroopType.cavalry);
+    _addEnemy(free, at);
+    expect(free.field[0].troop, TroopType.cavalry);
+    expect(free.field[1].troop, TroopType.cavalry);
+    expect(free.inMeleeContact(free.tokenCenter(0), free.tokenCenter(1)), isTrue);
+    free.debugStepPursuit(0.5);
+    expect(free.debugInRansen(0), isTrue);
+    expect(free.debugInRansen(1), isTrue);
+    expect(free.debugHitLabel, isNot('突撃'));
+    expect(free.debugUnitHp(0), lessThan(TaisenGame.kRansenMaxHp));
+    expect(free.debugUnitHp(1), lessThan(TaisenGame.kRansenMaxHp));
+    final freeAlly = free.debugUnitHp(0);
+    final freeEnemy = free.debugUnitHp(1);
+    free.debugStepPursuit(0.5);
+    expect(free.debugUnitHp(0), lessThan(freeAlly));
+    expect(free.debugUnitHp(1), lessThan(freeEnemy));
+
+    final coach = TutorialController()..resetToSession1();
+    final s1 = readyGame(tutorial: coach);
+    s1.setupSession1Field();
+    coach.onSelectOwnCavalry();
+    s1.fieldPos[0] = s1.fieldPos[1];
+    s1.debugStepPursuit(0.5);
+    expect(s1.debugInRansen(0), isTrue);
+    expect(s1.debugInRansen(1), isTrue);
+    expect(s1.debugUnitHp(0), lessThan(TaisenGame.kRansenMaxHp));
+    expect(s1.debugUnitHp(1), lessThan(TaisenGame.kRansenMaxHp));
+    final s1Ally = s1.debugUnitHp(0);
+    s1.debugStepPursuit(dt * 30);
+    expect(s1.debugUnitHp(0), lessThan(s1Ally),
+        reason: 'Session1 teach is not a silent no-damage stub');
+  });
 }
 
 void _placeOwn(TaisenGame g, Offset at, TroopType troop) {
