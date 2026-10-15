@@ -5120,7 +5120,9 @@ class TaisenGame extends FlameGame {
     final reach = forward.distance;
     if (reach < 1) return false;
     final along = ((them.dx - body.dx) * forward.dx + (them.dy - body.dy) * forward.dy) / reach;
-    return along <= reach;
+    // A body sitting on the tip can project a few ulps past `reach`.
+    // That is still the tip. It is not the approach fringe inside the hit radius.
+    return along <= reach + 1e-3;
   }
 
   /// Tip scrape is in the target's front 180° (chase from behind ≠ 迎擊).
