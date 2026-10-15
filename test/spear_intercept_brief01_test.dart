@@ -134,7 +134,11 @@ void main() {
     rear.debugStepPursuit(1 / 60);
     expect(rear.debugHitLabel, isNot('迎擊'));
     expect(rear.debugTipScrapeArmed, isFalse);
-    expect(rear.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    // Rear overlap is a light tip tick, not 迎撃 and not 亂戰.
+    expect(
+      rear.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
 
     final front = readyGame();
     _placeOwn(front, at, TroopType.spear);
@@ -158,7 +162,10 @@ void main() {
     expect(slow.debugHitLabel, isNot('迎擊'));
     expect(slow.debugGaritsuArmed, isFalse);
     expect(slow.debugTipScrapeArmed, isFalse);
-    expect(slow.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(
+      slow.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
     expect(slow.spearTipExtendedAt(0), isTrue);
   });
 
@@ -173,7 +180,10 @@ void main() {
     edge.debugSetMoveSpeed(1, 1.3);
     edge.debugStepPursuit(1 / 60);
     expect(edge.debugHitLabel, isNot('迎擊'));
-    expect(edge.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(
+      edge.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
 
     final fast = readyGame();
     _placeOwn(fast, at, TroopType.spear);
@@ -225,7 +235,10 @@ void main() {
     expect(g.debugHitLabel, isNot('迎擊'));
     expect(g.debugGaritsuArmed, isFalse);
     expect(g.debugTipScrapeArmed, isFalse);
-    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(
+      g.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
 
     g.fieldPos[1] = g.spearTipAt(0);
     g.debugStepPursuit(1 / 60);

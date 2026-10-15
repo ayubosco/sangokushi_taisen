@@ -172,6 +172,16 @@ class TaisenGame extends FlameGame {
     return _hpCause[i];
   }
 
+  /// Seconds left on 出城準備. 0 when the body is not exiting.
+  double debugSortiePrepLeft(int i) =>
+      (i >= 0 && i < _sortiePrepLeft.length) ? _sortiePrepLeft[i] : 0;
+
+  /// Readable 出城 bar is up. Not a fight and not a teleport.
+  bool debugSortiePrepVisible(int i) => debugSortiePrepLeft(i) > 0;
+
+  /// Caption drawn while [debugSortiePrepVisible]. Empty otherwise.
+  String debugSortiePrepCaption(int i) => debugSortiePrepVisible(i) ? '出城' : '';
+
   /// Visible yellow prep while this siege's body is inside the enemy castle zone.
   bool debugSiegePrepVisible(int i) {
     if (i < 0 || i >= field.length || i >= fieldPos.length) return false;
@@ -281,6 +291,11 @@ class TaisenGame extends FlameGame {
   final Set<int> _ransenUnits = {};
   /// Spear-tip contacts already resolved. Cleared when the tip leaves that body.
   final Set<String> _tipResolved = {};
+  /// Light tip-tick contacts. Separate from [_tipResolved] so a scrape can
+  /// still become 迎撃 once aura / speed / front 180 qualify.
+  final Set<String> _tipTickResolved = {};
+  /// Seconds left in 出城準備. 0 = not prepping. Moving the card does not reset it.
+  final List<double> _sortiePrepLeft = [];
   /// Playtest HP stub. Mutual ticks use [kRansenTickPerSec] — not a locked wiki DPS.
   final List<double> _unitHp = [];
   /// Playtest name of the last stub hit. Shown on the skull when that hit retreats the body.
@@ -539,6 +554,10 @@ class TaisenGame extends FlameGame {
   /// 天 wiki hysteresis: enter ~6成 into band, leave below ~4成.
   static const double kCastleEnterDepth = 0.60;
   static const double kCastleExitDepth = 0.40;
+  /// 出城準備 base at 槍 open speed. Wiki feel ≈2.5C (天 速度上昇, approximate).
+  /// Adapted Soft Lock lock — not Official seconds, not 桃園 ~4s, not RET-09.
+  /// Faster wiki speeds finish sooner (騎 before 槍). Moving during prep does not lengthen it.
+  static const double kSortiePrepBaseC = 2.5;
 
   /// Real-card 54×86 ≈ 5:8. Short-side (width) as fraction of field width (UIUX gate 0.10–0.11, max 0.12).
   /// Soft Pass Size. 5:8, own＝enemy, hit stays ≥12mm. Not the 0.085 Feel shrink.
@@ -817,6 +836,13 @@ class TaisenGame extends FlameGame {
     if (selectedIndex == null || dragTo == null) return false;
     final i = selectedIndex!;
     if (i >= fieldPos.length || isEnemyAt(i)) return false;
+    // 出城準備: already past the exit line, or the timer is running.
+    // Hold the body. Do not lengthen prep, and do not teleport to the pin.
+    if (_inSortiePrep(i)) return false;
+    if (_sortieExitPending(i)) {
+      _beginSortiePrep(i);
+      return false;
+    }
     final pos = fieldPos[i];
     final target = dragTo!;
     final delta = target - pos;
@@ -858,7 +884,7 @@ class TaisenGame extends FlameGame {
       return false;
     }
     fieldPos[i] = next;
-    _noteCastleExit(i, next);
+    _noteSortieGate(i, next);
     // 亂戰: cavalry must not build or keep filling aura while bodies overlap.
     // Contact resolution itself runs in [_tickRansen], once per frame.
     final scrambled = _ransenUnits.contains(i);
@@ -1052,6 +1078,10 @@ class TaisenGame extends FlameGame {
         _matchTurnWindowOpen = true;
       }
     }
+    _tickSortiePrep(dt);
+    // Aim + enemy aura before the tip resolves, or a same-frame 迎撃
+    // retreats the lesson cavalry and the 弓 gate never opens.
+    _syncTutorialInterceptTeach();
     _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
     _tickRansen(dt);
@@ -1694,6 +1724,8 @@ class TaisenGame extends FlameGame {
     // Aura from continuous straight travel. Waypoint retarget keeps the meter.
     // Clear travel to 0 on arrive or stop. Sharp turn (~70°) and 突撃 still clear.
     // Overlap: aura+contact → 突撃 once then 亂戰; no aura → 亂戰 directly.
+    _tickSortiePrep(dt);
+    _syncTutorialInterceptTeach();
     _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
     _tickRansen(dt);
@@ -1729,13 +1761,6 @@ class TaisenGame extends FlameGame {
           watchKind = AWindowKind.intercept;
         } else {
           watchKind = AWindowKind.intercept;
-        }
-        // Soft Lock Field1: keep match charge lane wired so tip physics can fire.
-        if (tutorialOwnIndex != null) _matchSpearIndex = tutorialOwnIndex;
-        if (tutorialEnemyIndex != null) _matchEnemyChargeIndex = tutorialEnemyIndex;
-        if (coach.enemyAuraVisible) {
-          _matchEnemyChargeC = math.max(_matchEnemyChargeC, coach.turnWindowOpen ? 1.0 : 0.5);
-          _matchTurnWindowOpen = coach.turnWindowOpen;
         }
       }
     } else if (liveChargeOn) {
@@ -1845,8 +1870,15 @@ class TaisenGame extends FlameGame {
     final tip = spearTipAt(s);
     final enemy = tokenCenter(e);
     final toEnemy = enemy - tip;
-    if (toEnemy.distance < 1) return;
     if (!_playerAimedSpear) return;
+    // The cavalry sitting on the tip has no direction vector. That contact
+    // is the aim — bailing here used to spend the hit without unlocking 弓.
+    if (toEnemy.distance <= kSpearTipHitR && toEnemy.distance < 1) {
+      coach.onSpearAimedByMove();
+      onTutorialChanged?.call();
+      return;
+    }
+    if (toEnemy.distance < 1) return;
     final facing = tipFacingAt(s);
     final forward = Offset(math.sin(facing), -math.cos(facing));
     final along = (toEnemy.dx * forward.dx + toEnemy.dy * forward.dy) / toEnemy.distance;
@@ -2098,6 +2130,11 @@ class TaisenGame extends FlameGame {
       _drawText(canvas, card.nameZh, Offset(cardAt.dx - 18, labelY), FactionColors.gold, 11);
       _drawCostStars(canvas, Offset(cardAt.dx - 18, labelY + 16), card.cost);
       _drawUnitHpBar(canvas, cardAt, tokenSize, i);
+    }
+
+    for (var i = 0; i < field.length; i++) {
+      if (!_inSortiePrep(i)) continue;
+      _drawSortiePrep(canvas, tokenCenter(i), tokenSize, i);
     }
 
     // 亂戰 is a local stamp + HP chip. Never a full-screen cut-in.
@@ -4595,17 +4632,22 @@ class TaisenGame extends FlameGame {
           _parkInCastle(i, at);
         } else {
           castleBandHot = inCastleBand(dragTo!);
-          if (wasInCastle) {
-            fieldInCastle[i] = false;
-            flashHit(i, '出陣');
+          final sortieBody = wasInCastle || _lifeAt(i) == UnitLife.readyRedeploy;
+          if (sortieBody && _pastCastleExit(at)) {
+            _beginSortiePrep(i);
           }
           if (field[i].troop == TroopType.bow) {
             // Soft Lock: move / waypoint commit cuts aim — never fire on drag release.
             _cancelBowWindup();
           }
           // Cavalry: keep aura telegraph; engagement resolves on contact.
-          // March target stays until arrival.
-          if (field[i].troop == TroopType.cavalry && _dragTravelDist > kChargeRingShowTravel01 * kChargeTravelNeed) {
+          // A castle exit does not arm 突撃 — the player marches after 出城準備.
+          final exitingCastle = wasInCastle ||
+              _lifeAt(i) == UnitLife.readyRedeploy ||
+              _inSortiePrep(i);
+          if (!exitingCastle &&
+              field[i].troop == TroopType.cavalry &&
+              _dragTravelDist > kChargeRingShowTravel01 * kChargeTravelNeed) {
             _matchChargeIndex = i;
             _matchChargeC = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
           }
@@ -4798,13 +4840,78 @@ class TaisenGame extends FlameGame {
     _unitLife[i] = UnitLife.readyRedeploy;
   }
 
-  void _noteCastleExit(int i, Offset pos) {
-    if (i < 0 || i >= fieldInCastle.length || !fieldInCastle[i]) return;
-    if (inCastleBand(pos)) return;
+  /// Adapted prep at 槍 speed, scaled by wiki open speed. Not Official seconds.
+  double _sortiePrepSeconds(TroopType troop) {
+    final wiki = pursuitWikiBase(troop);
+    if (wiki <= 0) return FxWindows.toSeconds(kSortiePrepBaseC);
+    final spear = pursuitWikiBase(TroopType.spear);
+    return FxWindows.toSeconds(kSortiePrepBaseC * (spear / wiki));
+  }
+
+  bool _inSortiePrep(int i) =>
+      i >= 0 && i < _sortiePrepLeft.length && _sortiePrepLeft[i] > 0;
+
+  /// Body is at or past the ~4成 exit line (or fully above the band).
+  bool _pastCastleExit(Offset pos) {
+    if (pos.dy < castleBandRect.top) return true;
+    return castleDepth01(pos) <= kCastleExitDepth;
+  }
+
+  /// Parked or revive-ready body has reached the exit line and still owes prep.
+  bool _sortieExitPending(int i) {
+    if (i < 0 || i >= fieldPos.length || isEnemyAt(i)) return false;
+    if (_inSortiePrep(i)) return false;
+    if (!_pastCastleExit(fieldPos[i])) return false;
+    final parked = i < fieldInCastle.length && fieldInCastle[i];
+    final ready = i < _unitLife.length && _unitLife[i] == UnitLife.readyRedeploy;
+    return parked || ready;
+  }
+
+  /// Start 出城準備 once. A later drag does not add time (天: 動かしても伸びない).
+  void _beginSortiePrep(int i) {
+    if (i < 0 || i >= field.length || isEnemyAt(i)) return;
+    while (_sortiePrepLeft.length <= i) {
+      _sortiePrepLeft.add(0);
+    }
+    if (_sortiePrepLeft[i] > 0) return;
+    _sortiePrepLeft[i] = _sortiePrepSeconds(field[i].troop);
+    while (fieldInCastle.length <= i) {
+      fieldInCastle.add(false);
+    }
     fieldInCastle[i] = false;
+    // Leaving castle is not a charge. Do not arm 突撃 on the exit drag.
+    if (_matchChargeIndex == i) {
+      _matchChargeIndex = null;
+      _matchChargeC = 0;
+    }
+  }
+
+  void _finishSortiePrep(int i) {
+    if (i < 0 || i >= field.length) return;
+    if (i < fieldInCastle.length) fieldInCastle[i] = false;
     if (i < _unitLife.length && _unitLife[i] == UnitLife.readyRedeploy) {
       _unitLife[i] = UnitLife.alive;
     }
+    // No auto-charge and no auto-walk. The committed pin, if any, marches next.
+  }
+
+  void _tickSortiePrep(double dt) {
+    if (dt <= 0) return;
+    for (var i = 0; i < field.length && i < _sortiePrepLeft.length; i++) {
+      if (_sortiePrepLeft[i] <= 0) continue;
+      _sortiePrepLeft[i] = math.max(0.0, _sortiePrepLeft[i] - dt);
+      if (_sortiePrepLeft[i] <= 0) _finishSortiePrep(i);
+    }
+  }
+
+  /// Crossed ~4成 out while parked or revive-ready. 1px inside the line does not start prep.
+  void _noteSortieGate(int i, Offset pos) {
+    if (i < 0 || i >= field.length || isEnemyAt(i)) return;
+    if (_inSortiePrep(i) || !_pastCastleExit(pos)) return;
+    final parked = i < fieldInCastle.length && fieldInCastle[i];
+    final ready = i < _unitLife.length && _unitLife[i] == UnitLife.readyRedeploy;
+    if (!parked && !ready) return;
+    _beginSortiePrep(i);
   }
 
   /// Countdown runs only inside 己城. Outside, [reviveLeft] stays put.
@@ -4820,6 +4927,10 @@ class TaisenGame extends FlameGame {
         case UnitLife.alive:
           // 歸城 heal is the parked path. Standing in the band while fighting does not heal.
           final parked = i < fieldInCastle.length && fieldInCastle[i];
+          if (parked && i < fieldPos.length && _pastCastleExit(fieldPos[i])) {
+            _beginSortiePrep(i);
+            break;
+          }
           if (parked && dt > 0 && _unitHp[i] < kRansenMaxHp) {
             _unitHp[i] = math.min(kRansenMaxHp, _unitHp[i] + kRansenTickPerSec * dt);
           }
@@ -4836,9 +4947,11 @@ class TaisenGame extends FlameGame {
           if (_reviveLeft[i] <= 0) _finishRevive(i);
           break;
         case UnitLife.readyRedeploy:
-          if (!inCastle) {
-            _unitLife[i] = UnitLife.alive;
-            if (i < fieldInCastle.length) fieldInCastle[i] = false;
+          // Countdown end does not snap onto the field or charge midfield.
+          // The player still drags past ~4成; prep then frees the march.
+          if (_inSortiePrep(i)) break;
+          if (i < fieldPos.length && _pastCastleExit(fieldPos[i])) {
+            _beginSortiePrep(i);
           }
           break;
       }
@@ -4924,8 +5037,10 @@ class TaisenGame extends FlameGame {
     int? chargeEnemy;
     for (var a = 0; a < field.length; a++) {
       if (isEnemyAt(a) || _lifeAt(a) != UnitLife.alive) continue;
+      if (_inSortiePrep(a)) continue;
       for (var e = 0; e < field.length; e++) {
         if (!isEnemyAt(e) || _lifeAt(e) != UnitLife.alive) continue;
+        if (_inSortiePrep(e)) continue;
         if (!inMeleeContact(tokenCenter(a), tokenCenter(e))) continue;
         overlapping.add(a);
         overlapping.add(e);
@@ -4993,6 +5108,36 @@ class TaisenGame extends FlameGame {
     _unitHp[i] = math.max(0.0, _unitHp[i] - amount);
     if (i < _hpCause.length) _hpCause[i] = cause;
     if (_unitHp[i] <= 0) _enterRetreat(i);
+  }
+
+  /// Gold prep bar +「出城」while the exit timer runs. Not a fullscreen cut-in.
+  void _drawSortiePrep(Canvas canvas, Offset center, Size tokenSize, int i) {
+    final total = _sortiePrepSeconds(field[i].troop);
+    final left = debugSortiePrepLeft(i);
+    final filled = total <= 0 ? 1.0 : (1.0 - left / total).clamp(0.0, 1.0);
+    final bar = Rect.fromCenter(
+      center: Offset(center.dx, center.dy - tokenSize.height / 2 - 18),
+      width: tokenSize.width,
+      height: 6,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(2)),
+      Paint()..color = const Color(0xFF3E2723),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * filled, bar.height),
+        const Radius.circular(2),
+      ),
+      Paint()..color = FactionColors.gold,
+    );
+    _drawText(
+      canvas,
+      '出城',
+      Offset(center.dx - 14, bar.top - 16),
+      FactionColors.gold,
+      13,
+    );
   }
 
   /// Always-on HP so 回城 is a read, not a guess. Same stub as castle heal.
@@ -5150,61 +5295,105 @@ class TaisenGame extends FlameGame {
     return _wikiSpeedAt(i);
   }
 
-  /// 槍尖 contact is not body 亂戰. Intercept only on tip + (cav aura | speed>1.3)
-  /// + target front 180°. Slow no-aura bump is silent (no 迎擊 FX).
+  /// 槍尖 contact is not body 亂戰.
+  /// tipTick = any tip overlap, one existing stub quantum, no「迎撃」and no 亂戰 stamp.
+  /// interceptHit = tip reached × (cav aura | speed>1.3) × target front 180°
+  /// +「迎撃」+ガリッ. Tip length stays [kSpearTipReach] (Unverified — not retuned).
   void _tickSpearTips() {
     _ensureLifeSlots();
     final still = <String>{};
     for (var s = 0; s < field.length; s++) {
       if (_lifeAt(s) != UnitLife.alive || !spearTipExtendedAt(s)) continue;
+      if (_inSortiePrep(s)) continue;
       for (var o = 0; o < field.length; o++) {
         if (o == s || isEnemyAt(s) == isEnemyAt(o)) continue;
-        if (_lifeAt(o) != UnitLife.alive) continue;
+        if (_lifeAt(o) != UnitLife.alive || _inSortiePrep(o)) continue;
         if (inMeleeContact(tokenCenter(s), tokenCenter(o))) continue;
         final tip = spearTipAt(s);
         if ((tip - tokenCenter(o)).distance > kSpearTipHitR) continue;
-        // Feel Not Pass: the leading part of the existing hit radius, still
-        // short of the tip point, is an approach scrape. It is not 迎撃 yet.
-        // Same tip length and same radius — the target must have reached the tip.
-        if (!_tipReached(s, o, tip)) continue;
         final key = '$s:$o';
         still.add(key);
-        if (_tipResolved.contains(key)) continue;
         final speed = _interceptMoveSpeed(o);
         final aura = _hasChargeAura(o);
-        // Slow no-aura bump ≠ 迎擊 — keep checking until aura/speed qualifies.
-        if (!aura && speed <= kInterceptSpeedMin) continue;
-        if (!_tipInTargetFront180(s, o, tip)) continue;
-        _tipResolved.add(key);
-        final doubleHit = speed >= kDoubleInterceptSpeed;
-        _lastInterceptDouble = doubleHit;
-        final heavy = field[o].troop == TroopType.cavalry;
-        // Existing playtest stub. Wiki +40 for 二倍 is not applied — the
-        // double read is the larger fly, not a new damage table.
-        var dmg = heavy ? kRansenMaxHp : kRansenTickPerSec;
-        if (doubleHit) dmg *= 2;
-        // Scrape is armed before HP loss so a same-tick retreat cannot skip it.
-        // Flytext stays a single fat「迎撃」— fly-geigeki OR canvas, never both.
-        // Label stays the locked「迎擊」so the existing fly path and cause rows match.
-        // ガリッ is this same ≤0.3C window (no second fly).
-        _tipScrapeAt = tip;
-        _tipScrapeLeft = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
-        flashHit(s, '迎擊');
-        _applyHpLoss(o, dmg, cause: '迎擊');
-        final tipCoach = tutorial;
-        if (tipCoach != null &&
-            tipCoach.session == TutorialSession.session2 &&
-            !tipCoach.interceptDone &&
-            !tipCoach.shotPassMode &&
-            tipCoach.facingCorrect &&
-            tipCoach.turnWindowOpen &&
-            (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn)) {
-          tipCoach.onAutoIntercept(facingWasCorrect: true);
-          onTutorialChanged?.call();
+        // 迎撃 still needs the tip point, not the approach fringe inside the radius.
+        final reached = _tipReached(s, o, tip);
+        final gated = reached && (aura || speed > kInterceptSpeedMin) && _tipInTargetFront180(s, o, tip);
+        // Lesson cavalry must survive an early / mis-aimed touch so the real
+        // 迎撃 can still unlock 弓. A light tick is not that pass.
+        final teachHold = gated && _holdTeachIntercept(s, o);
+        if (gated && !teachHold) {
+          if (_tipResolved.contains(key)) continue;
+          _tipResolved.add(key);
+          _tipTickResolved.add(key);
+          final doubleHit = speed >= kDoubleInterceptSpeed;
+          _lastInterceptDouble = doubleHit;
+          final heavy = field[o].troop == TroopType.cavalry;
+          // Existing playtest stub. Wiki +40 for 二倍 is not applied — the
+          // double read is the larger fly, not a new damage table.
+          var dmg = heavy ? kRansenMaxHp : kRansenTickPerSec;
+          if (doubleHit) dmg *= 2;
+          // Scrape is armed before HP loss so a same-tick retreat cannot skip it.
+          // Flytext stays a single fat「迎撃」— fly-geigeki OR canvas, never both.
+          // Label stays the locked「迎擊」so the existing fly path and cause rows match.
+          // ガリッ is this same ≤0.3C window (no second fly).
+          _tipScrapeAt = tip;
+          _tipScrapeLeft = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
+          flashHit(s, '迎擊');
+          _applyHpLoss(o, dmg, cause: '迎擊');
+          final tipCoach = tutorial;
+          if (tipCoach != null &&
+              tipCoach.session == TutorialSession.session2 &&
+              !tipCoach.interceptDone &&
+              !tipCoach.shotPassMode &&
+              tipCoach.facingCorrect &&
+              tipCoach.turnWindowOpen &&
+              (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn)) {
+            tipCoach.onAutoIntercept(facingWasCorrect: true);
+            onTutorialChanged?.call();
+          }
+          continue;
         }
+        if (_tipTickResolved.contains(key)) continue;
+        _tipTickResolved.add(key);
+        // Qualitative tip scrape: one quantum of the existing 亂戰 stub.
+        // Not a DPS table, not「迎撃」, not the 亂戰 mash stamp.
+        _applyHpLoss(o, kRansenTickPerSec, cause: '槍尖');
       }
     }
     _tipResolved.removeWhere((key) => !still.contains(key));
+    _tipTickResolved.removeWhere((key) => !still.contains(key));
+  }
+
+  /// Spear lesson has not earned the pass yet. Do not spend the cavalry on it.
+  bool _holdTeachIntercept(int spear, int target) {
+    final coach = tutorial;
+    if (coach == null || coach.shotPassMode) return false;
+    if (coach.session != TutorialSession.session2 || coach.interceptDone) return false;
+    if (spear != tutorialOwnIndex || target != tutorialEnemyIndex) return false;
+    if (coach.s2 == S2Phase.bowTeach ||
+        coach.s2 == S2Phase.returnCity ||
+        coach.s2 == S2Phase.strategyOrReturn ||
+        coach.s2 == S2Phase.tipDone ||
+        coach.s2 == S2Phase.passed) {
+      return false;
+    }
+    return !coach.turnWindowOpen || !coach.facingCorrect;
+  }
+
+  /// Wire the lesson aura and MOVE-aim before [_tickSpearTips].
+  void _syncTutorialInterceptTeach() {
+    final coach = tutorial;
+    if (coach == null || coach.session != TutorialSession.session2) return;
+    if (coach.shotPassMode) return;
+    if (tutorialOwnIndex != null) _matchSpearIndex = tutorialOwnIndex;
+    if (tutorialEnemyIndex != null) _matchEnemyChargeIndex = tutorialEnemyIndex;
+    if (coach.enemyAuraVisible) {
+      _matchEnemyChargeC = math.max(_matchEnemyChargeC, coach.turnWindowOpen ? 1.0 : 0.5);
+      _matchTurnWindowOpen = coach.turnWindowOpen;
+    }
+    if (coach.turnWindowOpen && !coach.interceptDone) {
+      _maybeMarkTutorialSpearAim();
+    }
   }
 
   void _ensureFacingSlots() {
@@ -5227,6 +5416,8 @@ class TaisenGame extends FlameGame {
     _cardRotateLocked.clear();
     _moveSpeedOverride.clear();
     _playerAimedSpear = false;
+    _sortiePrepLeft.clear();
+    _tipTickResolved.clear();
   }
 
   void _clearTravel(int i) {

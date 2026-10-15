@@ -52,7 +52,10 @@ void main() {
     expect(idle.debugInRansen(0), isFalse);
     expect(idle.debugHitLabel, isNot('迎擊'));
     expect(idle.debugTipScrapeArmed, isFalse);
-    expect(idle.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(
+      idle.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
 
     final g = readyGame();
     _placeOwn(g, at, TroopType.spear);
