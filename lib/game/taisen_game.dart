@@ -130,6 +130,17 @@ class TaisenGame extends FlameGame {
   /// Outermost cyan radius. 1.5× the field token width — not the old ~5× punch.
   double get _chargeRingMaxR => tokenCardSize.width * 1.5;
   String get debugHitLabel => _hitFlashLabel;
+  /// Seconds left on the board fly. 迎撃 stays ≤ [FxWindows.interceptHitFlashC].
+  double get debugHitFlashLeft => _hitFlashLeft;
+  double get debugTipScrapeLeft => _tipScrapeLeft;
+  /// True only after a resolved 迎撃. Slow bumps and rear scrapes leave it off.
+  bool get debugGaritsuArmed => _tipScrapeLeft > 0 && _hitFlashLabel == '迎擊';
+  /// ≥2.0 read. Distinct from a normal 迎撃. Not the wiki +40 damage.
+  bool get debugInterceptDouble => _lastInterceptDouble;
+  /// Wiki-relative speed the 迎撃 gate used. Test seam, not a DPS table.
+  double debugInterceptMoveSpeedForTest(int i) => _interceptMoveSpeed(i);
+  double get debugGeigekiReadScale =>
+      _lastInterceptDouble ? kDoubleInterceptReadScale : 1.0;
   /// off / charging (!aura, travel mid) / lit — CHARGE_AUTO_VERIFY mid vs lit proof.
   String get debugChargeFeel {
     if (auraActive) return 'lit';
@@ -197,20 +208,42 @@ class TaisenGame extends FlameGame {
   String? visualVerifyCaption;
 
   /// World point of the drawn 槍尖. Facing 0 is up. Not the body center.
+  /// Always the live aim — never a point that appears only on the hit frame.
   Offset spearTipAt(int i) {
     final c = tokenCenter(i);
-    final facing = isEnemyAt(i) ? enemyFacing : ownFacing;
+    final facing = tipFacingAt(i);
     return Offset(
       c.dx + math.sin(facing) * kSpearTipReach,
       c.dy - math.cos(facing) * kSpearTipReach,
     );
   }
 
-  /// Spear tip glow is on unless 亂戰 / 歸城 / sieging (tip retracts).
+  /// Tip aim. Mid-move travel wins. A card rotate while marching does not.
+  /// On settle, travel is cleared and this returns [cardFacingAt].
+  double tipFacingAt(int i) {
+    if (i >= 0 && i < _travelFacing.length) {
+      final travel = _travelFacing[i];
+      if (travel != null) return travel;
+    }
+    return cardFacingAt(i);
+  }
+
+  /// Card / stick facing. Global [ownFacing] / [enemyFacing] only if unset.
+  double cardFacingAt(int i) {
+    if (i >= 0 && i < _cardFacing.length) {
+      final card = _cardFacing[i];
+      if (card != null) return card;
+    }
+    return isEnemyAt(i) ? enemyFacing : ownFacing;
+  }
+
+  /// Spear tip glow is on unless 亂戰 / 歸城 / siege prep (tip retracts).
+  /// Eligible spears stay extended before any contact.
   bool spearTipExtendedAt(int i) {
     if (i < 0 || i >= field.length) return false;
     if (field[i].troop != TroopType.spear) return false;
     if (_ransenUnits.contains(i)) return false;
+    if (debugSiegePrepVisible(i)) return false;
     if (i < fieldInCastle.length && fieldInCastle[i]) return false;
     if (!isEnemyAt(i) && i < fieldPos.length && inCastleBand(fieldPos[i])) {
       return false;
@@ -314,16 +347,36 @@ class TaisenGame extends FlameGame {
   /// Layout stand-in so gate and wall are different contacts. Not a measured px.
   static const double kSiegeGateSpanFrac = 1 / 3;
   /// Drawn 槍尖 reach (48 × field tip scale). The hit core is smaller than body overlap.
+  /// Length is Unverified — do not retune it to invent a new hitbox.
   static const double kSpearTipReach = 48 * 1.28;
   static const double kSpearTipHitR = 18.0;
+  /// Idle 槍 aim before the player marches. Off the Field1 enemy approach so a
+  /// standing tip does not meet the cavalry. Facing only — not a new tip length.
+  static const double kSpearIdleMissFacing = 1.55;
+  /// Stronger「迎撃」fly when speed ≥ [kDoubleInterceptSpeed]. Not a DPS number.
+  static const double kDoubleInterceptReadScale = 1.45;
   /// 亂戰 world speed as a fraction of open-field march.
   /// Playtest band 0.55–0.65. 0.60 is the AC-mid default: obvious, still peelable.
   /// Not a DPS number. 突破術／捕縛術 are out of scope.
   static const double kRansenMul = 0.60;
 
   /// Session2 facing: radians; 0 = up (toward enemy).
+  /// Fallback when a body has no settled card facing yet. A march does not
+  /// swing every other spear — those keep [_cardFacing].
   double ownFacing = 0;
   double enemyFacing = math.pi;
+  /// Settled card / stick facing. Travel overrides this while the body is mid-move.
+  final List<double?> _cardFacing = [];
+  /// Non-null only while that body is taking a step. Cleared on settle / hold.
+  final List<double?> _travelFacing = [];
+  /// Card rotate during a march must not swing the tip. Settle uses the card.
+  final List<bool> _cardRotateLocked = [];
+  /// Test seam for the wiki speed gate. Not a troop and not 迎撃 DPS.
+  final List<double?> _moveSpeedOverride = [];
+  /// Session2: facingCorrect only after this spear actually marched.
+  bool _playerAimedSpear = false;
+  /// Last resolved 迎撃 was the ≥2.0 read. FX only — wiki +40 is not applied.
+  bool _lastInterceptDouble = false;
 
   /// Enemy-watch telegraph demo cycle (no combat numbers).
   /// A siege body does not consume this cycle — Watch paints the live prep gauge.
@@ -384,7 +437,6 @@ class TaisenGame extends FlameGame {
 
   /// Free-match intercept: turn window after enemy aura ≥1C.
   bool _matchTurnWindowOpen = false;
-  bool _matchFacingCorrect = false;
   int? _matchSpearIndex;
 
   void Function(CardFace card)? onRequestDetail;
@@ -813,7 +865,12 @@ class TaisenGame extends FlameGame {
     if (!scrambled) {
       _dragTravelDist += walked;
     }
-    ownFacing = _facingFromDelta(dir);
+    _noteTravelFacing(i, _facingFromDelta(dir));
+    if (tutorial != null &&
+        tutorial!.session == TutorialSession.session2 &&
+        i == tutorialOwnIndex) {
+      _playerAimedSpear = true;
+    }
     castleBandHot = inCastleBand(next);
 
     if (!scrambled) {
@@ -845,6 +902,7 @@ class TaisenGame extends FlameGame {
     // Finger still down: catching the pointer is not arrival. Dropping the
     // waypoint here froze peels (next update had nothing to walk toward).
     if (dragging) return;
+    _settleFacing(i);
     final wasIn = i < fieldInCastle.length && fieldInCastle[i];
     final coach = tutorial;
     final softReturn = coach != null &&
@@ -925,6 +983,7 @@ class TaisenGame extends FlameGame {
     final own = Cost6Roster.all.firstWhere((c) => c.id == ownId);
     final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -974,10 +1033,10 @@ class TaisenGame extends FlameGame {
     _tipScrapeLeft = 0;
     _tipScrapeAt = null;
     _retreatSplashAfterGeigeki = null;
+    _lastInterceptDouble = false;
     _matchEnemyChargeIndex = null;
     _matchEnemyChargeC = 0;
     _matchTurnWindowOpen = false;
-    _matchFacingCorrect = false;
     _matchSpearIndex = null;
     _cancelBowWindup();
   }
@@ -1055,6 +1114,7 @@ class TaisenGame extends FlameGame {
   double debugArmSpeedCompare(TroopType troop, {double distancePx = 96}) {
     final card = Cost6Roster.all.firstWhere((c) => c.troop == troop);
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -1170,6 +1230,7 @@ class TaisenGame extends FlameGame {
 
   void setupSession1Field() {
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -1195,6 +1256,7 @@ class TaisenGame extends FlameGame {
 
   void setupSession2Field() {
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -1223,8 +1285,7 @@ class TaisenGame extends FlameGame {
     _matchEnemyChargeIndex = 2;
     _matchEnemyChargeC = 0;
     _matchTurnWindowOpen = false;
-    _matchFacingCorrect = false;
-    ownFacing = 0.85; // wrong until MOVE aims tip
+    ownFacing = kSpearIdleMissFacing; // wrong until MOVE aims tip
     enemyFacing = math.pi;
     selectedIndex = 0;
     _bowWindupIndex = null;
@@ -1235,6 +1296,7 @@ class TaisenGame extends FlameGame {
 
   void setupMatchDemoField() {
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -1282,7 +1344,6 @@ class TaisenGame extends FlameGame {
     _matchEnemyChargeIndex = null;
     _matchEnemyChargeC = 0;
     _matchTurnWindowOpen = false;
-    _matchFacingCorrect = false;
     _matchSpearIndex = null;
     for (var i = 0; i < field.length; i++) {
       if (fieldIsEnemy[i] && field[i].troop == TroopType.cavalry && _matchEnemyChargeIndex == null) {
@@ -1293,7 +1354,7 @@ class TaisenGame extends FlameGame {
       }
     }
     _matchEnemyChargeC = 0;
-    ownFacing = 0.85; // wrong until player turns
+    ownFacing = kSpearIdleMissFacing; // wrong until player turns
     _bowWindupIndex = null;
     _bowWindupC = 0;
     _bowShotReady = false;
@@ -1427,6 +1488,7 @@ class TaisenGame extends FlameGame {
   /// FEEL_SHOT=drag-samefaction: Wei cavalry vs Wei cavalry mid-drag (Design outline check).
   void setupFeelDragSameFactionPose() {
     field.clear();
+    _clearPerUnitFacing();
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
@@ -1564,7 +1626,7 @@ class TaisenGame extends FlameGame {
   /// FEEL_SHOT=intercept-window: enemy aura on, spear tip glow, facing still wrong (count C).
   void setupFeelInterceptWindowPose() {
     setupSession2Field();
-    ownFacing = 0.9; // wrong facing — player must turn after ≥1C
+    ownFacing = kSpearIdleMissFacing; // wrong facing — player must turn after ≥1C
     enemyFacing = math.pi;
     watchKind = AWindowKind.intercept;
     selectedIndex = tutorialOwnIndex;
@@ -1750,7 +1812,7 @@ class TaisenGame extends FlameGame {
           t.s2 == S2Phase.failRetry;
       final marching = selectedIndex == tutorialOwnIndex && dragTo != null;
       if (spearPhases && !marching && !t.facingCorrect && !t.shotPassMode) {
-        ownFacing = 0.85; // idle wrong until MOVE
+        _holdTutorialSpearIdleMiss();
       }
       if (spearPhases &&
           t.turnWindowOpen &&
@@ -1759,15 +1821,17 @@ class TaisenGame extends FlameGame {
           tutorialEnemyIndex != null) {
         _maybeMarkTutorialSpearAim();
       }
-    } else if (tutorial == null &&
-        _matchSpearIndex != null &&
-        _matchEnemyChargeIndex == null) {
-      if (_matchFacingCorrect) {
-        ownFacing = -0.35;
-      } else {
-        ownFacing = 0.85;
-      }
     }
+  }
+
+  /// Idle tip stays off the enemy until the player marches. A tap does not aim it.
+  void _holdTutorialSpearIdleMiss() {
+    ownFacing = kSpearIdleMissFacing;
+    final s = tutorialOwnIndex;
+    if (s == null || s < 0 || s >= field.length) return;
+    _ensureFacingSlots();
+    if (!_cardRotateLocked[s]) _cardFacing[s] = kSpearIdleMissFacing;
+    _travelFacing[s] = null;
   }
 
   /// Soft Lock Field1: tip facing the charging enemy after MOVE → facingCorrect.
@@ -1782,10 +1846,11 @@ class TaisenGame extends FlameGame {
     final enemy = tokenCenter(e);
     final toEnemy = enemy - tip;
     if (toEnemy.distance < 1) return;
-    final facing = ownFacing;
+    if (!_playerAimedSpear) return;
+    final facing = tipFacingAt(s);
     final forward = Offset(math.sin(facing), -math.cos(facing));
     final along = (toEnemy.dx * forward.dx + toEnemy.dy * forward.dy) / toEnemy.distance;
-    // Tip roughly toward threat (MOVE aim). Not a combat invent.
+    // Tip roughly toward threat after a real march. Not a combat invent.
     if (along > 0.35) {
       coach.onSpearAimedByMove();
       onTutorialChanged?.call();
@@ -1935,7 +2000,7 @@ class TaisenGame extends FlameGame {
           cardW: tokenSize.width,
           cardH: tokenSize.height,
           opacity: marchShadowOpacityAt(i),
-          facing: ownFacing,
+          facing: tipFacingAt(i),
           troop: card.troop,
         );
       } else if (_lifeAt(i) != UnitLife.alive) {
@@ -1971,11 +2036,11 @@ class TaisenGame extends FlameGame {
           pulseOwn: tutorialOwnIndex == i && t != null && t.session == TutorialSession.session1,
         );
 
-        // Facing follows travel direction every frame (own while selected; enemy always).
+        // Facing follows this body's travel, then its card. Not a shared aim.
         if (isEnemy) {
-          _drawFacingArrow(canvas, center, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
+          _drawFacingArrow(canvas, center, tipFacingAt(i), const Color(0xFFFFF59D), enemyHard: true);
         } else if (selected || tutorialOwnIndex == i) {
-          _drawFacingArrow(canvas, center, ownFacing, FactionColors.gold);
+          _drawFacingArrow(canvas, center, tipFacingAt(i), FactionColors.gold);
         }
 
         final labelY = center.dy + tokenSize.height / 2 + 4;
@@ -2112,7 +2177,12 @@ class TaisenGame extends FlameGame {
         // tip-scrape is drawn once from the resolve timer, not again here.
         var drewGeigekiFly = false;
         if (isGeigeki) {
-          drewGeigekiFly = softLockCues.draw(canvas, 'fly-geigeki', flyAt);
+          drewGeigekiFly = softLockCues.draw(
+            canvas,
+            'fly-geigeki',
+            flyAt,
+            scale: debugGeigekiReadScale,
+          );
         }
         if (!drewGeigekiFly) {
           _drawFatFloatText(
@@ -2120,7 +2190,13 @@ class TaisenGame extends FlameGame {
             _hitFlashLabel,
             flyAt,
             alpha: 1,
-            fontSize: isChargePunch ? 36 : (isKisei || isRetreatSplash) ? 32 : 22,
+            fontSize: isChargePunch
+                ? 36
+                : (isKisei || isRetreatSplash)
+                    ? 32
+                    : isGeigeki
+                        ? (debugInterceptDouble ? 30 : 22)
+                        : 22,
           );
         }
         final punchCyan = (isChargePunch || isGeigeki) &&
@@ -2523,7 +2599,7 @@ class TaisenGame extends FlameGame {
               field[ownSafe].troop == TroopType.spear &&
               !spearTipExtendedAt(ownSafe);
           if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
-            _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
+            _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: tipFacingAt(ownSafe));
             // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
             _noteWatchPaint('watch-tip');
             softLockCues.draw(
@@ -2638,9 +2714,20 @@ class TaisenGame extends FlameGame {
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawWatchSiegeMirrors(canvas, band);
     if (ownSafe == null || _chargeCyanOnUnit(ownSafe)) {
-      _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
+      _drawFacingArrow(
+        canvas,
+        ownC,
+        ownSafe != null ? tipFacingAt(ownSafe) : ownFacing,
+        FactionColors.gold,
+      );
     }
-    _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
+    _drawFacingArrow(
+      canvas,
+      enemyC,
+      enemySafe != null ? tipFacingAt(enemySafe) : enemyFacing,
+      const Color(0xFFFFF59D),
+      enemyHard: true,
+    );
     if (showAWindowDebugLabels && paintOwnDemo) {
       final label = switch (kind) {
         AWindowKind.charge => '突撃氣場 蓄勢',
@@ -3523,14 +3610,10 @@ class TaisenGame extends FlameGame {
     if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
     switch (card.troop) {
       case TroopType.spear:
-        if (_ransenUnits.contains(index)) return TroopAnimPose.idle;
-        final tipLive = (!isEnemy) && (
-          (tutorial != null && tutorial!.session == TutorialSession.session2) ||
-          (_matchSpearIndex == index) ||
-          (_matchEnemyChargeIndex != null)
-        );
-        if (tipLive) return TroopAnimPose.attack;
-        return TroopAnimPose.idle;
+        // Tip sprite stays out whenever the hitbox is out. The hit frame must
+        // not be the first time the spear looks armed.
+        if (!spearTipExtendedAt(index)) return TroopAnimPose.idle;
+        return TroopAnimPose.attack;
       case TroopType.cavalry:
         if (_matchChargeIndex == index || (isEnemy && _matchEnemyChargeIndex == index)) {
           return TroopAnimPose.attack;
@@ -3643,7 +3726,13 @@ class TaisenGame extends FlameGame {
       if (isOwn && card.troop == TroopType.spear) {
         // Tip stays out for coaching, and retracts for the whole overlap (亂戰).
         if (spearTipExtendedAt(index)) {
-          _drawInterceptStance(canvas, c, 44, const Color(0xFFB2EBF2).withValues(alpha: 0.88), facing: ownFacing);
+          _drawInterceptStance(
+            canvas,
+            c,
+            44,
+            const Color(0xFFB2EBF2).withValues(alpha: 0.88),
+            facing: tipFacingAt(index),
+          );
         }
         return;
       }
@@ -3692,14 +3781,14 @@ class TaisenGame extends FlameGame {
         }
         break;
       case TroopType.spear:
-        // Idle facing still shows tip glow (槍尖光常在) — retracted during 亂戰.
+        // Idle facing still shows tip glow (槍尖光常在) — retracted during 亂戰 / 攻城.
         if (!spearTipExtendedAt(index)) break;
         _drawInterceptStance(
           canvas,
           c,
           42,
           const Color(0xFFB2EBF2).withValues(alpha: 0.82),
-          facing: ownFacing,
+          facing: tipFacingAt(index),
         );
         break;
       case TroopType.bow:
@@ -4293,9 +4382,7 @@ class TaisenGame extends FlameGame {
         i == _matchSpearIndex &&
         _matchEnemyChargeIndex != null) {
       selectedIndex = i;
-      if (_matchTurnWindowOpen) {
-        _matchFacingCorrect = true;
-      }
+      // MOVE aims the tip. A tap must not rotate it onto the cavalry.
       return;
     }
 
@@ -4367,6 +4454,7 @@ class TaisenGame extends FlameGame {
         _resetMeterForFreshMarch();
         dragFrom = tokenCenter(i);
         dragTo = _clampFieldPos(local);
+        _aimSelectedSpearNow();
         if (bowOk) {
           // Dragging bow cancels 蓄勢 — tip already warns 停穩.
           _cancelBowWindup();
@@ -4411,6 +4499,7 @@ class TaisenGame extends FlameGame {
       if (!keepMeter) _resetMeterForFreshMarch();
       dragFrom = tokenCenter(i);
       dragTo = _clampFieldPos(local);
+      _aimSelectedSpearNow();
       onTutorialChanged?.call();
       return;
     }
@@ -4422,6 +4511,7 @@ class TaisenGame extends FlameGame {
     if (!keepMeter) _resetMeterForFreshMarch();
     dragFrom = tokenCenter(i);
     dragTo = _clampFieldPos(local);
+    _aimSelectedSpearNow();
   }
 
   /// Same unit, waypoint still committed — a new 落點 is a retarget, not a stop.
@@ -4442,6 +4532,8 @@ class TaisenGame extends FlameGame {
     // Pin stays out of the Watch and one token off the bezel.
     final next = clampPlayableCenter(local);
     dragTo = next;
+    // Tip turns with the finger. Do not wait for the body to walk.
+    _aimSelectedSpearNow();
   }
 
 
@@ -4464,6 +4556,7 @@ class TaisenGame extends FlameGame {
     // Release COMMITS the waypoint. Body keeps marching at troop speed.
     // Never snap/teleport the body to the finger. Off-board points clamp in.
     dragTo = clampPlayableCenter(local);
+    _aimSelectedSpearNow();
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -4952,9 +5045,10 @@ class TaisenGame extends FlameGame {
     );
   }
 
-  /// 迎擊: the designated enemy cavalry (free-match demo) walks onto the own
-  /// spear tip and holds there. The tip turns to that approach. Contact inside
-  /// [kSpearTipHitR] is the counter — a distant aura or a 1C timer is not.
+  /// 迎擊 lane: the designated enemy cavalry walks the straight line to the
+  /// spear body and holds on that line at tip reach. It does not home onto a
+  /// tip that is aimed somewhere else. A mis-aimed tip therefore never fires.
+  /// Contact inside [kSpearTipHitR] is the counter — a distant aura is not.
   /// Not a new DPS table. A body already in 亂戰 does not keep charging.
   void _advanceChargingEnemy(double dt) {
     if (tutorial?.shotPassMode == true) return;
@@ -4963,24 +5057,30 @@ class TaisenGame extends FlameGame {
     if (e == null || s == null) return;
     if (e >= fieldPos.length || s >= fieldPos.length) return;
     if (_lifeAt(e) != UnitLife.alive || _lifeAt(s) != UnitLife.alive) return;
+    if (_ransenUnits.contains(e) || dt <= 0) return;
     final from = fieldPos[e];
     final spearAt = fieldPos[s];
-    final fromSpear = from - spearAt;
-    if (fromSpear.distance < 1) return;
-    // Soft Lock: tip facing is travel-facing from player MOVE only — never auto-aim.
-    // Enemy still faces the spear body while closing.
-    enemyFacing = math.atan2(-fromSpear.dx, fromSpear.dy);
-    final tip = spearTipAt(s);
-    final delta = tip - from;
-    final dist = delta.distance;
-    // In spear range: hold so the tip can counter. Do not dive into the body.
-    if (dist <= kSpearTipHitR || dt <= 0 || _ransenUnits.contains(e)) return;
+    final away = from - spearAt;
+    final awayDist = away.distance;
+    if (awayDist < 1) return;
+    // Standoff on the approach, on the tip-reach point. Not the current tip,
+    // and not the leading edge of the hit radius — that fringe fired early.
+    final hold = spearAt + away / awayDist * kSpearTipReach;
+    final toHold = hold - from;
+    final holdDist = toHold.distance;
     final speed = _worldSpeedPx(e);
     final dtCap = speed / kPursuitMinFps;
-    final step = math.min(dist, math.min(speed * dt, dtCap));
-    if (step <= 0 || dist < 1) return;
-    final dir = delta / dist;
+    final step = math.min(holdDist, math.min(speed * dt, dtCap));
+    if (holdDist <= step || holdDist <= kArrivalEpsilon) {
+      fieldPos[e] = hold;
+      if (toHold.distance >= 0.5) _noteTravelFacing(e, _facingFromDelta(toHold));
+      _clearTravel(e);
+      return;
+    }
+    if (step <= 0) return;
+    final dir = toHold / holdDist;
     fieldPos[e] = from + dir * step;
+    _noteTravelFacing(e, _facingFromDelta(dir));
   }
 
   /// Test hook: the enemy cavalry that is walking onto the spear, if any.
@@ -5011,17 +5111,46 @@ class TaisenGame extends FlameGame {
     return auraActive && _ownsLiveCharge(i);
   }
 
-  /// Tip scrape is in the target's front 180° (chase from behind ≠ 迎擊).
-  bool _tipInTargetFront180(int target, Offset tip) {
-    final c = tokenCenter(target);
-    final facing = isEnemyAt(target) ? enemyFacing : ownFacing;
-    final forward = Offset(math.sin(facing), -math.cos(facing));
-    final toTip = tip - c;
-    if (toTip.distance < 0.5) return true;
-    return toTip.dx * forward.dx + toTip.dy * forward.dy > 0;
+  /// True once [target] has closed to the tip point along the tip axis.
+  /// Overlap that is still beyond the tip is the early approach scrape.
+  bool _tipReached(int spear, int target, Offset tip) {
+    final body = tokenCenter(spear);
+    final them = tokenCenter(target);
+    final forward = tip - body;
+    final reach = forward.distance;
+    if (reach < 1) return false;
+    final along = ((them.dx - body.dx) * forward.dx + (them.dy - body.dy) * forward.dy) / reach;
+    // A body sitting on the tip can project a few ulps past `reach`.
+    // That is still the tip. It is not the approach fringe inside the hit radius.
+    return along <= reach + 1e-3;
   }
 
-  /// 槍尖 contact is not body 亂戰. Intercept only on tip + (aura cav | speed>1.3)
+  /// Tip scrape is in the target's front 180° (chase from behind ≠ 迎擊).
+  /// A tip anchor that has just stepped through the center still counts when
+  /// the spear body is in that front half — the hit came from the front.
+  bool _tipInTargetFront180(int spear, int target, Offset tip) {
+    final c = tokenCenter(target);
+    final facing = tipFacingAt(target);
+    final forward = Offset(math.sin(facing), -math.cos(facing));
+    bool inFront(Offset fromTarget) {
+      if (fromTarget.distance < 0.5) return true;
+      return fromTarget.dx * forward.dx + fromTarget.dy * forward.dy >= 0;
+    }
+    if (inFront(tip - c)) return true;
+    return inFront(tokenCenter(spear) - c);
+  }
+
+  /// Wiki move speed for the 迎撃 gate. Aura cavalry is 1.32. An override is
+  /// a test seam for >1.3 and ≥2.0 — not a new troop and not base DPS.
+  double _interceptMoveSpeed(int i) {
+    if (i >= 0 && i < _moveSpeedOverride.length) {
+      final over = _moveSpeedOverride[i];
+      if (over != null) return over;
+    }
+    return _wikiSpeedAt(i);
+  }
+
+  /// 槍尖 contact is not body 亂戰. Intercept only on tip + (cav aura | speed>1.3)
   /// + target front 180°. Slow no-aura bump is silent (no 迎擊 FX).
   void _tickSpearTips() {
     _ensureLifeSlots();
@@ -5034,22 +5163,30 @@ class TaisenGame extends FlameGame {
         if (inMeleeContact(tokenCenter(s), tokenCenter(o))) continue;
         final tip = spearTipAt(s);
         if ((tip - tokenCenter(o)).distance > kSpearTipHitR) continue;
+        // Feel Not Pass: the leading part of the existing hit radius, still
+        // short of the tip point, is an approach scrape. It is not 迎撃 yet.
+        // Same tip length and same radius — the target must have reached the tip.
+        if (!_tipReached(s, o, tip)) continue;
         final key = '$s:$o';
         still.add(key);
         if (_tipResolved.contains(key)) continue;
-        final speed = _wikiSpeedAt(o);
+        final speed = _interceptMoveSpeed(o);
         final aura = _hasChargeAura(o);
         // Slow no-aura bump ≠ 迎擊 — keep checking until aura/speed qualifies.
         if (!aura && speed <= kInterceptSpeedMin) continue;
-        if (!_tipInTargetFront180(o, tip)) continue;
+        if (!_tipInTargetFront180(s, o, tip)) continue;
         _tipResolved.add(key);
         final doubleHit = speed >= kDoubleInterceptSpeed;
+        _lastInterceptDouble = doubleHit;
         final heavy = field[o].troop == TroopType.cavalry;
+        // Existing playtest stub. Wiki +40 for 二倍 is not applied — the
+        // double read is the larger fly, not a new damage table.
         var dmg = heavy ? kRansenMaxHp : kRansenTickPerSec;
         if (doubleHit) dmg *= 2;
         // Scrape is armed before HP loss so a same-tick retreat cannot skip it.
         // Flytext stays a single fat「迎撃」— fly-geigeki OR canvas, never both.
         // Label stays the locked「迎擊」so the existing fly path and cause rows match.
+        // ガリッ is this same ≤0.3C window (no second fly).
         _tipScrapeAt = tip;
         _tipScrapeLeft = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
         flashHit(s, '迎擊');
@@ -5059,18 +5196,104 @@ class TaisenGame extends FlameGame {
             tipCoach.session == TutorialSession.session2 &&
             !tipCoach.interceptDone &&
             !tipCoach.shotPassMode &&
+            tipCoach.facingCorrect &&
+            tipCoach.turnWindowOpen &&
             (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn)) {
-          if (!tipCoach.facingCorrect) {
-            tipCoach.onSpearAimedByMove();
-          }
-          if (tipCoach.turnWindowOpen) {
-            tipCoach.onAutoIntercept(facingWasCorrect: true);
-            onTutorialChanged?.call();
-          }
+          tipCoach.onAutoIntercept(facingWasCorrect: true);
+          onTutorialChanged?.call();
         }
       }
     }
     _tipResolved.removeWhere((key) => !still.contains(key));
+  }
+
+  void _ensureFacingSlots() {
+    while (_cardFacing.length < field.length) {
+      _cardFacing.add(null);
+      _travelFacing.add(null);
+      _cardRotateLocked.add(false);
+    }
+    if (_cardFacing.length > field.length) {
+      final n = field.length;
+      _cardFacing.removeRange(n, _cardFacing.length);
+      _travelFacing.removeRange(n, _travelFacing.length);
+      _cardRotateLocked.removeRange(n, _cardRotateLocked.length);
+    }
+  }
+
+  void _clearPerUnitFacing() {
+    _cardFacing.clear();
+    _travelFacing.clear();
+    _cardRotateLocked.clear();
+    _moveSpeedOverride.clear();
+    _playerAimedSpear = false;
+  }
+
+  void _clearTravel(int i) {
+    if (i >= 0 && i < _travelFacing.length) _travelFacing[i] = null;
+  }
+
+  /// Finger moved. The spear tip matches the new waypoint before the body steps.
+  void _aimSelectedSpearNow() {
+    final i = selectedIndex;
+    final to = dragTo;
+    if (i == null || to == null) return;
+    if (i < 0 || i >= field.length || i >= fieldPos.length) return;
+    if (isEnemyAt(i) || field[i].troop != TroopType.spear) return;
+    final delta = to - fieldPos[i];
+    if (delta.distance < 0.5) return;
+    _noteTravelFacing(i, _facingFromDelta(delta));
+    if (tutorial != null &&
+        tutorial!.session == TutorialSession.session2 &&
+        i == tutorialOwnIndex) {
+      _playerAimedSpear = true;
+    }
+  }
+
+  /// Mid-move aim. Other bodies keep the facing they already had.
+  void _noteTravelFacing(int i, double facing) {
+    if (i < 0 || i >= field.length) return;
+    _ensureFacingSlots();
+    for (var k = 0; k < field.length; k++) {
+      if (k == i) continue;
+      _cardFacing[k] ??= isEnemyAt(k) ? enemyFacing : ownFacing;
+    }
+    _travelFacing[i] = facing;
+    if (!_cardRotateLocked[i]) _cardFacing[i] = facing;
+    if (isEnemyAt(i)) {
+      enemyFacing = facing;
+    } else if (selectedIndex == i || i == tutorialOwnIndex) {
+      ownFacing = facing;
+    }
+  }
+
+  /// Arrival: tip matches the card. A rotate held during the march wins.
+  void _settleFacing(int i) {
+    _ensureFacingSlots();
+    if (i < 0 || i >= field.length) return;
+    _travelFacing[i] = null;
+    if (!isEnemyAt(i) && (selectedIndex == i || i == tutorialOwnIndex)) {
+      ownFacing = cardFacingAt(i);
+    }
+  }
+
+  /// Test seam: rotate the card without swinging a live march's tip.
+  void debugLockCardFacing(int i, double radians) {
+    _ensureFacingSlots();
+    if (i < 0 || i >= field.length) return;
+    _cardFacing[i] = radians;
+    _cardRotateLocked[i] = true;
+    if (!isEnemyAt(i) && (i < _travelFacing.length && _travelFacing[i] == null)) {
+      ownFacing = radians;
+    }
+  }
+
+  /// Test seam for speed > 1.3 and ≥ 2.0. Not an Official skill and not DPS.
+  void debugSetMoveSpeed(int i, double wiki) {
+    while (_moveSpeedOverride.length <= i) {
+      _moveSpeedOverride.add(null);
+    }
+    _moveSpeedOverride[i] = wiki;
   }
 
   void _ensureSiegeSlots() {
