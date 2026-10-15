@@ -76,7 +76,9 @@ void main() {
     exiting.g.panStart(origin);
     exiting.g.panEnd(outside);
     expect(exiting.g.debugSortiePrepVisible(0), isTrue);
-    expect(exiting.g.debugSortiePrepCaption(0), '出城');
+    expect(exiting.g.debugSortiePrepCaption(0), TaisenGame.kSortiePrepCaption);
+    expect(exiting.g.debugSortiePrepCaption(0), contains('出城'));
+    expect(exiting.g.debugSortiePrepCaption(0), contains('出征'));
     expect(exiting.g.fieldInCastle[0], isFalse);
     final left = exiting.g.debugSortiePrepLeft(0);
     expect(left, closeTo(spearSec, 0.05));
@@ -164,6 +166,9 @@ void main() {
     idleGame.debugStepPursuit(1 / 60);
     expect(idle.s2, isNot(S2Phase.bowTeach));
     expect(idle.interceptDone, isFalse);
+    expect(idle.bowLessonUnlocked, isFalse);
+    expect(idle.lessons.firstWhere((l) => l.id == 'bow').name, '弓教學');
+    expect(idle.lessons.firstWhere((l) => l.id == 'bow').gate, TutorialLessonGate.locked);
     expect(idleGame.debugUnitLife(enemy), UnitLife.alive);
 
     for (var i = 0; i < 40; i++) {
@@ -186,6 +191,10 @@ void main() {
 
     expect(coach.interceptDone, isTrue);
     expect(coach.s2, S2Phase.bowTeach);
+    expect(coach.bowLessonUnlocked, isTrue);
+    expect(coach.bowLessonLive, isTrue);
+    expect(coach.lessons.firstWhere((l) => l.id == 'bow').gate, TutorialLessonGate.current);
+    expect(coach.lessons.firstWhere((l) => l.id == 'return').gate, TutorialLessonGate.locked);
     expect(coach.s2, isNot(S2Phase.returnCity));
     expect(coach.strategyOrReturnDone, isFalse);
     expect(g.debugHitLabel, '迎擊');

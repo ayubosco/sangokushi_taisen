@@ -16,6 +16,7 @@ import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
 import 'ui/card_detail_sheet.dart';
+import 'ui/tutorial_lesson_rail.dart';
 
 /// dart-define: TUTORIAL_SHOT=s1pass|s2pass|s1aura|s2coach for Simulator captures.
 const String kTutorialShot = String.fromEnvironment('TUTORIAL_SHOT', defaultValue: '');
@@ -808,10 +809,16 @@ class _TutorialShellState extends State<TutorialShell> {
     return Scaffold(
       backgroundColor: FactionColors.lacquer,
       body: SoftPassPlayFrame(
-        hud: _Hud(
-          game: _game,
-          subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
-          bingfaLabel: widget.bingfaLabel,
+        hud: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _Hud(
+              game: _game,
+              subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
+              bingfaLabel: widget.bingfaLabel,
+            ),
+            TutorialLessonRail(controller: _tutorial),
+          ],
         ),
         onStrategy: () {
           _game.triggerStrategyFx();
