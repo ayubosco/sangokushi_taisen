@@ -14,6 +14,7 @@ import 'soft_lock_cues.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 import 'unit_life.dart';
+import 'watch_siege_mirror.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
@@ -325,7 +326,12 @@ class TaisenGame extends FlameGame {
   double enemyFacing = math.pi;
 
   /// Enemy-watch telegraph demo cycle (no combat numbers).
+  /// A siege body does not consume this cycle — Watch paints the live prep gauge.
   AWindowKind watchKind = AWindowKind.charge;
+  /// Set by tests that need the Watch paint tags for one frame.
+  bool debugRecordWatchPaint = false;
+  final List<String> _watchPaint = [];
+  List<String> get debugWatchPaintLog => List.unmodifiable(_watchPaint);
   double _watchPhaseLeft = FxWindows.toSeconds(FxWindows.chargeAuraVisibleC);
   double _pulse = 0;
 
@@ -2401,6 +2407,9 @@ class TaisenGame extends FlameGame {
 
   void _drawCastleRaceBars(Canvas canvas, double w, double fieldTop) {
     // Dual castle bars on the watch/field seam. Height stays inside the watch band.
+    // A completed prep's gate/wall nick is this same pair of fills.
+    _noteWatchPaint('castle-own:${ownCastle.clamp(0.0, 1.0).toStringAsFixed(4)}');
+    _noteWatchPaint('castle-enemy:${enemyCastle.clamp(0.0, 1.0).toStringAsFixed(4)}');
     final band = Rect.fromLTWH(0, fieldTop - 22, w, 22);
     canvas.drawRect(band, Paint()..color = FactionColors.lacquer);
     const barH = 14.0;
@@ -2428,7 +2437,9 @@ class TaisenGame extends FlameGame {
   }
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
+  /// Siege prep is the field gauge mapped into this band, not the demo cycle.
   void _drawWatchFullField(Canvas canvas, Rect band) {
+    if (debugRecordWatchPaint) _watchPaint.clear();
     canvas.save();
     canvas.clipRect(band);
     final t = tutorial;
@@ -2455,35 +2466,40 @@ class TaisenGame extends FlameGame {
 
     canvas.save();
     canvas.clipRect(_watchFxClip());
+    // Siege prep is a live gauge. The demo cycle must not poster over that body.
+    final paintOwnDemo = watchPaintsOwnDemoPlate(ownIsSiege: _watchOwnIsSiege(ownSafe));
     switch (kind) {
       case AWindowKind.charge:
-        final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
-        final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
-        final live01 = math.max(travel01, match01);
-        // BINARY: Watch mirrors field. Charging = ZERO cyan. Lit = SNAP rings on a living body.
-        final ownIsCavalry = ownSafe != null &&
-            ownSafe < field.length &&
-            field[ownSafe].troop == TroopType.cavalry;
-        if (auraActive && ownIsCavalry && _chargeCyanOnUnit(ownSafe)) {
-          _drawWatchChargeRings(
-            canvas,
-            ownC,
-            52 * ownScale,
-            const Color(0xFF00E5FF),
-            tokenScale: ownScale,
-            whiteCore: true,
-            facing: ownFacing,
-          );
-        } else if (ownIsCavalry &&
-            live01 > kChargeRingShowTravel01 &&
-            _chargeCyanOnUnit(ownSafe)) {
-          _drawText(
-            canvas,
-            '蓄緊 ${(live01 * 100).round()}%',
-            Offset(ownC.dx - 22, ownC.dy - 28),
-            FactionColors.gold,
-            11,
-          );
+        if (paintOwnDemo) {
+          _noteWatchPaint('demo-charge');
+          final travel01 = (_dragTravelDist / kChargeTravelNeed).clamp(0.0, 1.0);
+          final match01 = (_matchChargeIndex != null ? _matchChargeC : 0.0).clamp(0.0, 1.0);
+          final live01 = math.max(travel01, match01);
+          // BINARY: Watch mirrors field. Charging = ZERO cyan. Lit = SNAP rings on a living body.
+          final ownIsCavalry = ownSafe != null &&
+              ownSafe < field.length &&
+              field[ownSafe].troop == TroopType.cavalry;
+          if (auraActive && ownIsCavalry && _chargeCyanOnUnit(ownSafe)) {
+            _drawWatchChargeRings(
+              canvas,
+              ownC,
+              52 * ownScale,
+              const Color(0xFF00E5FF),
+              tokenScale: ownScale,
+              whiteCore: true,
+              facing: ownFacing,
+            );
+          } else if (ownIsCavalry &&
+              live01 > kChargeRingShowTravel01 &&
+              _chargeCyanOnUnit(ownSafe)) {
+            _drawText(
+              canvas,
+              '蓄緊 ${(live01 * 100).round()}%',
+              Offset(ownC.dx - 22, ownC.dy - 28),
+              FactionColors.gold,
+              11,
+            );
+          }
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
           _drawWatchChargeRings(
@@ -2498,22 +2514,26 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.intercept:
-        // Ellipse, wedge, and the cyan pillar are a living spear's 迎擊 mark.
-        // A retreating or in-castle body keeps the 撤 card with none of that.
-        final retractSpear = ownSafe != null &&
-            ownSafe < field.length &&
-            field[ownSafe].troop == TroopType.spear &&
-            !spearTipExtendedAt(ownSafe);
-        if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
-          _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
-          // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
-          softLockCues.draw(
-            canvas,
-            'watch-tip',
-            ownC + Offset(0, -22 * ownScale),
-            alpha: 0.95,
-            scale: ownScale * 1.35,
-          );
+        if (paintOwnDemo) {
+          _noteWatchPaint('demo-intercept');
+          // Ellipse, wedge, and the cyan pillar are a living spear's 迎擊 mark.
+          // A retreating or in-castle body keeps the 撤 card with none of that.
+          final retractSpear = ownSafe != null &&
+              ownSafe < field.length &&
+              field[ownSafe].troop == TroopType.spear &&
+              !spearTipExtendedAt(ownSafe);
+          if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
+            _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: ownFacing);
+            // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
+            _noteWatchPaint('watch-tip');
+            softLockCues.draw(
+              canvas,
+              'watch-tip',
+              ownC + Offset(0, -22 * ownScale),
+              alpha: 0.95,
+              scale: ownScale * 1.35,
+            );
+          }
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
           _drawWatchChargeRings(
@@ -2528,19 +2548,26 @@ class TaisenGame extends FlameGame {
         }
         break;
       case AWindowKind.bow:
-        if (ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
-          _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
-          // VFX-01 Watch bow 蓄勢 mirror plate.
-          softLockCues.draw(
-            canvas,
-            'watch-bow',
-            ownC + Offset(18 * ownScale, -16 * ownScale),
-            alpha: 0.95,
-            scale: ownScale * 1.35,
-          );
+        if (paintOwnDemo) {
+          _noteWatchPaint('demo-bow');
+          if (ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
+            _drawBowWindup(canvas, ownC, ownC.dx + 70, const Color(0xFFFFAB40), progress01: 0.85, ready: false);
+            // VFX-01 Watch bow 蓄勢 mirror plate.
+            _noteWatchPaint('watch-bow');
+            softLockCues.draw(
+              canvas,
+              'watch-bow',
+              ownC + Offset(18 * ownScale, -16 * ownScale),
+              alpha: 0.95,
+              scale: ownScale * 1.35,
+            );
+          }
         }
         break;
       case AWindowKind.stratagem:
+        if (paintOwnDemo) {
+          _noteWatchPaint('demo-stratagem');
+        }
         break;
     }
 
@@ -2548,6 +2575,7 @@ class TaisenGame extends FlameGame {
     if (ownSafe != null && ownSafe < field.length && _lifeAt(ownSafe) == UnitLife.alive) {
       final troop = field[ownSafe].troop;
       if (troop == TroopType.spear && spearTipExtendedAt(ownSafe) && kind != AWindowKind.intercept) {
+        _noteWatchPaint('watch-tip');
         softLockCues.draw(
           canvas,
           'watch-tip',
@@ -2559,6 +2587,7 @@ class TaisenGame extends FlameGame {
       if (troop == TroopType.bow &&
           _bowWindupIndex == ownSafe &&
           kind != AWindowKind.bow) {
+        _noteWatchPaint('watch-bow');
         softLockCues.draw(
           canvas,
           'watch-bow',
@@ -2607,33 +2636,12 @@ class TaisenGame extends FlameGame {
       _drawText(canvas, '撤', enemyC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
     }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
-    if (ownSafe != null && debugSiegePrepVisible(ownSafe)) {
-      _drawSiegePrepGauge(
-        canvas,
-        Rect.fromCenter(
-          center: ownC + Offset(0, -16 * ownScale),
-          width: 28 * ownScale,
-          height: 4,
-        ),
-        debugSiegePrep01(ownSafe),
-      );
-    }
-    if (enemySafe != null && debugSiegePrepVisible(enemySafe)) {
-      _drawSiegePrepGauge(
-        canvas,
-        Rect.fromCenter(
-          center: enemyC + Offset(0, -14 * enemyScale),
-          width: 24 * enemyScale,
-          height: 3,
-        ),
-        debugSiegePrep01(enemySafe),
-      );
-    }
+    _drawWatchSiegeMirrors(canvas, band);
     if (ownSafe == null || _chargeCyanOnUnit(ownSafe)) {
       _drawFacingArrow(canvas, ownC, ownFacing, FactionColors.gold);
     }
     _drawFacingArrow(canvas, enemyC, enemyFacing, const Color(0xFFFFF59D), enemyHard: true);
-    if (showAWindowDebugLabels) {
+    if (showAWindowDebugLabels && paintOwnDemo) {
       final label = switch (kind) {
         AWindowKind.charge => '突撃氣場 蓄勢',
         AWindowKind.intercept => '迎擊 槍尖常駐',
@@ -2645,7 +2653,107 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
+  void _noteWatchPaint(String tag) {
+    if (debugRecordWatchPaint) _watchPaint.add(tag);
+  }
+
+  bool _watchOwnIsSiege(int? own) =>
+      own != null && own >= 0 && own < field.length && field[own].troop == TroopType.siege;
+
+  /// True when Watch will not paint the demo [AWindowKind] plate on [own].
+  bool debugWatchDemoPlateSuppressed(int? own) =>
+      !watchPaintsOwnDemoPlate(ownIsSiege: _watchOwnIsSiege(own));
+
+  Rect get _watchBand {
+    final w = size.x > 0 ? size.x : 390.0;
+    final h = size.y > 0 ? watchH : 0.0;
+    return Rect.fromLTWH(0, 0, w, h);
+  }
+
+  /// Live prep tell for body [i] in [band]. Null when the field gauge is down.
+  WatchSiegePrepMirror? _watchSiegeMirror(int i, Rect band) {
+    if (!debugSiegePrepVisible(i)) return null;
+    return WatchSiegePrepMirror(
+      index: i,
+      fill01: debugSiegePrep01(i),
+      pause: debugSiegePrepPause(i),
+      slowed: debugSiegePrepSlowed(i),
+      face: debugSiegeFace(i),
+      anchor: mapFieldToWatch(watchBodyAt(i), band),
+    );
+  }
+
+  /// What Watch paints for body [i] this frame. Same numbers as the field gauge.
+  WatchSiegePrepMirror? debugWatchSiegeMirror(int i) => _watchSiegeMirror(i, _watchBand);
+
+  /// Every field gauge that is up, in field order. Watch paints this list.
+  List<WatchSiegePrepMirror> debugWatchSiegeMirrors() {
+    final band = _watchBand;
+    final out = <WatchSiegePrepMirror>[];
+    for (var i = 0; i < field.length; i++) {
+      final m = _watchSiegeMirror(i, band);
+      if (m != null) out.add(m);
+    }
+    return out;
+  }
+
+  /// Yellow prep on every sieging body, at that body's Watch point this frame.
+  void _drawWatchSiegeMirrors(Canvas canvas, Rect band) {
+    for (var i = 0; i < field.length; i++) {
+      final m = _watchSiegeMirror(i, band);
+      if (m == null) continue;
+      final depth = watchDepth01(watchBodyAt(i));
+      final enemy = isEnemyAt(i);
+      final scale = enemy
+          ? (0.82 - 0.22 * depth).clamp(0.55, 0.82)
+          : (1.0 - 0.28 * depth).clamp(0.68, 1.0);
+      final bar = Rect.fromCenter(
+        center: m.anchor + Offset(0, enemy ? -14 * scale : -16 * scale),
+        width: enemy ? 24 * scale : 28 * scale,
+        height: enemy ? 3 : 4,
+      );
+      _drawSiegePrepGauge(canvas, bar, m.fill01);
+      _drawWatchSiegePrepMarks(canvas, bar, m);
+      _noteWatchPaint(m.prepTag);
+      _noteWatchPaint(m.anchorTag);
+      if (m.paused) _noteWatchPaint(m.pauseTag);
+      if (m.slowed) _noteWatchPaint(m.slowTag);
+      if (m.face.isNotEmpty) _noteWatchPaint(m.faceTag);
+    }
+  }
+
+  /// Pause ticks, bow-slow cap, and gate/wall hairline. The yellow fill is the field gauge.
+  void _drawWatchSiegePrepMarks(Canvas canvas, Rect bar, WatchSiegePrepMirror m) {
+    if (m.paused) {
+      final tick = Paint()..color = const Color(0xFF3E2723);
+      final y = bar.center.dy;
+      final h = bar.height + 3;
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(bar.center.dx - 2.2, y), width: 1.4, height: h),
+        tick,
+      );
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(bar.center.dx + 2.2, y), width: 1.4, height: h),
+        tick,
+      );
+    }
+    if (m.slowed) {
+      canvas.drawRect(
+        Rect.fromLTWH(bar.right - 2.5, bar.top, 2.5, bar.height),
+        Paint()..color = const Color(0xFFFFAB40),
+      );
+    }
+    if (m.face == 'gate' || m.face == 'wall') {
+      final gate = m.face == 'gate';
+      canvas.drawRect(
+        Rect.fromLTWH(bar.left, bar.bottom + 1, gate ? bar.width : bar.width * 0.55, 1.4),
+        Paint()..color = gate ? const Color(0xFFFFF59D) : const Color(0xFF8D6E63),
+      );
+    }
+  }
+
   /// Live Watch plate. Demo-cycle [watchKind] is only the fallback.
+  /// Siege bodies skip it — [_drawWatchSiegeMirrors] is their telegraph.
   AWindowKind _liveWatchKind(int? own) {
     if (own != null && own >= 0 && own < field.length && _lifeAt(own) == UnitLife.alive) {
       final troop = field[own].troop;

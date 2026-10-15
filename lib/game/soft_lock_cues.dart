@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 
 /// Design Soft Lock cue sprites (槍 tip / 迎撃 / 弓蓄勢 / 歸城·返城 / Watch mirrors).
 ///
+/// Siege prep is not a plate in this bank. Watch paints the live field gauge
+/// so fill / pause / clear / bow-slow stay same-frame with the field.
+///
 /// Assets live under [assetDir] with Flutter resolution folders (`2.0x/`, `3.0x/`).
 /// Logical draw sizes follow `sprites/manifest.json` size_pt. Missing art falls
 /// through to canvas paint in [TaisenGame] — gameplay never depends on these.
