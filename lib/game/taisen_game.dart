@@ -4454,6 +4454,7 @@ class TaisenGame extends FlameGame {
         _resetMeterForFreshMarch();
         dragFrom = tokenCenter(i);
         dragTo = _clampFieldPos(local);
+        _aimSelectedSpearNow();
         if (bowOk) {
           // Dragging bow cancels 蓄勢 — tip already warns 停穩.
           _cancelBowWindup();
@@ -4498,6 +4499,7 @@ class TaisenGame extends FlameGame {
       if (!keepMeter) _resetMeterForFreshMarch();
       dragFrom = tokenCenter(i);
       dragTo = _clampFieldPos(local);
+      _aimSelectedSpearNow();
       onTutorialChanged?.call();
       return;
     }
@@ -4509,6 +4511,7 @@ class TaisenGame extends FlameGame {
     if (!keepMeter) _resetMeterForFreshMarch();
     dragFrom = tokenCenter(i);
     dragTo = _clampFieldPos(local);
+    _aimSelectedSpearNow();
   }
 
   /// Same unit, waypoint still committed — a new 落點 is a retarget, not a stop.
@@ -4529,6 +4532,8 @@ class TaisenGame extends FlameGame {
     // Pin stays out of the Watch and one token off the bezel.
     final next = clampPlayableCenter(local);
     dragTo = next;
+    // Tip turns with the finger. Do not wait for the body to walk.
+    _aimSelectedSpearNow();
   }
 
 
@@ -4551,6 +4556,7 @@ class TaisenGame extends FlameGame {
     // Release COMMITS the waypoint. Body keeps marching at troop speed.
     // Never snap/teleport the body to the finger. Off-board points clamp in.
     dragTo = clampPlayableCenter(local);
+    _aimSelectedSpearNow();
     if (selectedIndex != null && selectedIndex! < fieldPos.length) {
       final i = selectedIndex!;
       final at = fieldPos[i];
@@ -5057,18 +5063,20 @@ class TaisenGame extends FlameGame {
     final away = from - spearAt;
     final awayDist = away.distance;
     if (awayDist < 1) return;
-    // Standoff on the approach, one tip-reach in front of the body.
-    // Not the current tip point — that magnet was the idle magic counter.
+    // Standoff on the approach, on the tip-reach point. Not the current tip,
+    // and not the leading edge of the hit radius — that fringe fired early.
     final hold = spearAt + away / awayDist * kSpearTipReach;
     final toHold = hold - from;
     final holdDist = toHold.distance;
-    if (holdDist <= kSpearTipHitR * 0.35) {
-      _clearTravel(e);
-      return;
-    }
     final speed = _worldSpeedPx(e);
     final dtCap = speed / kPursuitMinFps;
     final step = math.min(holdDist, math.min(speed * dt, dtCap));
+    if (holdDist <= step || holdDist <= kArrivalEpsilon) {
+      fieldPos[e] = hold;
+      if (toHold.distance >= 0.5) _noteTravelFacing(e, _facingFromDelta(toHold));
+      _clearTravel(e);
+      return;
+    }
     if (step <= 0) return;
     final dir = toHold / holdDist;
     fieldPos[e] = from + dir * step;
@@ -5103,14 +5111,31 @@ class TaisenGame extends FlameGame {
     return auraActive && _ownsLiveCharge(i);
   }
 
+  /// True once [target] has closed to the tip point along the tip axis.
+  /// Overlap that is still beyond the tip is the early approach scrape.
+  bool _tipReached(int spear, int target, Offset tip) {
+    final body = tokenCenter(spear);
+    final them = tokenCenter(target);
+    final forward = tip - body;
+    final reach = forward.distance;
+    if (reach < 1) return false;
+    final along = ((them.dx - body.dx) * forward.dx + (them.dy - body.dy) * forward.dy) / reach;
+    return along <= reach;
+  }
+
   /// Tip scrape is in the target's front 180° (chase from behind ≠ 迎擊).
-  bool _tipInTargetFront180(int target, Offset tip) {
+  /// A tip anchor that has just stepped through the center still counts when
+  /// the spear body is in that front half — the hit came from the front.
+  bool _tipInTargetFront180(int spear, int target, Offset tip) {
     final c = tokenCenter(target);
     final facing = tipFacingAt(target);
     final forward = Offset(math.sin(facing), -math.cos(facing));
-    final toTip = tip - c;
-    if (toTip.distance < 0.5) return true;
-    return toTip.dx * forward.dx + toTip.dy * forward.dy >= 0;
+    bool inFront(Offset fromTarget) {
+      if (fromTarget.distance < 0.5) return true;
+      return fromTarget.dx * forward.dx + fromTarget.dy * forward.dy >= 0;
+    }
+    if (inFront(tip - c)) return true;
+    return inFront(tokenCenter(spear) - c);
   }
 
   /// Wiki move speed for the 迎撃 gate. Aura cavalry is 1.32. An override is
@@ -5136,6 +5161,10 @@ class TaisenGame extends FlameGame {
         if (inMeleeContact(tokenCenter(s), tokenCenter(o))) continue;
         final tip = spearTipAt(s);
         if ((tip - tokenCenter(o)).distance > kSpearTipHitR) continue;
+        // Feel Not Pass: the leading part of the existing hit radius, still
+        // short of the tip point, is an approach scrape. It is not 迎撃 yet.
+        // Same tip length and same radius — the target must have reached the tip.
+        if (!_tipReached(s, o, tip)) continue;
         final key = '$s:$o';
         still.add(key);
         if (_tipResolved.contains(key)) continue;
@@ -5143,7 +5172,7 @@ class TaisenGame extends FlameGame {
         final aura = _hasChargeAura(o);
         // Slow no-aura bump ≠ 迎擊 — keep checking until aura/speed qualifies.
         if (!aura && speed <= kInterceptSpeedMin) continue;
-        if (!_tipInTargetFront180(o, tip)) continue;
+        if (!_tipInTargetFront180(s, o, tip)) continue;
         _tipResolved.add(key);
         final doubleHit = speed >= kDoubleInterceptSpeed;
         _lastInterceptDouble = doubleHit;
@@ -5200,6 +5229,23 @@ class TaisenGame extends FlameGame {
 
   void _clearTravel(int i) {
     if (i >= 0 && i < _travelFacing.length) _travelFacing[i] = null;
+  }
+
+  /// Finger moved. The spear tip matches the new waypoint before the body steps.
+  void _aimSelectedSpearNow() {
+    final i = selectedIndex;
+    final to = dragTo;
+    if (i == null || to == null) return;
+    if (i < 0 || i >= field.length || i >= fieldPos.length) return;
+    if (isEnemyAt(i) || field[i].troop != TroopType.spear) return;
+    final delta = to - fieldPos[i];
+    if (delta.distance < 0.5) return;
+    _noteTravelFacing(i, _facingFromDelta(delta));
+    if (tutorial != null &&
+        tutorial!.session == TutorialSession.session2 &&
+        i == tutorialOwnIndex) {
+      _playerAimedSpear = true;
+    }
   }
 
   /// Mid-move aim. Other bodies keep the facing they already had.

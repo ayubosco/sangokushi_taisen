@@ -208,6 +208,85 @@ void main() {
     expect(doubled.debugHitFlashLeft, lessThanOrEqualTo(FxWindows.toSeconds(0.3) + 1e-9));
   });
 
+  test('approach scrape inside the hit radius but short of the tip does not 迎撃', () {
+    final g = readyGame();
+    final at = _fieldAt(g, 0.42, 0.55);
+    _placeOwn(g, at, TroopType.spear);
+    g.ownFacing = 0;
+    final tip = g.spearTipAt(0);
+    // 12px beyond the tip, still inside the unchanged 18px radius, front 180°.
+    _addEnemy(g, tip + const Offset(0, -12));
+    g.enemyFacing = math.pi;
+    g.debugArmEnemyChargeAura();
+    expect((g.spearTipAt(0) - g.tokenCenter(1)).distance, lessThan(TaisenGame.kSpearTipHitR));
+    expect(TaisenGame.kSpearTipReach, closeTo(48 * 1.28, 0.001));
+    expect(TaisenGame.kSpearTipHitR, 18);
+    g.debugStepPursuit(1 / 60);
+    expect(g.debugHitLabel, isNot('迎擊'));
+    expect(g.debugGaritsuArmed, isFalse);
+    expect(g.debugTipScrapeArmed, isFalse);
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+
+    g.fieldPos[1] = g.spearTipAt(0);
+    g.debugStepPursuit(1 / 60);
+    expect(g.debugHitLabel, '迎擊');
+    expect(g.debugGaritsuArmed, isTrue);
+    expect(g.debugInRansen(0), isFalse);
+  });
+
+  test('a closing aura cavalry does not 迎撃 until it reaches the tip', () {
+    final g = readyGame();
+    g.setupSession2Field();
+    final spear = g.tokenCenter(0);
+    final enemy = g.tokenCenter(2);
+    final delta = enemy - spear;
+    g.ownFacing = math.atan2(delta.dx, -delta.dy);
+    g.debugArmEnemyChargeAura();
+    var fired = false;
+    var firedWhileShort = false;
+    for (var i = 0; i < 60 * 4 && !fired; i++) {
+      g.debugStepPursuit(1 / 60);
+      final body = g.tokenCenter(0);
+      final them = g.tokenCenter(2);
+      final tip = g.spearTipAt(0);
+      final forward = tip - body;
+      final reach = forward.distance;
+      final along = ((them.dx - body.dx) * forward.dx + (them.dy - body.dy) * forward.dy) / reach;
+      final hit = g.debugTipScrapeArmed || g.debugRetreatCause(2) == '迎擊';
+      if (hit) {
+        fired = true;
+        if (along > reach + 0.05) firedWhileShort = true;
+        expect(along, lessThanOrEqualTo(reach + 0.05));
+        expect((tip - them).distance, lessThanOrEqualTo(TaisenGame.kSpearTipHitR));
+      } else if ((tip - them).distance <= TaisenGame.kSpearTipHitR && along > reach) {
+        expect(g.debugRetreatCause(2), isNot('迎擊'), reason: 'frame $i still short of the tip');
+        expect(g.debugTipScrapeArmed, isFalse);
+      }
+    }
+    expect(firedWhileShort, isFalse);
+    expect(fired, isTrue);
+    expect(g.debugInterceptDouble, isFalse);
+    expect(g.debugRetreatCause(2), '迎擊');
+  });
+
+  test('a direction change turns the tip before the body steps', () {
+    final g = readyGame();
+    final at = _fieldAt(g, 0.40, 0.55);
+    _placeOwn(g, at, TroopType.spear);
+    g.ownFacing = math.pi;
+    g.panStart(at);
+    g.panEnd(at + const Offset(0, -80));
+    expect(g.tipFacingAt(0), closeTo(0, 0.08));
+    expect(g.tokenCenter(0), at, reason: 'aim is instant; the body has not walked');
+
+    final body = g.tokenCenter(0);
+    g.panStart(body);
+    g.panUpdate(body + const Offset(120, 0));
+    expect(g.tipFacingAt(0), closeTo(math.pi / 2, 0.08));
+    expect(g.tokenCenter(0), body);
+    expect(g.cardFacingAt(0), isNot(closeTo(0, 0.2)));
+  });
+
   test('tip retracts in 亂戰 and on a sieging body, and returns when the mash ends', () {
     final g = readyGame();
     final at = _fieldAt(g, 0.42, 0.48);
