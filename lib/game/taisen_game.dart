@@ -180,7 +180,10 @@ class TaisenGame extends FlameGame {
   bool debugSortiePrepVisible(int i) => debugSortiePrepLeft(i) > 0;
 
   /// Caption drawn while [debugSortiePrepVisible]. Empty otherwise.
-  String debugSortiePrepCaption(int i) => debugSortiePrepVisible(i) ? '出城' : '';
+  /// Player-facing exit verb. 出城 is the arcade gate; 出征 is the same agency.
+  static const kSortiePrepCaption = '出城·出征';
+
+  String debugSortiePrepCaption(int i) => debugSortiePrepVisible(i) ? kSortiePrepCaption : '';
 
   /// Visible yellow prep while this siege's body is inside the enemy castle zone.
   bool debugSiegePrepVisible(int i) {
@@ -1753,7 +1756,7 @@ class TaisenGame extends FlameGame {
               (coach.shotPassMode && coach.s1 == S1Phase.waitAura))) {
         watchKind = AWindowKind.charge;
       } else if (coach.session == TutorialSession.session2) {
-        if (coach.s2 == S2Phase.bowTeach) {
+        if (coach.bowLessonLive) {
           watchKind = AWindowKind.bow;
         } else if (coach.s2 == S2Phase.returnCity ||
             coach.s2 == S2Phase.strategyOrReturn ||
@@ -4378,7 +4381,7 @@ class TaisenGame extends FlameGame {
 
     // Soft Lock Field1 Session2: spear MOVE aims tip; bow select starts 蓄勢; return picks unit.
     if (t != null && t.session == TutorialSession.session2) {
-      if (t.s2 == S2Phase.bowTeach &&
+      if (t.bowLessonLive &&
           !isEnemyAt(i) &&
           field[i].troop == TroopType.bow) {
         selectedIndex = i;
@@ -4480,7 +4483,7 @@ class TaisenGame extends FlameGame {
                 t.s2 == S2Phase.enemyApproach ||
                 t.s2 == S2Phase.spearGlow) &&
             i == tutorialOwnIndex;
-        final bowOk = t.s2 == S2Phase.bowTeach &&
+        final bowOk = t.bowLessonLive &&
             field[i].troop == TroopType.bow &&
             !isEnemyAt(i);
         final returnOk = (t.s2 == S2Phase.returnCity || t.s2 == S2Phase.strategyOrReturn) &&
@@ -4618,7 +4621,7 @@ class TaisenGame extends FlameGame {
               (t.session == TutorialSession.session2 &&
                   (t.s2 == S2Phase.waitTurn ||
                       t.s2 == S2Phase.interceptHit ||
-                      t.s2 == S2Phase.bowTeach))) &&
+                      t.bowLessonLive))) &&
           !isEnemyAt(i)) {
         final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
         while (fieldInCastle.length <= i) {
@@ -5131,12 +5134,12 @@ class TaisenGame extends FlameGame {
       ),
       Paint()..color = FactionColors.gold,
     );
-    _drawText(
+    _drawCenteredText(
       canvas,
-      '出城',
-      Offset(center.dx - 14, bar.top - 16),
+      kSortiePrepCaption,
+      Offset(center.dx, bar.top - 16),
       FactionColors.gold,
-      13,
+      12,
     );
   }
 
@@ -5666,9 +5669,7 @@ class TaisenGame extends FlameGame {
   /// Standing auto: stop → 蓄勢 → shot. Move / 亂戰 / 歸城 cuts aim.
   void _tickBowStanding(double dt) {
     final coach = tutorial;
-    final bowLesson = coach != null &&
-        coach.session == TutorialSession.session2 &&
-        coach.s2 == S2Phase.bowTeach;
+    final bowLesson = coach != null && coach.bowLessonLive;
     // Soft Lock Field1 弓教學 needs standing auto. Other tutorial sessions stay silent.
     if ((coach != null && !bowLesson) || dt < 0) return;
     if (_bowAttackLeft > 0) _bowAttackLeft = math.max(0, _bowAttackLeft - dt);
@@ -5738,9 +5739,7 @@ class TaisenGame extends FlameGame {
     _bowLockedTarget = target;
     _applyHpLoss(target, _bowDamageTo(target), cause: '射');
     final coach = tutorial;
-    if (coach != null &&
-        coach.session == TutorialSession.session2 &&
-        coach.s2 == S2Phase.bowTeach) {
+    if (coach != null && coach.bowLessonLive) {
       coach.onBowShot();
       onTutorialChanged?.call();
     }
@@ -5932,6 +5931,22 @@ class TaisenGame extends FlameGame {
       troop,
       alpha: color.a.clamp(0.0, 1.0).toDouble(),
     );
+  }
+
+  void _drawCenteredText(Canvas canvas, String text, Offset at, Color color, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w700,
+          fontFamily: kInkFontFamily,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(at.dx - tp.width / 2, at.dy));
   }
 
   void _drawText(Canvas canvas, String text, Offset at, Color color, double fontSize) {

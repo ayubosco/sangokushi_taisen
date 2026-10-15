@@ -20,7 +20,7 @@ enum S2Phase {
   waitTurn,
   interceptHit,
   failRetry,
-  /// Soft Lock Field1: stand bow → 蓄勢 → 射 (after 槍).
+  /// Soft Lock Field1: stand bow → 蓄勢 → 射 (after a geometry 槍 Pass).
   bowTeach,
   /// Soft Lock Field1: drag own into 歸城區 (after 弓). Was strategyOrReturn either/or.
   returnCity,
@@ -28,6 +28,26 @@ enum S2Phase {
   strategyOrReturn,
   tipDone,
   passed,
+}
+
+/// Ordered Soft Lock handoff. Locked steps stay named — the player can read
+/// the next troop lesson before it opens. Not an 英傑 stage list, stamina
+/// cost, or cut-in.
+enum TutorialLessonGate { locked, current, done }
+
+class TutorialLesson {
+  const TutorialLesson({
+    required this.id,
+    required this.name,
+    required this.gate,
+  });
+
+  final String id;
+  final String name;
+  final TutorialLessonGate gate;
+
+  bool get unlocked => gate != TutorialLessonGate.locked;
+  bool get current => gate == TutorialLessonGate.current;
 }
 
 class TutorialController extends ChangeNotifier {
@@ -61,6 +81,87 @@ class TutorialController extends ChangeNotifier {
 
   /// Soft-fix: charge pass requires drag-to-drop + aura≥1C (not tip-skip alone).
   bool didDragDrop = false;
+
+  /// Arcade order the player can always read: 騎突擊 → 槍迎撃 → 弓教學 → 回城.
+  /// Only the current step is playable. The next step hard-unlocks on Pass.
+  /// 弓 stays locked until one aimed 迎撃 — a wait timer does not open it.
+  List<TutorialLesson> get lessons {
+    final bowOpen = bowLessonUnlocked;
+    final spearPlayable = session == TutorialSession.session2 ||
+        (session == TutorialSession.session1 &&
+            (s1 == S1Phase.tipNext || s1 == S1Phase.passed));
+    final returnOpen = _returnLessonOpen;
+    return [
+      TutorialLesson(
+        id: 'charge',
+        name: '騎突擊',
+        gate: session == TutorialSession.session1 &&
+                s1 != S1Phase.tipNext &&
+                s1 != S1Phase.passed
+            ? TutorialLessonGate.current
+            : TutorialLessonGate.done,
+      ),
+      TutorialLesson(
+        id: 'spear',
+        name: '槍迎撃',
+        gate: bowOpen || session == TutorialSession.complete
+            ? TutorialLessonGate.done
+            : (spearPlayable ? TutorialLessonGate.current : TutorialLessonGate.locked),
+      ),
+      TutorialLesson(
+        id: 'bow',
+        name: '弓教學',
+        gate: !bowOpen
+            ? TutorialLessonGate.locked
+            : (s2 == S2Phase.bowTeach ? TutorialLessonGate.current : TutorialLessonGate.done),
+      ),
+      TutorialLesson(
+        id: 'return',
+        name: '回城',
+        gate: !returnOpen
+            ? TutorialLessonGate.locked
+            : (s2 == S2Phase.tipDone || s2 == S2Phase.passed || session == TutorialSession.complete
+                ? TutorialLessonGate.done
+                : TutorialLessonGate.current),
+      ),
+    ];
+  }
+
+  /// 弓教學 is on the queue after a geometry-clear aimed 迎撃, including the
+  /// steps that follow it. Idle contact and the ≥1C wait do not set this.
+  bool get bowLessonUnlocked {
+    if (!interceptDone) return false;
+    if (session != TutorialSession.session2 && session != TutorialSession.complete) {
+      return false;
+    }
+    switch (s2) {
+      case S2Phase.bowTeach:
+      case S2Phase.returnCity:
+      case S2Phase.strategyOrReturn:
+      case S2Phase.tipDone:
+      case S2Phase.passed:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Live 弓 lesson. Standing fire and bow select use this, not a clock.
+  bool get bowLessonLive => bowLessonUnlocked && s2 == S2Phase.bowTeach;
+
+  bool get _returnLessonOpen {
+    if (session == TutorialSession.complete) return true;
+    if (session != TutorialSession.session2 || !interceptDone) return false;
+    switch (s2) {
+      case S2Phase.returnCity:
+      case S2Phase.strategyOrReturn:
+      case S2Phase.tipDone:
+      case S2Phase.passed:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   void resetToSession1() {
     session = TutorialSession.session1;
