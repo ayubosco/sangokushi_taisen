@@ -230,6 +230,23 @@ class TaisenGame extends FlameGame {
 
   /// True while this body stepped, is dragging, or still has a waypoint ahead.
   bool debugBowMovingAt(int i) => _bowIsMoving(i);
+
+  /// Sheet row this token would paint. Standing 蓄勢 is the draw row, never the walk row.
+  TroopAnimPose debugBowPoseAt(int i) {
+    if (i < 0 || i >= field.length) return TroopAnimPose.idle;
+    return _poseForToken(i, field[i], isEnemy: isEnemyAt(i));
+  }
+
+  /// Yellow moving-shot frame. Soft Lock keeps this false: a marching bow
+  /// has neither the attack row nor a 蓄勢 halo.
+  bool debugBowMoveShotBorderAt(int i) {
+    if (i < 0 || i >= field.length || field[i].troop != TroopType.bow) return false;
+    if (!_bowIsMoving(i)) return false;
+    if (_poseForToken(i, field[i], isEnemy: isEnemyAt(i)) == TroopAnimPose.attack) {
+      return true;
+    }
+    return _bowShowsStoppedAim(i);
+  }
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
   /// Live prove overlay. Null in normal play. Not a shot freeze.
@@ -3533,11 +3550,12 @@ class TaisenGame extends FlameGame {
       );
     }
 
-    final bowWinding = !isEnemy &&
-        selected &&
+    // Outer gold ring is selection. A marching bow must not wear it — that
+    // frame is the 走射 tell. The shared card stroke below stays.
+    final bowStandOnly = !isEnemy &&
         card.troop == TroopType.bow &&
-        _bowWindingAt(index);
-    if (selected && !isEnemy && !bowWinding) {
+        (_bowWindingAt(index) || _bowIsMoving(index));
+    if (selected && !isEnemy && !bowStandOnly) {
       // Selection ring tracks card (Design: 跟卡縮) — keep ≤+4 so own ≠ bigger than enemy.
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -3653,10 +3671,16 @@ class TaisenGame extends FlameGame {
     if (debugForcePose != null && debugForcePoseIndex == index) {
       return debugForcePose!;
     }
-    if (_bowAttackLeft > 0 && _bowAttackIndex == index) return TroopAnimPose.attack;
+    // 走射 OFF: a moving bow never wears the attack row, even mid-flash.
+    final bowMoving = card.troop == TroopType.bow && _bowIsMoving(index);
+    if (_bowAttackLeft > 0 && _bowAttackIndex == index && !bowMoving) {
+      return TroopAnimPose.attack;
+    }
     // March pose while a waypoint is committed, not only while the finger is down.
     if (dragTo != null && selectedIndex == index) return TroopAnimPose.move;
-    if (_hitFlashLeft > 0 && _hitFlashIndex == index) return TroopAnimPose.attack;
+    if (_hitFlashLeft > 0 && _hitFlashIndex == index && !bowMoving) {
+      return TroopAnimPose.attack;
+    }
     switch (card.troop) {
       case TroopType.spear:
         // Tip sprite stays out whenever the hitbox is out. The hit frame must
@@ -3669,10 +3693,9 @@ class TaisenGame extends FlameGame {
         }
         return TroopAnimPose.idle;
       case TroopType.bow:
-        if (_ransenUnits.contains(index)) return TroopAnimPose.idle;
-        if (_bowWindingAt(index)) {
-          return _bowReadyOf(index) ? TroopAnimPose.attack : TroopAnimPose.move;
-        }
+        if (_ransenUnits.contains(index) || bowMoving) return TroopAnimPose.idle;
+        // Stopped 蓄勢 is the draw row. The walk row is the 走射 tell.
+        if (_bowWindingAt(index)) return TroopAnimPose.attack;
         return TroopAnimPose.idle;
       case TroopType.infantry:
       case TroopType.siege:

@@ -6,6 +6,7 @@ import 'package:sangokushi_taisen/data/card_models.dart';
 import 'package:sangokushi_taisen/game/c_clock.dart';
 import 'package:sangokushi_taisen/game/fx_windows.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
+import 'package:sangokushi_taisen/game/troop_sprite_anims.dart';
 
 import 'feel_gates_test.dart' show readyGame;
 
@@ -44,6 +45,9 @@ void main() {
     final windup = _windupSec;
     g.debugStepPursuit(windup * 0.45);
     expect(g.debugBowWinding, isTrue, reason: '蓄勢 tell before the first arrow');
+    expect(g.debugBowPoseAt(0), TroopAnimPose.attack, reason: '蓄勢 is the draw row');
+    expect(g.debugBowPoseAt(0), isNot(TroopAnimPose.move));
+    expect(g.debugBowMoveShotBorderAt(0), isFalse);
     expect(g.debugHitLabel, isNot('射'));
     expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
     expect(g.debugBowLockAt(0), 1);
@@ -259,6 +263,58 @@ void main() {
       marching.debugSiegePrep01(0) - mid,
       closeTo(0.3 * TaisenGame.kSiegePrepFillPerSec, 1e-6),
     );
+  });
+
+  test('a one-frame pause does not loose, and a moving bow has no 走射 border', () {
+    final g = readyGame();
+    final at = _fieldAt(g, 0.40, 0.50);
+    _placeOwn(g, at, TroopType.bow);
+    _addEnemy(g, at + const Offset(140, -16), 'zhangliang');
+    final windup = _windupSec;
+
+    g.debugStepPursuit(windup * 0.92);
+    expect(g.debugBowWinding, isTrue);
+    expect(g.debugHitLabel, isNot('射'));
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+
+    g.fieldPos[0] = g.fieldPos[0] + const Offset(0, 1.2);
+    expect(g.debugBowMovingAt(0), isTrue, reason: 'a body step is moving before the sample');
+    expect(g.debugBowPoseAt(0), isNot(TroopAnimPose.attack));
+    expect(g.debugBowMoveShotBorderAt(0), isFalse);
+    g.watchKind = AWindowKind.bow;
+    _paint(g);
+    expect(g.debugWatchPaintLog, isNot(contains('watch-bow')));
+    expect(g.debugWatchPaintLog, isNot(contains('demo-bow')));
+
+    g.debugStepPursuit(1 / 60);
+    expect(g.debugBowWinding, isFalse);
+    expect(g.debugBowPoseAt(0), isNot(TroopAnimPose.attack));
+    expect(g.debugBowMoveShotBorderAt(0), isFalse);
+    expect(g.debugHitLabel, isNot('射'));
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+
+    g.debugStepPursuit(1 / 60);
+    expect(g.debugBowMovingAt(0), isFalse);
+    expect(g.debugHitLabel, isNot('射'), reason: 'micro-pause is not a shot');
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+    expect(g.debugBowMoveShotBorderAt(0), isFalse);
+
+    g.debugStepPursuit(windup * 0.45);
+    expect(g.debugBowWinding, isTrue, reason: 're-settle starts 蓄勢 over');
+    expect(g.debugBowPoseAt(0), TroopAnimPose.attack);
+    expect(g.debugHitLabel, isNot('射'));
+    expect(g.debugUnitHp(1), TaisenGame.kRansenMaxHp);
+
+    g.panStart(g.fieldPos[0]);
+    g.panUpdate(g.fieldPos[0] + const Offset(64, 0));
+    expect(g.debugBowMovingAt(0), isTrue);
+    expect(g.debugBowPoseAt(0), TroopAnimPose.move);
+    expect(g.debugBowPoseAt(0), isNot(TroopAnimPose.attack));
+    expect(g.debugBowMoveShotBorderAt(0), isFalse);
+    expect(g.debugBowWinding, isFalse);
+    _paint(g);
+    expect(g.debugWatchPaintLog, isNot(contains('watch-bow')));
+    expect(g.debugWatchPaintLog, isNot(contains('demo-bow')));
   });
 
   test('Watch paints 蓄勢 only while the bow is stopped and winding', () {
