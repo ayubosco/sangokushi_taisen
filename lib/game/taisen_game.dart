@@ -316,6 +316,8 @@ class TaisenGame extends FlameGame {
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
   /// Match morale stub. Retreat subtracts [kRetreatMoraleCost] only.
+  /// 計略 does not spend this. Observed-from-英傑 士氣 costs stay out.
+  /// See docs/AUTH-GAP-EIKETSU-2026-10-16.md.
   int matchMorale = 0;
 
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
@@ -5302,6 +5304,9 @@ class TaisenGame extends FlameGame {
   /// tipTick = any tip overlap, one existing stub quantum, no「迎撃」and no 亂戰 stamp.
   /// interceptHit = tip reached × (cav aura | speed>1.3) × target front 180°
   /// +「迎撃」+ガリッ. Tip length stays [kSpearTipReach] (Unverified — not retuned).
+  /// 英傑 槍擊 is not this gate. A direction change only aims the tip
+  /// ([_aimSelectedSpearNow]); it does not arm a glow that lasts until the hit.
+  /// See docs/AUTH-GAP-EIKETSU-2026-10-16.md.
   void _tickSpearTips() {
     _ensureLifeSlots();
     final still = <String>{};
@@ -5679,6 +5684,8 @@ class TaisenGame extends FlameGame {
       if (isEnemyAt(i) || field[i].troop != TroopType.bow) continue;
       if (_lifeAt(i) != UnitLife.alive) continue;
 
+      // 亂戰 / 歸城 / move cuts the standing shot (弓特性 off while mashed).
+      // A bow on the enemy gate is still not 攻城 — prep is TroopType.siege only.
       final blocked = _ransenUnits.contains(i) ||
           _bodyInOwnCastle(i) ||
           (i < fieldInCastle.length && fieldInCastle[i]) ||
@@ -5818,6 +5825,8 @@ class TaisenGame extends FlameGame {
 
   /// Stratagem FX ≤1C on the Watch strip; non-blocking (board stays tappable).
   /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
+  /// Does not spend [matchMorale], read [CardFace.strategyMorale] / intel,
+  /// show a 計略範圍, or resolve 雷擊. See docs/AUTH-GAP-EIKETSU-2026-10-16.md.
   void triggerStrategyFx({bool notifyTutorial = true}) {
     final t = tutorial;
     if (selectedIndex != null && selectedIndex! < field.length) {
