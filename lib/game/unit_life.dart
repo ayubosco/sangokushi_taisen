@@ -1,8 +1,9 @@
 /// Troop life after HP hits 0. Not a Feel boot.
 ///
 /// alive → retreating when HP ≤ 0.
-/// retreating → inCastleReviving only inside the own castle band.
-/// Outside that band the countdown stays frozen.
+/// retreating → inCastleReviving only inside the own castle gate
+/// (enter ~6成, leave below ~4成). Outside that gate the countdown stays frozen.
+/// A living 歸城 stays [alive] — heal and sit, no skull, no revive bell.
 /// inCastleReviving → readyRedeploy when the countdown ends (HP full).
 /// readyRedeploy → alive once the body leaves the castle.
 enum UnitLife { alive, retreating, inCastleReviving, readyRedeploy }
