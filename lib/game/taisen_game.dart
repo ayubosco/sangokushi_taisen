@@ -14,6 +14,7 @@ import 'soft_lock_cues.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 import 'unit_life.dart';
+import 'watch_revive_mirror.dart';
 import 'watch_siege_mirror.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
@@ -39,6 +40,9 @@ class TaisenGame extends FlameGame {
   final List<bool> fieldIsEnemy = [];
   /// Parallel to [field]: own token parked in bottom 己城 band (返城 / heal-redeploy).
   final List<bool> fieldInCastle = [];
+  /// Parallel to [field]: castle-gate hysteresis. Enter ~6成, leave below ~4成.
+  /// Not the parked flag, and not "reviving means inside".
+  final List<bool> _castleInside = [];
   int? selectedIndex;
 
   /// Drag hover: pointer currently inside own-castle band (highlight).
@@ -163,6 +167,8 @@ class TaisenGame extends FlameGame {
       (i >= 0 && i < _reviveLeft.length) ? _reviveLeft[i] : 0;
   bool debugShowsSkull(int i) => _lifeAt(i) != UnitLife.alive;
   String debugLifeTipAt(int i) => _lifeTipAt(i);
+  /// Living enter flash. Skulls keep 「返城」; this plate is 「歸城」 only.
+  String get debugReturnFlashLabel => _returnFlashLeft > 0 ? '歸城' : '';
   /// Playtest source of the hit that retreated this body.
   /// Stays up through the castle countdown. Empty once the body is ready to leave.
   String debugRetreatCause(int i) {
@@ -618,6 +624,19 @@ class TaisenGame extends FlameGame {
     return ((p.dy - band.top) / band.height).clamp(0.0, 1.0);
   }
 
+  /// Lights 己城 while a selected skull still reads 「返城」, or while a living
+  /// drag's waypoint is in the geometric band. Only turns the flag on.
+  void _noteCastleBandHot() {
+    final i = selectedIndex;
+    if (i == null || i < 0 || i >= field.length || isEnemyAt(i)) return;
+    if (_lifeTipAt(i) == '返城') {
+      castleBandHot = true;
+      return;
+    }
+    final pin = dragTo;
+    if (pin != null && inCastleBand(pin)) castleBandHot = true;
+  }
+
   /// Hysteresis enter/leave for 歸城 / 復活. Geometric [inCastleBand] still draws the rail.
   bool castleGateContains(Offset p, {required bool currentlyIn}) {
     final band = castleBandRect;
@@ -1016,6 +1035,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     field.add(own);
     field.add(enemy);
     fieldIsEnemy.addAll([false, true]);
@@ -1095,6 +1115,7 @@ class TaisenGame extends FlameGame {
     _tickUnitLife(dt);
     _maybeSnapKiseiFlash();
     _dropAuraFlashOffBody();
+    _noteCastleBandHot();
   }
 
   /// Stop fade only. Arrival clears the waypoint; this drains travel / aura.
@@ -1151,6 +1172,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     final w = size.x > 0 ? size.x : 390.0;
     final top = size.y > 0 ? watchH : 152.0;
     final fh = size.y > 0 ? fieldH : 400.0;
@@ -1267,6 +1289,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     selectedIndex = null;
     final zhao = Cost6Roster.all.firstWhere((c) => c.id == 'zhaoyun');
     final cao = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
@@ -1293,6 +1316,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     selectedIndex = null;
     final spear = Cost6Roster.all.firstWhere((c) => c.id == 'zhanghe');
     final bow = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.bow);
@@ -1333,6 +1357,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     selectedIndex = null;
     tutorialOwnIndex = null;
     tutorialEnemyIndex = null;
@@ -1525,6 +1550,7 @@ class TaisenGame extends FlameGame {
     fieldPos.clear();
     fieldIsEnemy.clear();
     fieldInCastle.clear();
+    _castleInside.clear();
     final own = Cost6Roster.all.firstWhere((c) => c.id == 'caoren'); // 魏騎
     final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao'); // 魏騎
     field.addAll([own, enemy]);
@@ -1806,6 +1832,7 @@ class TaisenGame extends FlameGame {
 
     _maybeSnapKiseiFlash();
     _dropAuraFlashOffBody();
+    _noteCastleBandHot();
 
     // Tutorial S1: 突撃 only on collide while aura ready (handled in walk / panEnd).
 
@@ -2297,8 +2324,9 @@ class TaisenGame extends FlameGame {
         Paint()..color = FactionColors.gold.withValues(alpha: 0.10 * a),
       );
       final flyAt = Offset(w * 0.5, fieldTop + 56);
-      if (!softLockCues.draw(canvas, 'fly-fancheng', flyAt, alpha: a)) {
-        _drawFatFloatText(canvas, '返城', flyAt, alpha: a);
+      // Living enter is 「歸城」. The skull plate stays 「返城」.
+      if (!softLockCues.draw(canvas, 'fly-guicheng', flyAt, alpha: a)) {
+        _drawFatFloatText(canvas, '歸城', flyAt, alpha: a);
       }
     }
 
@@ -2713,12 +2741,9 @@ class TaisenGame extends FlameGame {
         );
       }
       final lifeTip = _lifeTipAt(ownSafe);
-      if (lifeTip == '返城') {
-        final at = ownC + Offset(0, -16 * ownScale);
-        if (!softLockCues.draw(canvas, 'fly-fancheng', at, scale: ownScale.clamp(0.55, 1.0))) {
-          _drawText(canvas, '返城', at, const Color(0xFFFFF59D), 11);
-        }
-      } else if (lifeTip == '返城回血') {
+      if (lifeTip == '返城回血') {
+        // Living heal. Distinct from the skull 「返城」 mirror.
+        _noteWatchPaint('watch-guicheng');
         final at = ownC + Offset(0, -16 * ownScale);
         if (!softLockCues.draw(canvas, 'fly-guicheng', at, scale: ownScale.clamp(0.55, 1.0))) {
           _drawText(canvas, '歸城', at, const Color(0xFFFFF59D), 11);
@@ -2746,6 +2771,8 @@ class TaisenGame extends FlameGame {
     if (ownSafe != null && _lifeAt(ownSafe) != UnitLife.alive) {
       canvas.drawCircle(ownC, 7, Paint()..color = const Color(0xFFB0A8A0));
       _drawText(canvas, '撤', ownC + const Offset(-5, -6), const Color(0xFF3E2723), 10);
+      final revive = _watchReviveMirror(ownSafe, band);
+      if (revive != null) _drawWatchReviveCue(canvas, revive);
     }
     if (enemySafe != null && _lifeAt(enemySafe) != UnitLife.alive) {
       canvas.drawCircle(enemyC, 7, Paint()..color = const Color(0xFFB0A8A0));
@@ -2807,6 +2834,60 @@ class TaisenGame extends FlameGame {
       slowed: debugSiegePrepSlowed(i),
       face: debugSiegeFace(i),
       anchor: mapFieldToWatch(watchBodyAt(i), band),
+    );
+  }
+
+  /// Live skull / 「返城」 / in-castle bar for body [i]. Null for the living and for enemies.
+  WatchReviveMirror? _watchReviveMirror(int i, Rect band) {
+    if (i < 0 || i >= field.length || isEnemyAt(i)) return null;
+    final life = _lifeAt(i);
+    if (life == UnitLife.alive) return null;
+    final tip = _lifeTipAt(i);
+    final inCastle = _bodyInOwnCastle(i);
+    final total = _reviveSecondsFor(i);
+    final left = i < _reviveLeft.length ? _reviveLeft[i] : 0.0;
+    return WatchReviveMirror(
+      index: i,
+      skull: true,
+      tip: tip,
+      bar: life == UnitLife.inCastleReviving && inCastle && left > 0,
+      reviveLeft: left,
+      reviveTotal: total,
+      anchor: mapFieldToWatch(watchBodyAt(i), band),
+    );
+  }
+
+  /// What Watch paints for skull [i] this frame. Same countdown as the field card.
+  WatchReviveMirror? debugWatchReviveMirror(int i) => _watchReviveMirror(i, _watchBand);
+
+  /// Skull tag, outside 「返城」, and the in-castle bar. Bar size is a stand-in, not Official px.
+  void _drawWatchReviveCue(Canvas canvas, WatchReviveMirror m) {
+    _noteWatchPaint(m.skullTag);
+    _noteWatchPaint(m.anchorTag);
+    if (m.tip == '返城') {
+      _noteWatchPaint(m.tipTag);
+      final at = m.anchor + const Offset(12, -18);
+      if (!softLockCues.draw(canvas, 'fly-fancheng', at, scale: 0.65)) {
+        _drawText(canvas, '返城', at, const Color(0xFFFFF59D), 11);
+      }
+    }
+    if (!m.bar) return;
+    _noteWatchPaint(m.barTag);
+    const barW = 26.0;
+    const barH = 4.0;
+    final bar = Rect.fromCenter(
+      center: m.anchor + const Offset(0, 14),
+      width: barW,
+      height: barH,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar, const Radius.circular(1)),
+      Paint()..color = const Color(0xFF5C564F),
+    );
+    final fill = Rect.fromLTWH(bar.left, bar.top, bar.width * m.remain01, bar.height);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(fill, const Radius.circular(1)),
+      Paint()..color = const Color(0xFFFFF59D),
     );
   }
 
@@ -4574,6 +4655,7 @@ class TaisenGame extends FlameGame {
     dragTo = next;
     // Tip turns with the finger. Do not wait for the body to walk.
     _aimSelectedSpearNow();
+    _noteCastleBandHot();
   }
 
 
@@ -4737,9 +4819,15 @@ class TaisenGame extends FlameGame {
 
   bool _bodyInOwnCastle(int i) {
     if (i < 0 || i >= fieldPos.length || isEnemyAt(i)) return false;
-    final parked = i < fieldInCastle.length && fieldInCastle[i];
-    if (parked) return true;
-    return castleGateContains(fieldPos[i], currentlyIn: false);
+    while (_castleInside.length <= i) {
+      _castleInside.add(false);
+    }
+    final inside = castleGateContains(
+      fieldPos[i],
+      currentlyIn: _castleInside[i],
+    );
+    _castleInside[i] = inside;
+    return inside;
   }
 
   double _reviveSecondsFor(int i) {
@@ -4755,10 +4843,9 @@ class TaisenGame extends FlameGame {
   void _drawLifeFlyTip(Canvas canvas, int i, Offset at) {
     final tip = _lifeTipAt(i);
     if (tip.isEmpty) return;
-    final life = _lifeAt(i);
-    if (life == UnitLife.retreating) {
+    if (tip == '返城') {
       if (softLockCues.draw(canvas, 'fly-fancheng', at + const Offset(28, 8))) return;
-    } else if (life == UnitLife.alive && tip == '返城回血') {
+    } else if (tip == '返城回血') {
       // Living 歸城 heal cue — Design optional 「歸城」.
       if (softLockCues.draw(canvas, 'fly-guicheng', at + const Offset(28, 8))) return;
     }
@@ -4768,14 +4855,16 @@ class TaisenGame extends FlameGame {
   String _lifeTipAt(int i) {
     switch (_lifeAt(i)) {
       case UnitLife.retreating:
+      case UnitLife.inCastleReviving:
         if (isEnemyAt(i)) return '';
-        // Persistent one-thumb cue until skull enters 己城.
+        // Persistent 「返城」 until the skull is inside the gate. A step back out
+        // shows it again. Inside, the countdown is the cue.
+        if (_bodyInOwnCastle(i)) return '';
         return '返城';
       case UnitLife.alive:
         final parked = i < fieldInCastle.length && fieldInCastle[i];
         if (parked && debugUnitHp(i) < kRansenMaxHp) return '返城回血';
         return '';
-      case UnitLife.inCastleReviving:
       case UnitLife.readyRedeploy:
         return '';
     }
@@ -4929,6 +5018,8 @@ class TaisenGame extends FlameGame {
       switch (_unitLife[i]) {
         case UnitLife.alive:
           // 歸城 heal is the parked path. Standing in the band while fighting does not heal.
+          // Rate stays [kRansenTickPerSec] — the living castle heal is Unverified,
+          // so this is the existing playtest stub, not a new castle DPS.
           final parked = i < fieldInCastle.length && fieldInCastle[i];
           if (parked && i < fieldPos.length && _pastCastleExit(fieldPos[i])) {
             _beginSortiePrep(i);

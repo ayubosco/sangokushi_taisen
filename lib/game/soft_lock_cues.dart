@@ -6,8 +6,12 @@ import 'package:flutter/services.dart';
 
 /// Design Soft Lock cue sprites (槍 tip / 迎撃 / 弓蓄勢 / 歸城·返城 / Watch mirrors).
 ///
+/// `fly-guicheng` is the living 「歸城」 plate. `fly-fancheng` is the skull 「返城」
+/// plate. They are not interchangeable.
+///
 /// Siege prep is not a plate in this bank. Watch paints the live field gauge
-/// so fill / pause / clear / bow-slow stay same-frame with the field.
+/// so fill / pause / clear / bow-slow stay same-frame with the field. The
+/// skull countdown is the Watch revive mirror, not a plate in this bank either.
 ///
 /// Assets live under [assetDir] with Flutter resolution folders (`2.0x/`, `3.0x/`).
 /// Logical draw sizes follow `sprites/manifest.json` size_pt. Missing art falls
