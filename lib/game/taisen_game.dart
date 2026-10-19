@@ -315,8 +315,15 @@ class TaisenGame extends FlameGame {
   final List<UnitLife> _unitLife = [];
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
-  /// Match morale stub. Retreat subtracts [kRetreatMoraleCost] only.
+  /// Match 士氣 pool. A cast spends the caster's printed [CardFace.strategyMorale].
+  /// Retreat still subtracts only [kRetreatMoraleCost]. No regen (Unverified).
   int matchMorale = 0;
+  /// Player changed this spear's facing. Gold read until a tip hit.
+  /// Arcade extension ([spearTipExtendedAt]) stays on without this flag.
+  /// Does not change the 迎撃 gate or any damage figure.
+  final List<bool> _qiangjiArmed = [];
+  Offset? _strategyBeamFrom;
+  Offset? _strategyBeamTo;
 
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
   static const double kRansenTickPerSec = 6.0;
@@ -371,6 +378,8 @@ class TaisenGame extends FlameGame {
   /// Idle 槍 aim before the player marches. Off the Field1 enemy approach so a
   /// standing tip does not meet the cavalry. Facing only — not a new tip length.
   static const double kSpearIdleMissFacing = 1.55;
+  /// Float noise under a player facing write. Not a 槍擊 angle and not damage.
+  static const double kFacingChangeNoise = 0.02;
   /// Stronger「迎撃」fly when speed ≥ [kDoubleInterceptSpeed]. Not a DPS number.
   static const double kDoubleInterceptReadScale = 1.45;
   /// 亂戰 world speed as a fraction of open-field march.
@@ -894,7 +903,11 @@ class TaisenGame extends FlameGame {
     if (!scrambled) {
       _dragTravelDist += walked;
     }
-    _noteTravelFacing(i, _facingFromDelta(dir));
+    if (!isEnemyAt(i) && field[i].troop == TroopType.spear) {
+      _notePlayerSpearTurn(i, _facingFromDelta(dir));
+    } else {
+      _noteTravelFacing(i, _facingFromDelta(dir));
+    }
     if (tutorial != null &&
         tutorial!.session == TutorialSession.session2 &&
         i == tutorialOwnIndex) {
@@ -1285,6 +1298,7 @@ class TaisenGame extends FlameGame {
     selectedIndex = null;
     ownFacing = -0.2;
     enemyFacing = math.pi + 0.3;
+    _seedMatchMoraleFromPrintedCosts();
   }
 
   void setupSession2Field() {
@@ -1325,6 +1339,7 @@ class TaisenGame extends FlameGame {
     _bowWindupC = 0;
     _bowShotReady = false;
     _bowDidShoot = false;
+    _seedMatchMoraleFromPrintedCosts();
   }
 
   void setupMatchDemoField() {
@@ -1392,6 +1407,7 @@ class TaisenGame extends FlameGame {
     _bowWindupC = 0;
     _bowShotReady = false;
     _bowDidShoot = false;
+    _seedMatchMoraleFromPrintedCosts();
   }
 
   void setupFeelCastleField() {
@@ -1777,6 +1793,8 @@ class TaisenGame extends FlameGame {
       if (_stratLeft <= 0) {
         _stratLeft = 0;
         _stratAt = null;
+        _strategyBeamFrom = null;
+        _strategyBeamTo = null;
       }
     }
     if (!holdFx) {
@@ -2289,6 +2307,7 @@ class TaisenGame extends FlameGame {
       _drawStrategyWatchStrip(canvas, _stratLeft / FxWindows.toSeconds(FxWindows.strategyFxMaxC));
       canvas.restore();
     }
+    _drawStrategyRangePreview(canvas);
 
     if (_returnFlashLeft > 0) {
       final a = (_returnFlashLeft / 0.6).clamp(0.0, 1.0);
@@ -2639,7 +2658,14 @@ class TaisenGame extends FlameGame {
               field[ownSafe].troop == TroopType.spear &&
               !spearTipExtendedAt(ownSafe);
           if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
-            _drawInterceptStance(canvas, ownC, 42 * ownScale, const Color(0xFF26C6DA), facing: tipFacingAt(ownSafe));
+            _drawInterceptStance(
+              canvas,
+              ownC,
+              42 * ownScale,
+              const Color(0xFF26C6DA),
+              facing: tipFacingAt(ownSafe),
+              goldArmed: spearQiangjiGoldAt(ownSafe),
+            );
             // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
             _noteWatchPaint('watch-tip');
             softLockCues.draw(
@@ -3772,6 +3798,7 @@ class TaisenGame extends FlameGame {
             44,
             const Color(0xFFB2EBF2).withValues(alpha: 0.88),
             facing: tipFacingAt(index),
+            goldArmed: spearQiangjiGoldAt(index),
           );
         }
         return;
@@ -3829,6 +3856,7 @@ class TaisenGame extends FlameGame {
           42,
           const Color(0xFFB2EBF2).withValues(alpha: 0.82),
           facing: tipFacingAt(index),
+          goldArmed: spearQiangjiGoldAt(index),
         );
         break;
       case TroopType.bow:
@@ -4000,7 +4028,14 @@ class TaisenGame extends FlameGame {
   }
 
 
-  void _drawInterceptStance(Canvas canvas, Offset c, double rx, Color color, {double facing = 0}) {
+  void _drawInterceptStance(
+    Canvas canvas,
+    Offset c,
+    double rx,
+    Color color, {
+    double facing = 0,
+    bool goldArmed = false,
+  }) {
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
@@ -4064,6 +4099,23 @@ class TaisenGame extends FlameGame {
           ..color = Color.lerp(color, cyanCore, 0.35)!.withValues(alpha: 0.92)
           ..strokeWidth = 4.2 * tipScale
           ..strokeCap = StrokeCap.round,
+      );
+    }
+    // Gold armed read sits on the existing tip point. Paint only —
+    // [kSpearTipReach] and [kSpearTipHitR] stay the arcade hit.
+    if (goldArmed) {
+      canvas.drawCircle(
+        tip,
+        16 * tipScale,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.95)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.2 * tipScale,
+      );
+      canvas.drawCircle(
+        tip,
+        6 * tipScale,
+        Paint()..color = FactionColors.gold.withValues(alpha: 0.96),
       );
     }
     canvas.restore();
@@ -4207,6 +4259,47 @@ class TaisenGame extends FlameGame {
     canvas.drawLine(Offset(rt.dx + rr - 2, rt.dy), Offset(rt.dx + rr + 5, rt.dy), shaft);
     canvas.drawLine(Offset(rt.dx, rt.dy - rr - 5), Offset(rt.dx, rt.dy - rr + 2), shaft);
     canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 5), shaft);
+  }
+
+  /// Lower-field ring for the caster. Clipped under the watch. Not a cut-in.
+  void _drawStrategyRangePreview(Canvas canvas) {
+    final caster = _strategyCaster;
+    if (caster == null || !strategyPreviewVisibleFor(caster)) return;
+    final center = tokenCenter(caster);
+    final radius = strategyPreviewRadius;
+    canvas.save();
+    canvas.clipRect(_fieldFxClip());
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: 0.85)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0,
+    );
+    final caption = strategyPreviewCaption;
+    if (caption != null) {
+      _drawText(
+        canvas,
+        caption,
+        Offset(center.dx - radius, center.dy + 6),
+        FactionColors.gold,
+        11,
+      );
+    }
+    final from = _strategyBeamFrom;
+    final to = _strategyBeamTo;
+    if (_stratLeft > 0 && from != null && to != null && (to - from).distance >= 1) {
+      canvas.drawLine(
+        from,
+        to,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.95)
+          ..strokeWidth = 3
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    canvas.restore();
   }
 
   /// Watch-strip 計略 banner. Sits above the castle gauges and the timer medallion.
@@ -5302,10 +5395,14 @@ class TaisenGame extends FlameGame {
   /// tipTick = any tip overlap, one existing stub quantum, no「迎撃」and no 亂戰 stamp.
   /// interceptHit = tip reached × (cav aura | speed>1.3) × target front 180°
   /// +「迎撃」+ガリッ. Tip length stays [kSpearTipReach] (Unverified — not retuned).
+  /// 槍擊 gold is a readability flag on a player facing change. It does not
+  /// open the gate and it does not add a damage figure.
   void _tickSpearTips() {
     _ensureLifeSlots();
+    _ensureQiangjiSlots();
     final still = <String>{};
     for (var s = 0; s < field.length; s++) {
+      if (field[s].troop == TroopType.spear) _clearQiangjiIfTipIn(s);
       if (_lifeAt(s) != UnitLife.alive || !spearTipExtendedAt(s)) continue;
       if (_inSortiePrep(s)) continue;
       for (var o = 0; o < field.length; o++) {
@@ -5343,6 +5440,7 @@ class TaisenGame extends FlameGame {
           _tipScrapeLeft = math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC));
           flashHit(s, '迎擊');
           _applyHpLoss(o, dmg, cause: '迎擊');
+          _disarmQiangji(s);
           final tipCoach = tutorial;
           if (tipCoach != null &&
               tipCoach.session == TutorialSession.session2 &&
@@ -5361,6 +5459,7 @@ class TaisenGame extends FlameGame {
         // Qualitative tip scrape: one quantum of the existing 亂戰 stub.
         // Not a DPS table, not「迎撃」, not the 亂戰 mash stamp.
         _applyHpLoss(o, kRansenTickPerSec, cause: '槍尖');
+        _disarmQiangji(s);
       }
     }
     _tipResolved.removeWhere((key) => !still.contains(key));
@@ -5421,6 +5520,7 @@ class TaisenGame extends FlameGame {
     _playerAimedSpear = false;
     _sortiePrepLeft.clear();
     _tipTickResolved.clear();
+    _qiangjiArmed.clear();
   }
 
   void _clearTravel(int i) {
@@ -5436,7 +5536,7 @@ class TaisenGame extends FlameGame {
     if (isEnemyAt(i) || field[i].troop != TroopType.spear) return;
     final delta = to - fieldPos[i];
     if (delta.distance < 0.5) return;
-    _noteTravelFacing(i, _facingFromDelta(delta));
+    _notePlayerSpearTurn(i, _facingFromDelta(delta));
     if (tutorial != null &&
         tutorial!.session == TutorialSession.session2 &&
         i == tutorialOwnIndex) {
@@ -5460,6 +5560,54 @@ class TaisenGame extends FlameGame {
       ownFacing = facing;
     }
   }
+
+  /// Player spear only. A card lock ([debugLockCardFacing]) does not come here.
+  void _notePlayerSpearTurn(int i, double facing) {
+    _armQiangjiOnDirectionChange(i, facing);
+    _noteTravelFacing(i, facing);
+  }
+
+  void _armQiangjiOnDirectionChange(int i, double next) {
+    if (i < 0 || i >= field.length) return;
+    if (isEnemyAt(i) || field[i].troop != TroopType.spear) return;
+    if (!spearTipExtendedAt(i)) return;
+    if (_angleDelta(tipFacingAt(i), next) < kFacingChangeNoise) return;
+    _ensureQiangjiSlots();
+    _qiangjiArmed[i] = true;
+  }
+
+  double _angleDelta(double a, double b) {
+    var d = (a - b).abs();
+    if (d > math.pi) d = 2 * math.pi - d;
+    return d;
+  }
+
+  void _ensureQiangjiSlots() {
+    while (_qiangjiArmed.length < field.length) {
+      _qiangjiArmed.add(false);
+    }
+    if (_qiangjiArmed.length > field.length) {
+      _qiangjiArmed.removeRange(field.length, _qiangjiArmed.length);
+    }
+  }
+
+  void _clearQiangjiIfTipIn(int i) {
+    if (i < 0 || i >= _qiangjiArmed.length) return;
+    if (!spearTipExtendedAt(i)) _qiangjiArmed[i] = false;
+  }
+
+  void _disarmQiangji(int i) {
+    if (i >= 0 && i < _qiangjiArmed.length) _qiangjiArmed[i] = false;
+  }
+
+  /// Gold until a tip hit. False while the arcade tip is retracted (亂戰 / 攻城 / 歸城).
+  bool spearQiangjiArmedAt(int i) {
+    if (i < 0 || i >= field.length || i >= _qiangjiArmed.length) return false;
+    if (field[i].troop != TroopType.spear) return false;
+    return _qiangjiArmed[i];
+  }
+
+  bool spearQiangjiGoldAt(int i) => spearQiangjiArmedAt(i) && spearTipExtendedAt(i);
 
   /// Arrival: tip matches the card. A rotate held during the march wins.
   void _settleFacing(int i) {
@@ -5815,23 +5963,138 @@ class TaisenGame extends FlameGame {
   }
 
   Offset? get debugStrategyCastAt => _stratAt;
+  Offset? get debugStrategyBeamFrom => _strategyBeamFrom;
+  Offset? get debugStrategyBeamTo => _strategyBeamTo;
 
-  /// Stratagem FX ≤1C on the Watch strip; non-blocking (board stays tappable).
-  /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
-  void triggerStrategyFx({bool notifyTutorial = true}) {
-    final t = tutorial;
-    if (selectedIndex != null && selectedIndex! < field.length) {
-      final i = selectedIndex!;
-      _stratAt = tokenCenter(i);
-      // 計略 is not 迎撃. Never flash a counter from the seal.
-    } else if (tutorialOwnIndex != null) {
-      _stratAt = tokenCenter(tutorialOwnIndex!);
-    } else {
-      _stratAt = Offset(size.x * 0.45, watchH + 130);
+  /// Cast never opens a modal. The board stays tappable through the ≤1C strip.
+  bool get strategyCastBlocksField => false;
+
+  /// Printed 士氣 on [CardFace]. Not a teaching-card 6/2 and not an 智力 formula.
+  int? strategyMoraleCostAt(int i) {
+    if (i < 0 || i >= field.length) return null;
+    final cost = field[i].strategyMorale;
+    if (cost <= 0) return null;
+    return cost;
+  }
+
+  /// Own card the seal will bill. A live selection wins.
+  /// With nothing selected, the lesson unit is the fallback.
+  int? get _strategyCaster {
+    final selected = selectedIndex;
+    if (selected != null) {
+      if (selected < 0 ||
+          selected >= field.length ||
+          isEnemyAt(selected) ||
+          strategyMoraleCostAt(selected) == null ||
+          _lifeAt(selected) != UnitLife.alive) {
+        return null;
+      }
+      return selected;
     }
+    final lesson = tutorialOwnIndex;
+    if (lesson != null &&
+        lesson >= 0 &&
+        lesson < field.length &&
+        !isEnemyAt(lesson) &&
+        strategyMoraleCostAt(lesson) != null &&
+        _lifeAt(lesson) == UnitLife.alive) {
+      return lesson;
+    }
+    return null;
+  }
+
+  /// Ring scale already used by the charge telegraph. Not a measured 計略 range.
+  double get strategyPreviewRadius => _chargeRingMaxR;
+
+  bool strategyPreviewVisibleFor(int i) {
+    if (i < 0 || i >= field.length || isEnemyAt(i)) return false;
+    if (_lifeAt(i) != UnitLife.alive) return false;
+    return strategyMoraleCostAt(i) != null;
+  }
+
+  bool get strategyPreviewVisible {
+    final caster = _strategyCaster;
+    return caster != null && strategyPreviewVisibleFor(caster);
+  }
+
+  Offset? get strategyPreviewCenter {
+    final caster = _strategyCaster;
+    if (caster == null || !strategyPreviewVisibleFor(caster)) return null;
+    return tokenCenter(caster);
+  }
+
+  /// Card name plus the printed 士氣 and 智力. Display only — no difference formula.
+  String? get strategyPreviewCaption {
+    final caster = _strategyCaster;
+    if (caster == null || !strategyPreviewVisibleFor(caster)) return null;
+    final card = field[caster];
+    return '${card.strategyName} 士氣${card.strategyMorale} 智力${card.intel}';
+  }
+
+  bool strategyPreviewContains(Offset fieldPoint) {
+    final caster = _strategyCaster;
+    if (caster == null || !strategyPreviewVisibleFor(caster)) return false;
+    if (fieldPoint.dy < watchH) return false;
+    final center = tokenCenter(caster);
+    return (fieldPoint - center).distance <= strategyPreviewRadius + 0.01;
+  }
+
+  /// One cast of each own card, from that card's printed 士氣. Not a regen rate.
+  void _seedMatchMoraleFromPrintedCosts() {
+    var sum = 0;
+    for (var i = 0; i < field.length; i++) {
+      if (isEnemyAt(i)) continue;
+      final cost = field[i].strategyMorale;
+      if (cost > 0) sum += cost;
+    }
+    matchMorale = sum;
+  }
+
+  /// Seal or upward flick. Lands on the caster. Spends printed 士氣 or does nothing.
+  bool castStrategyAtSelected({bool notifyTutorial = true}) {
+    final caster = _strategyCaster;
+    if (caster == null) return false;
+    return castStrategyOnMap(tokenCenter(caster), notifyTutorial: notifyTutorial);
+  }
+
+  /// Upward flick on the seal. Same spend as the button. Does not march.
+  bool castStrategyFlick({bool notifyTutorial = true}) =>
+      castStrategyAtSelected(notifyTutorial: notifyTutorial);
+
+  /// Card → map. [fieldPoint] must sit in the preview on the lower field.
+  /// Refuses when 士氣 is short. No 雷擊, no 智力差, no fullscreen cut-in.
+  bool castStrategyOnMap(Offset fieldPoint, {bool notifyTutorial = true}) {
+    final caster = _strategyCaster;
+    if (caster == null) return false;
+    if (!strategyPreviewContains(fieldPoint)) return false;
+    final cost = strategyMoraleCostAt(caster);
+    if (cost == null || matchMorale < cost) return false;
+    matchMorale -= cost;
+    _stratAt = fieldPoint;
+    _strategyBeamFrom = tokenCenter(caster);
+    _strategyBeamTo = fieldPoint;
     _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
     if (notifyTutorial) {
-      t?.onStrategy();
+      tutorial?.onStrategy();
+      onTutorialChanged?.call();
+    }
+    return true;
+  }
+
+  /// Stratagem FX ≤1C on the Watch strip; non-blocking (board stays tappable).
+  /// A resolved caster spends printed 士氣. No card to bill keeps the anchor strip.
+  /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
+  void triggerStrategyFx({bool notifyTutorial = true}) {
+    if (_strategyCaster != null) {
+      castStrategyAtSelected(notifyTutorial: notifyTutorial);
+      return;
+    }
+    _stratAt = Offset(size.x * 0.45, watchH + 130);
+    _strategyBeamFrom = null;
+    _strategyBeamTo = null;
+    _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
+    if (notifyTutorial) {
+      tutorial?.onStrategy();
       onTutorialChanged?.call();
     }
   }
