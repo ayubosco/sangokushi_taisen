@@ -4,6 +4,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
+import 'package:sangokushi_taisen/game/faction_colors.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 import 'package:sangokushi_taisen/game/unit_life.dart';
 import 'package:sangokushi_taisen/game/tutorial_controller.dart';
@@ -355,10 +356,19 @@ void main() {
     expect(game.strategyPreviewVisible, isTrue);
     expect(find.byKey(const Key('match-morale')), findsOneWidget);
     expect(find.text('士氣 4'), findsOneWidget);
+    expect(find.byKey(const Key('match-morale-pip')), findsNWidgets(4));
+    final seal = tester.widget<Material>(find.byKey(const Key('soft-pass-strategy-seal')));
+    expect(seal.color, FactionColors.lacquer);
     expect(find.text('騎突擊'), findsOneWidget);
     expect(find.text('槍迎撃'), findsOneWidget);
     expect(find.text('弓教學'), findsOneWidget);
     expect(find.text('回城'), findsOneWidget);
+    final rail = find.byKey(const Key('tutorial-lesson-rail'));
+    expect(find.descendant(of: rail, matching: find.text('1')), findsOneWidget);
+    expect(find.descendant(of: rail, matching: find.text('2')), findsOneWidget);
+    expect(find.descendant(of: rail, matching: find.text('3')), findsOneWidget);
+    expect(find.descendant(of: rail, matching: find.text('4')), findsOneWidget);
+    expect(find.descendant(of: rail, matching: find.text('5')), findsNothing);
     expect(find.text('用計得宜'), findsNothing);
     expect(find.text('槍擊退敵'), findsNothing);
 
@@ -366,6 +376,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('士氣 0'), findsOneWidget);
+    expect(find.byKey(const Key('match-morale-pip')), findsNothing);
     expect(game.strategyPreviewVisible, isFalse);
     expect(game.matchMorale, 0);
     game.selectOrDetailAt(game.tokenCenter(own));

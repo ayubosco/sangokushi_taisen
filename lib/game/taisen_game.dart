@@ -4105,21 +4105,39 @@ class TaisenGame extends FlameGame {
           ..strokeCap = StrokeCap.round,
       );
     }
-    // Gold armed read sits on the existing tip point. Paint only —
-    // [kSpearTipReach] and [kSpearTipHitR] stay the arcade hit.
+    // A3 gold is paint on the cyan tip already drawn (A1). It does not
+    // move the tip point, so reach and hit radius stay the arcade values.
+    // A5 drops this flag on the hit; the 迎撃 fly is the release read.
     if (goldArmed) {
+      final blade = Offset(c.dx, tip.dy - 14 * tipScale);
+      canvas.drawLine(
+        Offset(c.dx, c.dy + 6 * tipScale),
+        tip,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.92)
+          ..strokeWidth = 6.5 * tipScale
+          ..strokeCap = StrokeCap.round,
+      );
+      final head = Path()
+        ..moveTo(blade.dx, blade.dy)
+        ..lineTo(c.dx - 8 * tipScale, tip.dy + 8 * tipScale)
+        ..lineTo(c.dx + 8 * tipScale, tip.dy + 8 * tipScale)
+        ..close();
+      canvas.drawPath(head, Paint()..color = const Color(0xFFFFE082).withValues(alpha: 0.96));
+      canvas.drawPath(
+        head,
+        Paint()
+          ..color = FactionColors.gold
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5 * tipScale,
+      );
       canvas.drawCircle(
         tip,
         16 * tipScale,
         Paint()
-          ..color = FactionColors.gold.withValues(alpha: 0.95)
+          ..color = FactionColors.gold.withValues(alpha: 0.9)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.2 * tipScale,
-      );
-      canvas.drawCircle(
-        tip,
-        6 * tipScale,
-        Paint()..color = FactionColors.gold.withValues(alpha: 0.96),
+          ..strokeWidth = 2.4 * tipScale,
       );
     }
     canvas.restore();
@@ -4296,14 +4314,32 @@ class TaisenGame extends FlameGame {
     }
     final from = _strategyBeamFrom;
     final to = _strategyBeamTo;
+    // B4 card→map. A shaft plus a point on the lower field. Not a cut-in.
     if (_stratLeft > 0 && from != null && to != null && (to - from).distance >= 1) {
       canvas.drawLine(
         from,
         to,
         Paint()
-          ..color = FactionColors.gold.withValues(alpha: 0.95)
-          ..strokeWidth = 3
+          ..color = FactionColors.gold.withValues(alpha: 0.32)
+          ..strokeWidth = 9
           ..strokeCap = StrokeCap.round,
+      );
+      canvas.drawLine(
+        from,
+        to,
+        Paint()
+          ..color = const Color(0xFFFFF3C4).withValues(alpha: 0.95)
+          ..strokeWidth = 2.6
+          ..strokeCap = StrokeCap.round,
+      );
+      canvas.drawCircle(to, 5.5, Paint()..color = const Color(0xFFFFF8E1).withValues(alpha: 0.96));
+      canvas.drawCircle(
+        to,
+        11,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.6,
       );
     }
     canvas.restore();

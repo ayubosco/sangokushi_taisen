@@ -33,7 +33,7 @@ class TutorialLessonRail extends StatelessWidget {
                         style: TextStyle(color: Color(0x66D4AF37), fontSize: 14, height: 1),
                       ),
                     ),
-                  Expanded(child: _LessonChip(lesson: lessons[i])),
+                  Expanded(child: _LessonChip(index: i + 1, lesson: lessons[i])),
                 ],
               ],
             ),
@@ -45,8 +45,9 @@ class TutorialLessonRail extends StatelessWidget {
 }
 
 class _LessonChip extends StatelessWidget {
-  const _LessonChip({required this.lesson});
+  const _LessonChip({required this.index, required this.lesson});
 
+  final int index;
   final TutorialLesson lesson;
 
   @override
@@ -68,16 +69,34 @@ class _LessonChip extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            lesson.name,
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: nameColor,
-              fontSize: 12,
-              fontWeight: current ? FontWeight.w800 : FontWeight.w600,
-              height: 1.1,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '$index',
+                style: TextStyle(
+                  color: nameColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Flexible(
+                child: Text(
+                  lesson.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: nameColor,
+                    fontSize: 12,
+                    fontWeight: current ? FontWeight.w800 : FontWeight.w600,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 1),
           Text(
