@@ -51,6 +51,64 @@ void main() {
     expect(g.debugHitLabel, isNot('3450'));
   });
 
+  test('M-01 A4 whiff persist: cavalry passes the tip and gold stays until a hit', () {
+    final g = readyGame();
+    final at = _fieldAt(g, 0.36, 0.48);
+    _placeOwn(g, at, TroopType.spear);
+    g.ownFacing = 0;
+    _turnSpear(g, at, const Offset(90, 0));
+    expect(g.spearQiangjiGoldAt(0), isTrue);
+    expect(g.spearTipExtendedAt(0), isTrue);
+
+    final body = g.tokenCenter(0);
+    final tip = g.spearTipAt(0);
+    final along = tip - body;
+    final unit = along / along.distance;
+    final side = Offset(-unit.dy, unit.dx);
+    final gap = math.max(TaisenGame.kSpearTipHitR, g.meleeContactDist) + 40;
+    final start = tip - unit * 70 + side * gap;
+    final end = tip + unit * 70 + side * gap;
+    _addEnemy(g, start);
+    expect(g.field[1].troop, TroopType.cavalry);
+    final hp = g.debugUnitHp(1);
+    var sawBefore = false;
+    var sawAfter = false;
+    const steps = 12;
+    for (var i = 0; i <= steps; i++) {
+      final t = i / steps;
+      g.fieldPos[1] = Offset(
+        start.dx + (end.dx - start.dx) * t,
+        start.dy + (end.dy - start.dy) * t,
+      );
+      g.debugStepPursuit(1 / 60);
+      final liveTip = g.spearTipAt(0);
+      expect(
+        (liveTip - g.tokenCenter(1)).distance,
+        greaterThan(TaisenGame.kSpearTipHitR),
+        reason: 'frame $i stays outside the tip',
+      );
+      expect(g.spearQiangjiArmedAt(0), isTrue, reason: 'A4 gold stays armed across the whiff');
+      expect(g.spearQiangjiGoldAt(0), isTrue);
+      expect(g.spearTipExtendedAt(0), isTrue);
+      expect(g.debugHitLabel, isNot('迎擊'));
+      expect(g.debugUnitHp(1), hp);
+      final proj = (g.tokenCenter(1) - body).dx * unit.dx + (g.tokenCenter(1) - body).dy * unit.dy;
+      if (proj < along.distance - 10) sawBefore = true;
+      if (proj > along.distance + 10) sawAfter = true;
+    }
+    expect(sawBefore && sawAfter, isTrue, reason: 'the cavalry passed the tip');
+    expect(g.debugHitLabel, isNot('3450'));
+
+    g.fieldPos[1] = g.spearTipAt(0);
+    g.enemyFacing = 0;
+    g.debugArmEnemyChargeAura();
+    g.debugStepPursuit(1 / 60);
+    expect(g.debugHitLabel, '迎擊');
+    expect(g.spearQiangjiArmedAt(0), isFalse, reason: 'only the hit clears the whiff gold');
+    expect(g.spearQiangjiGoldAt(0), isFalse);
+    expect(g.spearTipExtendedAt(0), isTrue);
+  });
+
   test('M-01 gold clears on 迎撃 and the arcade gate still owns the hit', () {
     final armed = readyGame();
     final at = _fieldAt(armed, 0.42, 0.50);
@@ -363,6 +421,8 @@ void main() {
     expect(find.text('槍迎撃'), findsOneWidget);
     expect(find.text('弓教學'), findsOneWidget);
     expect(find.text('回城'), findsOneWidget);
+    expect(find.byKey(const Key('tutorial-handoff-hand')), findsNothing);
+    expect(find.text('迎撃後開弓'), findsNothing);
     final rail = find.byKey(const Key('tutorial-lesson-rail'));
     expect(find.descendant(of: rail, matching: find.text('1')), findsOneWidget);
     expect(find.descendant(of: rail, matching: find.text('2')), findsOneWidget);
