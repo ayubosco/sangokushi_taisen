@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
+import 'package:sangokushi_taisen/game/unit_life.dart';
 import 'package:sangokushi_taisen/game/tutorial_controller.dart';
 import 'package:sangokushi_taisen/main.dart';
 
@@ -136,6 +138,53 @@ void main() {
     expect(g.debugInRansen(0), isTrue);
     expect(g.spearTipExtendedAt(0), isFalse);
     expect(g.spearQiangjiGoldAt(0), isFalse);
+    expect(g.spearQiangjiArmedAt(0), isFalse);
+  });
+
+  test('M-01 death releases the armed flag; siege prep is the existing tip gate', () {
+    final dead = readyGame();
+    final at = _fieldAt(dead, 0.42, 0.50);
+    _placeOwn(dead, at, TroopType.spear);
+    dead.ownFacing = 0;
+    _turnSpear(dead, at, const Offset(70, 0));
+    expect(dead.spearQiangjiGoldAt(0), isTrue);
+    expect(dead.spearTipExtendedAt(0), isTrue);
+    dead.debugForceHpZero(0);
+    expect(dead.debugUnitLife(0), UnitLife.retreating);
+    expect(dead.spearQiangjiArmedAt(0), isFalse);
+    expect(dead.spearQiangjiGoldAt(0), isFalse);
+    expect(TaisenGame.kSpearTipReach, closeTo(48 * 1.28, 0.001));
+
+    final zoned = readyGame();
+    final zoneAt = _enemyZoneAt(zoned);
+    _placeOwn(zoned, zoneAt, TroopType.spear);
+    zoned.ownFacing = 0;
+    _turnSpear(zoned, zoneAt, const Offset(0, 64));
+    zoned.dragTo = null;
+    expect(zoned.inEnemyCastleZone(0), isTrue);
+    expect(zoned.debugSiegePrepVisible(0), isFalse);
+    expect(zoned.spearTipExtendedAt(0), isTrue);
+    expect(zoned.spearQiangjiGoldAt(0), isTrue);
+
+    final siege = readyGame();
+    final siegeAt = _enemyZoneAt(siege);
+    final card = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.siege);
+    siege.field
+      ..clear()
+      ..add(card);
+    siege.fieldPos
+      ..clear()
+      ..add(siegeAt);
+    siege.fieldIsEnemy
+      ..clear()
+      ..add(false);
+    siege.fieldInCastle
+      ..clear()
+      ..add(false);
+    siege.debugStepPursuit(1 / 60);
+    expect(siege.debugSiegePrepVisible(0), isTrue);
+    expect(siege.spearQiangjiArmedAt(0), isFalse);
+    expect(siege.spearTipExtendedAt(0), isFalse);
   });
 
   test('M-02 cast spends the printed card cost, previews range, and does not melt', () {
@@ -164,38 +213,62 @@ void main() {
 
     final enemyHp = g.debugUnitHp(2);
     expect(g.castStrategyOnMap(inside), isTrue);
+    expect(g.strategyPreviewVisible, isFalse, reason: 'cast clears the range ring');
+    expect(g.debugStrategyBeamTo, inside);
     expect(g.matchMorale, bow.strategyMorale);
     expect(g.debugStrategyCastAt, inside);
     expect(g.debugStrategyBeamFrom, center);
-    expect(g.debugStrategyBeamTo, inside);
     expect(g.debugHitLabel, isNot('雷擊'));
     expect(g.debugHitLabel, isNot('迎擊'));
     expect(g.debugUnitHp(2), enemyHp);
 
-    g.selectedIndex = 1;
+    expect(g.castStrategyFlick(), isFalse, reason: 'the ring stays down until another select');
+    expect(g.matchMorale, bow.strategyMorale);
+
+    g.selectOrDetailAt(g.tokenCenter(1));
     final bowCost = g.field[1].strategyMorale;
+    expect(g.strategyPreviewVisible, isTrue);
+    expect(g.strategyPreviewCaption, contains('士氣$bowCost'));
     expect(g.castStrategyFlick(), isTrue);
+    expect(g.strategyPreviewVisible, isFalse);
     expect(g.matchMorale, 0);
     expect(g.debugStrategyCastAt, g.tokenCenter(1));
-    expect(g.strategyPreviewCaption, contains('士氣$bowCost'));
+    expect(g.debugUnitHp(2), enemyHp);
+
+    g.selectOrDetailAt(g.tokenCenter(0));
+    expect(g.strategyPreviewVisible, isTrue);
+    g.cancelStrategyPreview();
+    expect(g.strategyPreviewVisible, isFalse);
     expect(g.castStrategyAtSelected(), isFalse);
     expect(g.matchMorale, 0);
-    expect(g.debugUnitHp(2), enemyHp);
+    g.selectOrDetailAt(g.tokenCenter(0));
+    expect(g.strategyPreviewVisible, isTrue);
+    g.selectOrDetailAt(Offset(4, g.watchH + 4));
+    expect(g.selectedIndex, isNull);
+    expect(g.strategyPreviewVisible, isFalse);
   });
 
   test('M-02 a short pool refuses the cast and the seal is not FX-only', () {
     final g = readyGame();
     g.setupSession2Field();
     final cost = g.field[0].strategyMorale;
+    expect(g.strategyPreviewVisible, isTrue);
     g.matchMorale = cost - 1;
     g.triggerStrategyFx(notifyTutorial: false);
     expect(g.matchMorale, cost - 1);
     expect(g.debugStrategyCastAt, isNull);
+    expect(g.strategyPreviewVisible, isTrue, reason: 'a refused cast leaves the ring');
+
+    final bare = readyGame();
+    bare.triggerStrategyFx();
+    expect(bare.debugStrategyCastAt, isNull);
+    expect(bare.matchMorale, 0);
 
     g.matchMorale = cost;
     g.triggerStrategyFx(notifyTutorial: false);
     expect(g.matchMorale, 0);
     expect(g.debugStrategyCastAt, g.tokenCenter(0));
+    expect(g.strategyPreviewVisible, isFalse);
     expect(g.strategyCastBlocksField, isFalse);
   });
 
@@ -216,6 +289,7 @@ void main() {
       ..clear()
       ..add(false);
     g.selectedIndex = 0;
+    g.selectOrDetailAt(at);
     _addEnemy(g, at + const Offset(40, -30));
     g.matchMorale = zhou.strategyMorale;
     final hp = g.debugUnitHp(1);
@@ -273,6 +347,12 @@ void main() {
     await tester.pump();
     await tester.pump();
 
+    final game = tester.widget<GameWidget<TaisenGame>>(find.byType(GameWidget<TaisenGame>)).game!;
+    final own = game.tutorialOwnIndex!;
+    game.selectOrDetailAt(game.tokenCenter(own));
+    await tester.pump();
+
+    expect(game.strategyPreviewVisible, isTrue);
     expect(find.byKey(const Key('match-morale')), findsOneWidget);
     expect(find.text('士氣 4'), findsOneWidget);
     expect(find.text('騎突擊'), findsOneWidget);
@@ -286,6 +366,13 @@ void main() {
     await tester.pump();
 
     expect(find.text('士氣 0'), findsOneWidget);
+    expect(game.strategyPreviewVisible, isFalse);
+    expect(game.matchMorale, 0);
+    game.selectOrDetailAt(game.tokenCenter(own));
+    expect(game.strategyPreviewVisible, isTrue);
+    game.cancelStrategyPreview();
+    expect(game.strategyPreviewVisible, isFalse);
+    expect(game.matchMorale, 0);
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('計略'), findsOneWidget);
 
@@ -331,6 +418,11 @@ void _addOwn(TaisenGame g, Offset at, TroopType troop) {
   g.fieldIsEnemy.add(false);
   g.fieldInCastle.add(false);
   g.fieldPos.add(at);
+}
+
+Offset _enemyZoneAt(TaisenGame g) {
+  final zone = g.enemyCastleZoneRect;
+  return Offset(zone.center.dx, zone.top + zone.height * 0.45);
 }
 
 void _turnSpear(TaisenGame g, Offset at, Offset delta) {

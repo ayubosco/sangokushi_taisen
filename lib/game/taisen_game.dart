@@ -324,6 +324,8 @@ class TaisenGame extends FlameGame {
   final List<bool> _qiangjiArmed = [];
   Offset? _strategyBeamFrom;
   Offset? _strategyBeamTo;
+  /// Range ring for the selected caster. Null after cast or cancel.
+  int? _strategyPreviewIndex;
 
   /// Playtest knob: HP each overlapping body loses per second while in 亂戰.
   static const double kRansenTickPerSec = 6.0;
@@ -1340,6 +1342,7 @@ class TaisenGame extends FlameGame {
     _bowShotReady = false;
     _bowDidShoot = false;
     _seedMatchMoraleFromPrintedCosts();
+    _openStrategyPreview(0);
   }
 
   void setupMatchDemoField() {
@@ -1408,6 +1411,7 @@ class TaisenGame extends FlameGame {
     _bowShotReady = false;
     _bowDidShoot = false;
     _seedMatchMoraleFromPrintedCosts();
+    if (selectedIndex != null) _openStrategyPreview(selectedIndex!);
   }
 
   void setupFeelCastleField() {
@@ -4261,31 +4265,34 @@ class TaisenGame extends FlameGame {
     canvas.drawLine(Offset(rt.dx, rt.dy + rr - 2), Offset(rt.dx, rt.dy + rr + 5), shaft);
   }
 
-  /// Lower-field ring for the caster. Clipped under the watch. Not a cut-in.
+  /// Lower-field ring while a caster is selected. Clipped under the watch.
+  /// The ring clears on cast and on cancel. A card→map beam can outlive it
+  /// for the ≤1C strip. Not a cut-in.
   void _drawStrategyRangePreview(Canvas canvas) {
-    final caster = _strategyCaster;
-    if (caster == null || !strategyPreviewVisibleFor(caster)) return;
-    final center = tokenCenter(caster);
-    final radius = strategyPreviewRadius;
     canvas.save();
     canvas.clipRect(_fieldFxClip());
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..color = FactionColors.gold.withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0,
-    );
-    final caption = strategyPreviewCaption;
-    if (caption != null) {
-      _drawText(
-        canvas,
-        caption,
-        Offset(center.dx - radius, center.dy + 6),
-        FactionColors.gold,
-        11,
+    final caster = _strategyPreviewCaster;
+    if (caster != null) {
+      final center = tokenCenter(caster);
+      final radius = strategyPreviewRadius;
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..color = FactionColors.gold.withValues(alpha: 0.85)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
       );
+      final caption = strategyPreviewCaption;
+      if (caption != null) {
+        _drawText(
+          canvas,
+          caption,
+          Offset(center.dx - radius, center.dy + 6),
+          FactionColors.gold,
+          11,
+        );
+      }
     }
     final from = _strategyBeamFrom;
     final to = _strategyBeamTo;
@@ -4457,12 +4464,14 @@ class TaisenGame extends FlameGame {
     final i = hitTokenAt(local);
     if (i == null) {
       selectedIndex = null;
+      cancelStrategyPreview();
       return;
     }
 
     if (t != null && t.session == TutorialSession.session1) {
       if (i == tutorialOwnIndex) {
         selectedIndex = i;
+        _openStrategyPreview(i);
         t.onSelectOwnCavalry();
         onTutorialChanged?.call();
         return;
@@ -4478,6 +4487,7 @@ class TaisenGame extends FlameGame {
           !isEnemyAt(i) &&
           field[i].troop == TroopType.bow) {
         selectedIndex = i;
+        _openStrategyPreview(i);
         t.onSelectBow();
         onTutorialChanged?.call();
         return;
@@ -4485,6 +4495,7 @@ class TaisenGame extends FlameGame {
       if ((t.s2 == S2Phase.returnCity || t.s2 == S2Phase.strategyOrReturn) &&
           !isEnemyAt(i)) {
         selectedIndex = i;
+        _openStrategyPreview(i);
         return;
       }
       if (i == tutorialOwnIndex &&
@@ -4494,6 +4505,7 @@ class TaisenGame extends FlameGame {
               t.s2 == S2Phase.spearGlow ||
               t.s2 == S2Phase.failRetry)) {
         selectedIndex = i;
+        _openStrategyPreview(i);
         // Early tap still fails the ≥1C gate; MOVE owns facing.
         t.onTapTurnFacing();
         onTutorialChanged?.call();
@@ -4506,6 +4518,7 @@ class TaisenGame extends FlameGame {
       // Living enemies can be read. Skulls get no selection ring and no drag.
       if (_lifeAt(i) != UnitLife.alive) return;
       selectedIndex = i;
+      cancelStrategyPreview();
       return;
     }
 
@@ -4515,6 +4528,7 @@ class TaisenGame extends FlameGame {
         i == _matchSpearIndex &&
         _matchEnemyChargeIndex != null) {
       selectedIndex = i;
+      _openStrategyPreview(i);
       // MOVE aims the tip. A tap must not rotate it onto the cavalry.
       return;
     }
@@ -4522,14 +4536,17 @@ class TaisenGame extends FlameGame {
     // Soft Lock bow: select only. Standing auto windup+shot; never tap-fire / drag-fire.
     if (t == null && field[i].troop == TroopType.bow) {
       selectedIndex = i;
+      _openStrategyPreview(i);
       if (_ransenUnits.contains(i)) _cancelBowWindup();
       return;
     }
 
     if (selectedIndex == i) {
+      _openStrategyPreview(i);
       onRequestDetail?.call(field[i]);
     } else {
       selectedIndex = i;
+      _openStrategyPreview(i);
       // Selecting non-bow cancels any bow windup.
       _cancelBowWindup();
     }
@@ -4583,6 +4600,7 @@ class TaisenGame extends FlameGame {
             !isEnemyAt(i);
         if (!spearOk && !bowOk && !returnOk) return;
         selectedIndex = i;
+        _openStrategyPreview(i);
         dragging = true;
         _resetMeterForFreshMarch();
         dragFrom = tokenCenter(i);
@@ -4612,6 +4630,7 @@ class TaisenGame extends FlameGame {
       // Taisen-delta deferred: Research wanted clear-on-redirect.
       final keepMeter = _retargetKeepsMeter(i);
       selectedIndex = i;
+      _openStrategyPreview(i);
       if (t.shotPassMode) {
         // FEEL/DEMO freezes own coaching — steer only, never reset shot pose.
       } else if (keepMeter) {
@@ -4640,6 +4659,7 @@ class TaisenGame extends FlameGame {
     // Taisen-delta deferred: Research wanted clear-on-redirect.
     final keepMeter = _retargetKeepsMeter(i);
     selectedIndex = i;
+    _openStrategyPreview(i);
     dragging = true;
     if (!keepMeter) _resetMeterForFreshMarch();
     dragFrom = tokenCenter(i);
@@ -4895,6 +4915,7 @@ class TaisenGame extends FlameGame {
     _unitLife[i] = UnitLife.retreating;
     _reviveLeft[i] = _reviveSecondsFor(i);
     _ransenUnits.remove(i);
+    _disarmQiangji(i);
     matchMorale -= kRetreatMoraleCost;
     if (_tipScrapeLeft > 0 && _hitFlashLabel == '迎擊') {
       _retreatSplashAfterGeigeki = i;
@@ -5402,7 +5423,7 @@ class TaisenGame extends FlameGame {
     _ensureQiangjiSlots();
     final still = <String>{};
     for (var s = 0; s < field.length; s++) {
-      if (field[s].troop == TroopType.spear) _clearQiangjiIfTipIn(s);
+      if (field[s].troop == TroopType.spear) _releaseQiangji(s);
       if (_lifeAt(s) != UnitLife.alive || !spearTipExtendedAt(s)) continue;
       if (_inSortiePrep(s)) continue;
       for (var o = 0; o < field.length; o++) {
@@ -5521,6 +5542,7 @@ class TaisenGame extends FlameGame {
     _sortiePrepLeft.clear();
     _tipTickResolved.clear();
     _qiangjiArmed.clear();
+    _strategyPreviewIndex = null;
   }
 
   void _clearTravel(int i) {
@@ -5591,9 +5613,17 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  void _clearQiangjiIfTipIn(int i) {
+  /// Release 槍擊. Hit is [_disarmQiangji] at the contact.
+  /// 亂戰, siege prep, and death release here. Tip retract (歸城) does too.
+  /// Siege prep is [debugSiegePrepVisible] — siege troops only. A spear in the
+  /// enemy castle zone is not that prep (弓攻城 stays HOLD).
+  void _releaseQiangji(int i) {
     if (i < 0 || i >= _qiangjiArmed.length) return;
-    if (!spearTipExtendedAt(i)) _qiangjiArmed[i] = false;
+    final dead = _lifeAt(i) != UnitLife.alive;
+    final ransen = _ransenUnits.contains(i);
+    final siege = debugSiegePrepVisible(i);
+    final tipIn = !spearTipExtendedAt(i);
+    if (dead || ransen || siege || tipIn) _qiangjiArmed[i] = false;
   }
 
   void _disarmQiangji(int i) {
@@ -6012,31 +6042,44 @@ class TaisenGame extends FlameGame {
     return strategyMoraleCostAt(i) != null;
   }
 
-  bool get strategyPreviewVisible {
-    final caster = _strategyCaster;
-    return caster != null && strategyPreviewVisibleFor(caster);
+  /// The selected caster's ring. Null after [cancelStrategyPreview] or a cast.
+  int? get _strategyPreviewCaster {
+    final i = _strategyPreviewIndex;
+    if (i == null || !strategyPreviewVisibleFor(i)) return null;
+    return i;
   }
 
+  bool get strategyPreviewVisible => _strategyPreviewCaster != null;
+
   Offset? get strategyPreviewCenter {
-    final caster = _strategyCaster;
-    if (caster == null || !strategyPreviewVisibleFor(caster)) return null;
+    final caster = _strategyPreviewCaster;
+    if (caster == null) return null;
     return tokenCenter(caster);
   }
 
   /// Card name plus the printed 士氣 and 智力. Display only — no difference formula.
   String? get strategyPreviewCaption {
-    final caster = _strategyCaster;
-    if (caster == null || !strategyPreviewVisibleFor(caster)) return null;
+    final caster = _strategyPreviewCaster;
+    if (caster == null) return null;
     final card = field[caster];
     return '${card.strategyName} 士氣${card.strategyMorale} 智力${card.intel}';
   }
 
   bool strategyPreviewContains(Offset fieldPoint) {
-    final caster = _strategyCaster;
-    if (caster == null || !strategyPreviewVisibleFor(caster)) return false;
+    final caster = _strategyPreviewCaster;
+    if (caster == null) return false;
     if (fieldPoint.dy < watchH) return false;
     final center = tokenCenter(caster);
     return (fieldPoint - center).distance <= strategyPreviewRadius + 0.01;
+  }
+
+  void _openStrategyPreview(int i) {
+    if (strategyPreviewVisibleFor(i)) _strategyPreviewIndex = i;
+  }
+
+  /// Player cancel. The ring drops. 士氣 is unchanged.
+  void cancelStrategyPreview() {
+    _strategyPreviewIndex = null;
   }
 
   /// One cast of each own card, from that card's printed 士氣. Not a regen rate.
@@ -6065,7 +6108,8 @@ class TaisenGame extends FlameGame {
   /// Refuses when 士氣 is short. No 雷擊, no 智力差, no fullscreen cut-in.
   bool castStrategyOnMap(Offset fieldPoint, {bool notifyTutorial = true}) {
     final caster = _strategyCaster;
-    if (caster == null) return false;
+    final preview = _strategyPreviewCaster;
+    if (caster == null || preview == null || caster != preview) return false;
     if (!strategyPreviewContains(fieldPoint)) return false;
     final cost = strategyMoraleCostAt(caster);
     if (cost == null || matchMorale < cost) return false;
@@ -6074,6 +6118,7 @@ class TaisenGame extends FlameGame {
     _strategyBeamFrom = tokenCenter(caster);
     _strategyBeamTo = fieldPoint;
     _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
+    cancelStrategyPreview();
     if (notifyTutorial) {
       tutorial?.onStrategy();
       onTutorialChanged?.call();
@@ -6081,22 +6126,10 @@ class TaisenGame extends FlameGame {
     return true;
   }
 
-  /// Stratagem FX ≤1C on the Watch strip; non-blocking (board stays tappable).
-  /// A resolved caster spends printed 士氣. No card to bill keeps the anchor strip.
+  /// Cast through the spend path. No card, no preview, or a short pool: no FX.
   /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
   void triggerStrategyFx({bool notifyTutorial = true}) {
-    if (_strategyCaster != null) {
-      castStrategyAtSelected(notifyTutorial: notifyTutorial);
-      return;
-    }
-    _stratAt = Offset(size.x * 0.45, watchH + 130);
-    _strategyBeamFrom = null;
-    _strategyBeamTo = null;
-    _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
-    if (notifyTutorial) {
-      tutorial?.onStrategy();
-      onTutorialChanged?.call();
-    }
+    castStrategyAtSelected(notifyTutorial: notifyTutorial);
   }
 
   void triggerReturnCityFx() {
@@ -6107,6 +6140,7 @@ class TaisenGame extends FlameGame {
       onTutorialChanged?.call();
     }
     selectedIndex = null;
+    cancelStrategyPreview();
   }
 
   /// Brighter field fill so Shu green reads on lacquer (lock RGB kept for chrome).

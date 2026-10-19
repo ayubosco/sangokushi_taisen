@@ -39,7 +39,13 @@ void main() {
     expect(TaisenGame.kSoftPassFrameH - box.bottom, closeTo(28, 0.01));
 
     final g = readyGame();
+    g.setupSession2Field();
+    final before = g.matchMorale;
+    final cost = g.field[0].strategyMorale;
+    expect(g.strategyPreviewVisible, isTrue);
     g.triggerStrategyFx();
+    expect(g.matchMorale, before - cost);
+    expect(g.strategyPreviewVisible, isFalse);
     expect(g.debugHitLabel, isNot('迎擊'));
     expect(g.debugStrategyCastAt, isNotNull);
     final banner = g.strategyBannerRect;
