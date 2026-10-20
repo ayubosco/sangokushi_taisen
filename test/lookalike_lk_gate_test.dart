@@ -128,8 +128,9 @@ void main() {
     g.cancelStrategyPreview();
     expect(g.strategyPreviewVisible, isFalse);
     expect(g.matchMorale, before - cost);
-    // K4 Soft note: headless pt size only. Not a device millimetre pass.
-    expect(TaisenGame.kStrategySealPt, 64);
+    // K4: 70pt on the 402×874 frame. Pro Max laid the old 64pt seal out at
+    // ~69pt / 11.44 mm; this size is the ≥12 mm intent (~75pt / ~12.5 mm).
+    expect(TaisenGame.kStrategySealPt, 70);
     expect(TaisenGame.kStrategySealCenter, const Offset(350, 814));
     expect(TaisenGame.kSoftPassFrameW, 402);
     expect(TaisenGame.kSoftPassFrameH, 874);

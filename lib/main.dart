@@ -1527,8 +1527,9 @@ class _Hud extends StatelessWidget {
   }
 }
 
-/// Soft Pass play column. The lacquer 計略 seal is 64×64 at (350, 814) on a
-/// 402×874 frame. It is not a gold pill, and it is the only combat seal.
+/// Soft Pass play column. The lacquer 計略 seal is [TaisenGame.kStrategySealPt]
+/// square at (350, 814) on a 402×874 frame. It is not a gold pill, and it is
+/// the only combat seal.
 class SoftPassPlayFrame extends StatelessWidget {
   const SoftPassPlayFrame({
     super.key,

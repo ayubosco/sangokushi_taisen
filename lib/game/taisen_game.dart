@@ -527,8 +527,13 @@ class TaisenGame extends FlameGame {
   /// iPhone 17 logical frame the Soft Pass HUD signoff was measured on.
   static const double kSoftPassFrameW = 402;
   static const double kSoftPassFrameH = 874;
-  /// Lacquer 計略 seal. Center (350, 814) → box (318, 782)–(382, 846).
-  static const double kStrategySealPt = 64;
+  /// Lacquer 計略 seal. Center (350, 814) → box (315, 779)–(385, 849).
+  ///
+  /// K4: iPhone 14 Pro Max measured the 64pt seal at 11.44 mm wide
+  /// (~69 laid-out pt, ~460 ppi, 430 pt width). 12 mm is ~72.4 laid-out pt
+  /// on that same scale, so the frame constant is 70 (~75 pt / ~12.5 mm).
+  /// Intent only — the device still is remeasured after this change.
+  static const double kStrategySealPt = 70;
   static const Offset kStrategySealCenter = Offset(350, 814);
   /// Watch-strip stamp and banner. Signoff y sits inside Watch bottom 160.667.
   static const Offset kStrategyStampScreen = Offset(273, 130.33);
