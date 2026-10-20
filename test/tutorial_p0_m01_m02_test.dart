@@ -421,7 +421,21 @@ void main() {
     expect(find.text('槍迎撃'), findsOneWidget);
     expect(find.text('弓教學'), findsOneWidget);
     expect(find.text('回城'), findsOneWidget);
-    expect(find.byKey(const Key('tutorial-handoff-hand')), findsNothing);
+    expect(find.byKey(const Key('tutorial-coach-tip')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-charge')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-return')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsNothing,
+    );
     expect(find.text('迎撃後開弓'), findsNothing);
     final rail = find.byKey(const Key('tutorial-lesson-rail'));
     expect(find.descendant(of: rail, matching: find.text('1')), findsOneWidget);

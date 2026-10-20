@@ -138,9 +138,15 @@ void main() {
     );
     expect(s1.lessons.first.current, isTrue);
     expect(s1.lessons.first.name, '騎突擊');
-    expect(find.byKey(const Key('tutorial-handoff-hand')), findsNothing);
     expect(find.byKey(const Key('tutorial-handoff-link')), findsNothing);
     expect(find.text('迎撃後開弓'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-charge')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsOneWidget,
+    );
     expect(
       find.descendant(
         of: find.byKey(const Key('tutorial-lesson-return')),
@@ -159,6 +165,39 @@ void main() {
     expect(find.byKey(const Key('tutorial-handoff-link')), findsOneWidget);
     expect(
       find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-spear')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-bow')),
+        matching: find.byKey(const Key('tutorial-lesson-lock-bow')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('tutorial-lesson-open-bow')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-return')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsNothing,
+    );
+    expect(s2.lessons.map((l) => l.name).toList(), ['騎突擊', '槍迎撃', '弓教學', '回城']);
+    expect(s2.lessons, hasLength(4));
+
+    s2.turnWindowOpen = true;
+    s2.s2 = S2Phase.waitTurn;
+    s2.onSpearAimedByMove();
+    s2.onAutoIntercept(facingWasCorrect: true);
+    await tester.pump();
+    expect(s2.bowLessonUnlocked, isTrue);
+    expect(find.byKey(const Key('tutorial-lesson-lock-bow')), findsNothing);
+    expect(find.byKey(const Key('tutorial-lesson-open-bow')), findsOneWidget);
+    expect(
+      find.descendant(
         of: find.byKey(const Key('tutorial-lesson-bow')),
         matching: find.byKey(const Key('tutorial-handoff-hand')),
       ),
@@ -171,26 +210,18 @@ void main() {
       ),
       findsNothing,
     );
-    expect(s2.lessons.map((l) => l.name).toList(), ['騎突擊', '槍迎撃', '弓教學', '回城']);
-
-    s2.turnWindowOpen = true;
-    s2.s2 = S2Phase.waitTurn;
-    s2.onSpearAimedByMove();
-    s2.onAutoIntercept(facingWasCorrect: true);
-    await tester.pump();
-    expect(s2.bowLessonUnlocked, isTrue);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('tutorial-lesson-bow')),
-        matching: find.byKey(const Key('tutorial-handoff-hand')),
-      ),
-      findsOneWidget,
-    );
 
     s2.onBowShot();
     await tester.pump();
     expect(s2.lessons.firstWhere((l) => l.id == 'return').current, isTrue);
-    expect(find.byKey(const Key('tutorial-handoff-hand')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('tutorial-lesson-return')),
+        matching: find.byKey(const Key('tutorial-handoff-hand')),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('迎撃後開弓'), findsNothing);
+    expect(find.byKey(const Key('tutorial-handoff-link')), findsNothing);
   });
 }

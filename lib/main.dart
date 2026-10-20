@@ -872,6 +872,7 @@ class _TutorialShellState extends State<TutorialShell> {
                     child: GameWidget(key: _fieldKey, game: _game),
                   ),
                   if (_showSessionBanner &&
+                      _tutorial.tipText == null &&
                       (_tutorial.session == TutorialSession.session1 ||
                           _tutorial.session == TutorialSession.session2))
                     Positioned(
@@ -907,6 +908,7 @@ class _TutorialShellState extends State<TutorialShell> {
                       // so tips never cover 計略 (only remaining field button).
                       bottom: 8,
                       child: _TipBanner(
+                        key: const Key('tutorial-coach-tip'),
                         text: _tutorial.tipText!,
                         failed: _tutorial.failed,
                         onSkip: _tutorial.tipSkippable ? _onSkipTip : null,
@@ -924,7 +926,7 @@ class _TutorialShellState extends State<TutorialShell> {
 }
 
 class _TipBanner extends StatelessWidget {
-  const _TipBanner({required this.text, required this.failed, this.onSkip});
+  const _TipBanner({super.key, required this.text, required this.failed, this.onSkip});
   final String text;
   final bool failed;
   final VoidCallback? onSkip;

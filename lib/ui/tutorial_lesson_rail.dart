@@ -4,8 +4,8 @@ import '../game/faction_colors.dart';
 import '../game/tutorial_controller.dart';
 
 /// Soft Lock 4-step rail. Unlock stays on the lesson gates.
-/// The hand and the yellow link mark 槍迎撃 → 弓教學 only.
-/// They stay off while 騎突擊 is the current step, and they never sit on 回城.
+/// The hand sits on the current step. The yellow link is the 槍 drag
+/// that opens 弓. It is not drawn on 回城.
 class TutorialLessonRail extends StatelessWidget {
   const TutorialLessonRail({super.key, required this.controller});
 
@@ -17,7 +17,8 @@ class TutorialLessonRail extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final lessons = controller.lessons;
-        final handoff = _handoffCue(lessons);
+        final spearDrag = _spearDrag(lessons);
+        final handoffCopy = _handoffCopy(lessons);
         return IgnorePointer(
           child: Container(
             key: const Key('tutorial-lesson-rail'),
@@ -28,18 +29,18 @@ class TutorialLessonRail extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (handoff)
+                if (handoffCopy)
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: _HandoffBubble(),
                   ),
                 for (var i = 0; i < lessons.length; i++) ...[
-                  if (i > 0 && handoff && lessons[i].id == 'bow') const _HandoffLink(),
+                  if (spearDrag && lessons[i].id == 'bow') const _HandoffLink(),
                   _LessonChip(
                     index: i + 1,
                     lesson: lessons[i],
-                    handoffTarget: handoff && lessons[i].id == 'bow',
-                    onHandoff: handoff && (lessons[i].id == 'spear' || lessons[i].id == 'bow'),
+                    showHand: lessons[i].current,
+                    onHandoff: spearDrag && (lessons[i].id == 'spear' || lessons[i].id == 'bow'),
                   ),
                 ],
               ],
@@ -50,10 +51,15 @@ class TutorialLessonRail extends StatelessWidget {
     );
   }
 
-  /// C1 v3: cue the 2→3 handoff. Step 1 current, or 回城 current, hides it.
-  bool _handoffCue(List<TutorialLesson> lessons) {
+  /// Yellow path while 槍迎撃 is the drag lesson. Hidden on 回城.
+  bool _spearDrag(List<TutorialLesson> lessons) {
     if (lessons.length != 4) return false;
-    if (lessons[0].current) return false;
+    return lessons[1].current;
+  }
+
+  /// Coach line for the 槍→弓 handoff. Backend string. Off once 回城 is current.
+  bool _handoffCopy(List<TutorialLesson> lessons) {
+    if (lessons.length != 4) return false;
     if (lessons[3].current) return false;
     return lessons[1].current || lessons[2].current;
   }
@@ -113,13 +119,13 @@ class _LessonChip extends StatelessWidget {
   const _LessonChip({
     required this.index,
     required this.lesson,
-    required this.handoffTarget,
+    required this.showHand,
     required this.onHandoff,
   });
 
   final int index;
   final TutorialLesson lesson;
-  final bool handoffTarget;
+  final bool showHand;
   final bool onHandoff;
 
   @override
@@ -148,6 +154,20 @@ class _LessonChip extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  if (locked)
+                    Icon(
+                      Icons.lock,
+                      key: Key('tutorial-lesson-lock-${lesson.id}'),
+                      color: const Color(0xFFBDBDBD),
+                      size: 12,
+                    )
+                  else if (lesson.id == 'bow')
+                    const Icon(
+                      Icons.lock_open,
+                      key: Key('tutorial-lesson-open-bow'),
+                      color: FactionColors.gold,
+                      size: 12,
+                    ),
                   Text(
                     '$index',
                     style: TextStyle(
@@ -172,6 +192,13 @@ class _LessonChip extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (showHand)
+                    const Icon(
+                      Icons.touch_app,
+                      key: Key('tutorial-handoff-hand'),
+                      color: Color(0xFFF7F7F7),
+                      size: 16,
+                    ),
                 ],
               ),
               const SizedBox(height: 1),
@@ -188,13 +215,6 @@ class _LessonChip extends StatelessWidget {
               ),
             ],
           ),
-          if (handoffTarget)
-            const Icon(
-              Icons.touch_app,
-              key: Key('tutorial-handoff-hand'),
-              color: Color(0xFFF7F7F7),
-              size: 18,
-            ),
         ],
       ),
     );

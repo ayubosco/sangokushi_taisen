@@ -18,6 +18,9 @@ import 'watch_siege_mirror.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
 
+/// Watch read of the live spear tip. Same flags as the field. Not a new hit.
+enum WatchTipMirror { idle, gold, scrape, clear }
+
 /// Offline 1v1 CPU stub — short watch (read-only) + large flat 2D field.
 /// H0 A: Watch 0.12–0.13 of the game band; draggable field ≥0.87. Ortho 1:1.
 /// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
@@ -2657,29 +2660,6 @@ class TaisenGame extends FlameGame {
           _noteWatchPaint('demo-intercept');
           // Ellipse, wedge, and the cyan pillar are a living spear's 迎擊 mark.
           // A retreating or in-castle body keeps the 撤 card with none of that.
-          final retractSpear = ownSafe != null &&
-              ownSafe < field.length &&
-              field[ownSafe].troop == TroopType.spear &&
-              !spearTipExtendedAt(ownSafe);
-          if (!retractSpear && ownSafe != null && _chargeCyanOnUnit(ownSafe)) {
-            _drawInterceptStance(
-              canvas,
-              ownC,
-              42 * ownScale,
-              const Color(0xFF26C6DA),
-              facing: tipFacingAt(ownSafe),
-              goldArmed: spearQiangjiGoldAt(ownSafe),
-            );
-            // VFX-01 Watch mirror plate (Design stand-in) — same-frame as field tip.
-            _noteWatchPaint('watch-tip');
-            softLockCues.draw(
-              canvas,
-              'watch-tip',
-              ownC + Offset(0, -22 * ownScale),
-              alpha: 0.95,
-              scale: ownScale * 1.35,
-            );
-          }
         }
         if (_enemyChargeLit(enemySafe, tutorialEnemyAura: t != null && t.enemyAuraVisible)) {
           _drawWatchChargeRings(
@@ -2717,19 +2697,14 @@ class TaisenGame extends FlameGame {
         break;
     }
 
+    // Spear tip mirror follows the field: idle cyan, gold, scrape, or clear.
+    if (ownSafe != null && ownSafe < field.length && field[ownSafe].troop == TroopType.spear) {
+      _drawWatchSpearTipMirror(canvas, ownSafe, ownC, ownScale);
+    }
+
     // VFX-01 live field→Watch mirrors (same-frame), even when demo cycle kind differs.
     if (ownSafe != null && ownSafe < field.length && _lifeAt(ownSafe) == UnitLife.alive) {
       final troop = field[ownSafe].troop;
-      if (troop == TroopType.spear && spearTipExtendedAt(ownSafe) && kind != AWindowKind.intercept) {
-        _noteWatchPaint('watch-tip');
-        softLockCues.draw(
-          canvas,
-          'watch-tip',
-          ownC + Offset(0, -22 * ownScale),
-          alpha: 0.9,
-          scale: ownScale * 1.35,
-        );
-      }
       if (troop == TroopType.bow &&
           _bowWindupIndex == ownSafe &&
           kind != AWindowKind.bow) {
@@ -2907,6 +2882,76 @@ class TaisenGame extends FlameGame {
         Paint()..color = gate ? const Color(0xFFFFF59D) : const Color(0xFF8D6E63),
       );
     }
+  }
+
+  /// Field tip state the Watch copies. Gold is the armed flag. Scrape is the
+  /// 迎撃 window. Clear is a retracted tip, a dead body, or not a spear.
+  WatchTipMirror watchTipMirrorAt(int i) {
+    if (i < 0 || i >= field.length || field[i].troop != TroopType.spear) {
+      return WatchTipMirror.clear;
+    }
+    if (_lifeAt(i) != UnitLife.alive || !spearTipExtendedAt(i)) {
+      return WatchTipMirror.clear;
+    }
+    if (_tipScrapeLeft > 0 && _tipScrapeAt != null && _hitFlashIndex == i && _hitFlashLabel == '迎擊') {
+      return WatchTipMirror.scrape;
+    }
+    if (spearQiangjiGoldAt(i)) return WatchTipMirror.gold;
+    return WatchTipMirror.idle;
+  }
+
+  /// Cyan plate first. Gold is paint on that plate. A scrape replaces the gold.
+  void _drawWatchSpearTipMirror(Canvas canvas, int own, Offset ownC, double ownScale) {
+    final mirror = watchTipMirrorAt(own);
+    if (mirror == WatchTipMirror.clear) {
+      _noteWatchPaint('watch-tip-clear');
+      return;
+    }
+    final tipAt = ownC + Offset(0, -22 * ownScale);
+    _drawInterceptStance(
+      canvas,
+      ownC,
+      42 * ownScale,
+      const Color(0xFF26C6DA),
+      facing: tipFacingAt(own),
+      goldArmed: mirror == WatchTipMirror.gold,
+    );
+    _noteWatchPaint('watch-tip');
+    softLockCues.draw(
+      canvas,
+      'watch-tip',
+      tipAt,
+      alpha: 0.95,
+      scale: ownScale * 1.35,
+    );
+    if (mirror == WatchTipMirror.gold) {
+      _drawWatchGoldTip(canvas, tipAt, ownScale);
+      _noteWatchPaint('watch-tip-gold');
+    } else if (mirror == WatchTipMirror.scrape) {
+      softLockCues.draw(canvas, 'tip-scrape', tipAt, alpha: 0.95, scale: ownScale);
+      _noteWatchPaint('watch-tip-scrape');
+    } else {
+      _noteWatchPaint('watch-tip-idle');
+    }
+  }
+
+  /// Additive gold on the Watch tip point. Paint only — Watch height stays 0.125.
+  void _drawWatchGoldTip(Canvas canvas, Offset tip, double scale) {
+    final s = scale.clamp(0.55, 1.2);
+    canvas.drawLine(
+      tip + Offset(0, 8 * s),
+      tip + Offset(0, -4 * s),
+      Paint()
+        ..color = FactionColors.gold.withValues(alpha: 0.95)
+        ..strokeWidth = 3.0 * s
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(tip.dx, tip.dy - 10 * s)
+      ..lineTo(tip.dx - 4.5 * s, tip.dy)
+      ..lineTo(tip.dx + 4.5 * s, tip.dy)
+      ..close();
+    canvas.drawPath(head, Paint()..color = const Color(0xFFFFE082).withValues(alpha: 0.96));
   }
 
   /// Live Watch plate. Demo-cycle [watchKind] is only the fallback.
