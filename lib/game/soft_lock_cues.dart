@@ -138,6 +138,7 @@ class SoftLockCueBank {
     double alpha = 1,
     double rotation = 0,
     double scale = 1,
+    Color? tint,
   }) {
     final img = _images[name];
     if (img == null) return false;
@@ -146,8 +147,12 @@ class SoftLockCueBank {
     final blend = additiveBlend.contains(name) ? BlendMode.plus : BlendMode.srcOver;
     final paint = Paint()
       ..color = Color.fromRGBO(255, 255, 255, alpha.clamp(0.0, 1.0))
-      ..blendMode = blend
+      ..blendMode = tint == null ? blend : BlendMode.srcOver
       ..filterQuality = FilterQuality.medium;
+    if (tint != null) {
+      // Keep the sprite's ink alpha, replace the cyan plate with the release color.
+      paint.colorFilter = ColorFilter.mode(tint.withValues(alpha: alpha.clamp(0.0, 1.0)), BlendMode.srcIn);
+    }
 
     canvas.save();
     canvas.translate(worldAnchor.dx, worldAnchor.dy);

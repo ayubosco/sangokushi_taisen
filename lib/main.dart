@@ -389,6 +389,7 @@ class _TutorialShellState extends State<TutorialShell> {
   bool _fieldReady = false;
   bool _showSessionBanner = true;
   TutorialSession? _bannerFor;
+  final GlobalKey _fieldKey = GlobalKey();
 
   @override
   void initState() {
@@ -785,6 +786,25 @@ class _TutorialShellState extends State<TutorialShell> {
     super.dispose();
   }
 
+  /// Drag from the seal onto the field places the cast. An upward drag that
+  /// never enters the field is a flick on the card. Either spends printed 士氣.
+  bool _onStrategyDragEnd(Offset global, Offset velocity) {
+    final box = _fieldKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize) {
+      final local = box.globalToLocal(global);
+      if (box.size.contains(local)) {
+        final placed = _game.castStrategyOnMap(local);
+        if (placed && mounted) setState(() {});
+        return true;
+      }
+    }
+    final flicked = velocity.dy < 0 && velocity.dy.abs() >= velocity.dx.abs();
+    if (!flicked) return false;
+    final placed = _game.castStrategyFlick();
+    if (placed && mounted) setState(() {});
+    return placed;
+  }
+
   void _onSkipTip() {
     final wasS2Tip = _tutorial.session == TutorialSession.session2 && _tutorial.s2 == S2Phase.tipDone;
     final wasS1Tip = _tutorial.session == TutorialSession.session1 && _tutorial.s1 == S1Phase.tipNext;
@@ -821,9 +841,10 @@ class _TutorialShellState extends State<TutorialShell> {
           ],
         ),
         onStrategy: () {
-          _game.triggerStrategyFx();
+          _game.castStrategyAtSelected();
           setState(() {});
         },
+        onStrategyDragEnd: _onStrategyDragEnd,
         field: Stack(
           children: [
                   GestureDetector(
@@ -848,9 +869,10 @@ class _TutorialShellState extends State<TutorialShell> {
                       _game.panCancel();
                       setState(() {});
                     },
-                    child: GameWidget(game: _game),
+                    child: GameWidget(key: _fieldKey, game: _game),
                   ),
                   if (_showSessionBanner &&
+                      _tutorial.tipText == null &&
                       (_tutorial.session == TutorialSession.session1 ||
                           _tutorial.session == TutorialSession.session2))
                     Positioned(
@@ -886,6 +908,7 @@ class _TutorialShellState extends State<TutorialShell> {
                       // so tips never cover 計略 (only remaining field button).
                       bottom: 8,
                       child: _TipBanner(
+                        key: const Key('tutorial-coach-tip'),
                         text: _tutorial.tipText!,
                         failed: _tutorial.failed,
                         onSkip: _tutorial.tipSkippable ? _onSkipTip : null,
@@ -903,7 +926,7 @@ class _TutorialShellState extends State<TutorialShell> {
 }
 
 class _TipBanner extends StatelessWidget {
-  const _TipBanner({required this.text, required this.failed, this.onSkip});
+  const _TipBanner({super.key, required this.text, required this.failed, this.onSkip});
   final String text;
   final bool failed;
   final VoidCallback? onSkip;
@@ -1018,6 +1041,25 @@ class MatchShell extends StatefulWidget {
 class _MatchShellState extends State<MatchShell> {
   late final TaisenGame _game;
   final GlobalKey _shotKey = GlobalKey();
+
+  /// Drag from the seal onto the field places the cast. An upward drag that
+  /// never enters the field is a flick on the card. Either spends printed 士氣.
+  bool _onStrategyDragEnd(Offset global, Offset velocity) {
+    final box = _shotKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize) {
+      final local = box.globalToLocal(global);
+      if (box.size.contains(local)) {
+        final placed = _game.castStrategyOnMap(local);
+        if (placed && mounted) setState(() {});
+        return true;
+      }
+    }
+    final flicked = velocity.dy < 0 && velocity.dy.abs() >= velocity.dx.abs();
+    if (!flicked) return false;
+    final placed = _game.castStrategyFlick();
+    if (placed && mounted) setState(() {});
+    return placed;
+  }
   @override
   void initState() {
     super.initState();
@@ -1300,10 +1342,10 @@ class _MatchShellState extends State<MatchShell> {
       body: SoftPassPlayFrame(
         hud: _Hud(game: _game, subtitle: 'Cost6', bingfaLabel: widget.bingfaLabel),
         onStrategy: () {
-          _game.triggerStrategyFx();
-          // Cosmetic: using 計略 does not consume 兵法; stub only.
+          _game.castStrategyAtSelected();
           setState(() {});
         },
+        onStrategyDragEnd: _onStrategyDragEnd,
         field: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapUp: (d) {
@@ -1334,6 +1376,40 @@ class _MatchShellState extends State<MatchShell> {
       ),
     );
   }
+}
+
+/// One printed 士氣 point. The count is [TaisenGame.matchMorale], not a 6/2 table.
+class _MoraleHex extends StatelessWidget {
+  const _MoraleHex();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      key: const Key('match-morale-pip'),
+      size: const Size(9, 10),
+      painter: _MoraleHexPainter(),
+    );
+  }
+}
+
+class _MoraleHexPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(w * 0.5, 0)
+      ..lineTo(w, h * 0.25)
+      ..lineTo(w, h * 0.75)
+      ..lineTo(w * 0.5, h)
+      ..lineTo(0, h * 0.75)
+      ..lineTo(0, h * 0.25)
+      ..close();
+    canvas.drawPath(path, Paint()..color = FactionColors.gold);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _Hud extends StatelessWidget {
@@ -1408,6 +1484,33 @@ class _Hud extends StatelessWidget {
                 ),
               ],
               const Spacer(),
+              Flexible(
+                child: ClipRect(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < game.matchMorale; i++)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 2),
+                            child: _MoraleHex(),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Text(
+                '士氣 ${game.matchMorale}',
+                key: const Key('match-morale'),
+                style: const TextStyle(
+                  color: FactionColors.gold,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(width: 10),
               Text(
                 '$c C',
                 style: TextStyle(
@@ -1424,19 +1527,25 @@ class _Hud extends StatelessWidget {
   }
 }
 
-/// Soft Pass play column. The lacquer 計略 seal is 64×64 at (350, 814) on a
-/// 402×874 frame. It is not a gold pill, and it is the only combat seal.
+/// Soft Pass play column. The lacquer 計略 seal is [TaisenGame.kStrategySealPt]
+/// square at (350, 814) on a 402×874 frame. It is not a gold pill, and it is
+/// the only combat seal.
 class SoftPassPlayFrame extends StatelessWidget {
   const SoftPassPlayFrame({
     super.key,
     required this.hud,
     required this.field,
     required this.onStrategy,
+    this.onStrategyDragEnd,
   });
 
   final Widget hud;
   final Widget field;
   final VoidCallback onStrategy;
+
+  /// Seal drag. [globalPosition] is the pointer. [velocity] is px/s.
+  /// Return true when the drag placed a cast.
+  final bool Function(Offset globalPosition, Offset velocity)? onStrategyDragEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -1488,7 +1597,10 @@ class SoftPassPlayFrame extends StatelessWidget {
               top: sealTop,
               width: seal,
               height: seal,
-              child: _LacquerStrategySeal(onTap: onStrategy),
+              child: _LacquerStrategySeal(
+                onTap: onStrategy,
+                onDragEnd: onStrategyDragEnd,
+              ),
             ),
           ],
         );
@@ -1498,10 +1610,20 @@ class SoftPassPlayFrame extends StatelessWidget {
 }
 
 /// Lacquer square seal. Gold hairline, ink「計略」. Not an ElevatedButton pill.
-class _LacquerStrategySeal extends StatelessWidget {
-  const _LacquerStrategySeal({required this.onTap});
+/// Tap casts on the selected card. A drag onto the field is card→map.
+/// An upward drag that stays on the seal is a flick cast. No fullscreen route.
+class _LacquerStrategySeal extends StatefulWidget {
+  const _LacquerStrategySeal({required this.onTap, this.onDragEnd});
 
   final VoidCallback onTap;
+  final bool Function(Offset globalPosition, Offset velocity)? onDragEnd;
+
+  @override
+  State<_LacquerStrategySeal> createState() => _LacquerStrategySealState();
+}
+
+class _LacquerStrategySealState extends State<_LacquerStrategySeal> {
+  Offset? _lastGlobal;
 
   @override
   Widget build(BuildContext context) {
@@ -1512,8 +1634,16 @@ class _LacquerStrategySeal extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         side: const BorderSide(color: FactionColors.gold, width: 2),
       ),
-      child: InkWell(
-        onTap: onTap,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onPanStart: (d) => _lastGlobal = d.globalPosition,
+        onPanUpdate: (d) => _lastGlobal = d.globalPosition,
+        onPanEnd: (d) {
+          final point = _lastGlobal;
+          if (point == null) return;
+          widget.onDragEnd?.call(point, d.velocity.pixelsPerSecond);
+        },
         child: const Center(
           child: Text(
             '計略',

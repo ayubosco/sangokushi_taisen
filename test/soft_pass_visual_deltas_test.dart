@@ -27,19 +27,25 @@ void main() {
   });
 
   test('P4 計略 seal anchors and Watch-strip FX do not meet the medallion', () {
-    expect(TaisenGame.kStrategySealPt, 64);
+    expect(TaisenGame.kStrategySealPt, 70);
     expect(TaisenGame.kStrategySealCenter, const Offset(350, 814));
     final box = Rect.fromCenter(
       center: TaisenGame.kStrategySealCenter,
       width: TaisenGame.kStrategySealPt,
       height: TaisenGame.kStrategySealPt,
     );
-    expect(box.left, closeTo(318, 0.01));
-    expect(box.top, closeTo(782, 0.01));
-    expect(TaisenGame.kSoftPassFrameH - box.bottom, closeTo(28, 0.01));
+    expect(box.left, closeTo(315, 0.01));
+    expect(box.top, closeTo(779, 0.01));
+    expect(TaisenGame.kSoftPassFrameH - box.bottom, closeTo(25, 0.01));
 
     final g = readyGame();
+    g.setupSession2Field();
+    final before = g.matchMorale;
+    final cost = g.field[0].strategyMorale;
+    expect(g.strategyPreviewVisible, isTrue);
     g.triggerStrategyFx();
+    expect(g.matchMorale, before - cost);
+    expect(g.strategyPreviewVisible, isFalse);
     expect(g.debugHitLabel, isNot('迎擊'));
     expect(g.debugStrategyCastAt, isNotNull);
     final banner = g.strategyBannerRect;

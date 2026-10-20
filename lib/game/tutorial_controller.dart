@@ -186,7 +186,7 @@ class TutorialController extends ChangeNotifier {
     session = TutorialSession.session2;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
-    tipText = '場2槍教學：拖己方槍兵向敵騎，槍尖對住敵先迎擊（跟手指轉面，唔好淨等）';
+    tipText = '場2槍教學：拖槍轉方向，槍頭金光留到打中；槍尖對住敵先迎擊';
     tipSkippable = false;
     failed = false;
     failReason = null;
@@ -463,7 +463,7 @@ class TutorialController extends ChangeNotifier {
     if (facingCorrect) return;
     facingCorrect = true;
     s2 = S2Phase.interceptHit;
-    tipText = '槍尖對住喇 — 等敵氣勢撞尖就迎擊';
+    tipText = '方向轉咗，槍頭金光留到打中 — 等敵氣勢撞尖就迎擊';
     tipSkippable = false;
     notifyListeners();
   }
@@ -534,7 +534,7 @@ class TutorialController extends ChangeNotifier {
     }
     // Live Soft Lock: 計略 is flavour only — tip stays on 回城.
     if (s2 == S2Phase.returnCity) {
-      tipText = '計略得，但場2要拖返歸城區先過關';
+      tipText = '計略用咗卡面士氣，但場2要拖返歸城區先過關';
       tipSkippable = false;
       notifyListeners();
     }
