@@ -9,9 +9,10 @@ void main() {
   test('handoff names stay readable and only the first lesson is open', () {
     final c = TutorialController()..resetToSession1();
     final names = c.lessons.map((l) => l.name).toList();
-    expect(names, ['騎突擊', '槍迎撃', '弓教學', '回城']);
+    expect(names, ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
     expect(c.lessons.map((l) => l.gate).toList(), [
       TutorialLessonGate.current,
+      TutorialLessonGate.locked,
       TutorialLessonGate.locked,
       TutorialLessonGate.locked,
       TutorialLessonGate.locked,
@@ -29,7 +30,7 @@ void main() {
 
   test('a long wait does not hard-unlock 弓; one aimed 迎撃 does', () {
     final c = TutorialController()..resetToSession2();
-    expect(c.lessons.firstWhere((l) => l.id == 'bow').name, '弓教學');
+    expect(c.lessons.firstWhere((l) => l.id == 'bow').name, '遠攻削敵');
     expect(c.lessons.firstWhere((l) => l.id == 'bow').gate, TutorialLessonGate.locked);
     expect(c.lessons.firstWhere((l) => l.id == 'spear').gate, TutorialLessonGate.current);
 
@@ -87,13 +88,13 @@ void main() {
     );
 
     expect(find.byKey(const Key('tutorial-lesson-rail')), findsOneWidget);
-    expect(find.text('弓教學'), findsOneWidget);
-    expect(find.text('槍迎撃'), findsOneWidget);
-    expect(find.text('騎突擊'), findsOneWidget);
+    expect(find.text('遠攻削敵'), findsOneWidget);
+    expect(find.text('槍擊退敵'), findsOneWidget);
+    expect(find.text('快馬突擊'), findsOneWidget);
 
     final lockedBow = tester.widget<Text>(find.descendant(
       of: find.byKey(const Key('tutorial-lesson-bow')),
-      matching: find.text('弓教學'),
+      matching: find.text('遠攻削敵'),
     ));
     expect(lockedBow.style!.color, isNot(Colors.transparent));
     expect(lockedBow.style!.color!.a, greaterThan(0.8));
@@ -128,7 +129,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('弓教學'), findsOneWidget);
+    expect(find.text('遠攻削敵'), findsOneWidget);
   });
 
   testWidgets('C1 hand cues 槍→弓 and stays off 回城 while step 1 is current', (tester) async {
@@ -137,7 +138,7 @@ void main() {
       MaterialApp(home: Scaffold(body: TutorialLessonRail(controller: s1))),
     );
     expect(s1.lessons.first.current, isTrue);
-    expect(s1.lessons.first.name, '騎突擊');
+    expect(s1.lessons.first.name, '快馬突擊');
     expect(find.byKey(const Key('tutorial-handoff-link')), findsNothing);
     expect(find.text('迎撃後開弓'), findsNothing);
     expect(
@@ -185,8 +186,8 @@ void main() {
       ),
       findsNothing,
     );
-    expect(s2.lessons.map((l) => l.name).toList(), ['騎突擊', '槍迎撃', '弓教學', '回城']);
-    expect(s2.lessons, hasLength(4));
+    expect(s2.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(s2.lessons, hasLength(5));
 
     s2.turnWindowOpen = true;
     s2.s2 = S2Phase.waitTurn;

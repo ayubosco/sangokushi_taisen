@@ -1791,6 +1791,7 @@ class TaisenGame extends FlameGame {
         if (coach.bowLessonLive) {
           watchKind = AWindowKind.bow;
         } else if (coach.s2 == S2Phase.returnCity ||
+            coach.s2 == S2Phase.strategyTeach ||
             coach.s2 == S2Phase.strategyOrReturn ||
             coach.s2 == S2Phase.tipDone) {
           watchKind = AWindowKind.intercept;
@@ -4733,6 +4734,14 @@ class TaisenGame extends FlameGame {
         _openStrategyPreview(i);
         return;
       }
+      // 用計得宜: tap an own card to show its 計略範圍. No drag on this step.
+      if (t.strategyLessonLive && !isEnemyAt(i)) {
+        if (_lifeAt(i) != UnitLife.alive) return;
+        selectedIndex = i;
+        _openStrategyPreview(i);
+        onTutorialChanged?.call();
+        return;
+      }
       if (i == tutorialOwnIndex &&
           (t.s2 == S2Phase.waitTurn ||
               t.s2 == S2Phase.interceptHit ||
@@ -5730,6 +5739,7 @@ class TaisenGame extends FlameGame {
     if (spear != tutorialOwnIndex || target != tutorialEnemyIndex) return false;
     if (coach.s2 == S2Phase.bowTeach ||
         coach.s2 == S2Phase.returnCity ||
+        coach.s2 == S2Phase.strategyTeach ||
         coach.s2 == S2Phase.strategyOrReturn ||
         coach.s2 == S2Phase.tipDone ||
         coach.s2 == S2Phase.passed) {
@@ -6378,7 +6388,13 @@ class TaisenGame extends FlameGame {
     _returnFlashLeft = 0.6;
     final t = tutorial;
     if (t != null && t.session == TutorialSession.session2) {
+      final wasReturn = t.s2 == S2Phase.returnCity;
       t.onReturnCity();
+      // 用計得宜 opens on a lesson pool: one printed cast per own card,
+      // the same seed every lesson field uses. Not a regen rate.
+      if (wasReturn && t.s2 == S2Phase.strategyTeach) {
+        _seedMatchMoraleFromPrintedCosts();
+      }
       onTutorialChanged?.call();
     }
     selectedIndex = null;

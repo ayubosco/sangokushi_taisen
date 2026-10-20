@@ -359,10 +359,10 @@ void main() {
     expect(g.matchMorale, 0);
   });
 
-  test('lesson rail stays the Soft Lock 4-step and bow drag still does not loose', () {
+  test('lesson rail reads the 英傑 stage names and bow drag still does not loose', () {
     final c = TutorialController()..resetToSession1();
-    expect(c.lessons.map((l) => l.name).toList(), ['騎突擊', '槍迎撃', '弓教學', '回城']);
-    expect(c.lessons.map((l) => l.id).toList(), ['charge', 'spear', 'bow', 'return']);
+    expect(c.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(c.lessons.map((l) => l.id).toList(), ['charge', 'spear', 'bow', 'return', 'strategy']);
 
     c.resetToSession2();
     expect(c.tipText, contains('金光'));
@@ -378,7 +378,7 @@ void main() {
     c.onStrategy();
     expect(c.tipText, contains('士氣'));
     expect(c.s2, S2Phase.returnCity, reason: '計略 does not replace 回城');
-    expect(c.lessons.map((l) => l.name).toList(), ['騎突擊', '槍迎撃', '弓教學', '回城']);
+    expect(c.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
 
     final moving = readyGame();
     final at = _fieldAt(moving, 0.30, 0.46);
@@ -398,7 +398,7 @@ void main() {
     expect(moving.debugBowWinding, isFalse);
   });
 
-  testWidgets('seal tap spends 士氣 and does not open a cut-in or a fifth lesson', (tester) async {
+  testWidgets('seal tap spends 士氣, opens no cut-in, and 用計得宜 waits locked as step 5', (tester) async {
     await tester.pumpWidget(const SangokushiApp());
     await tester.tap(find.text('輕觸繼續'));
     await tester.pump();
@@ -417,9 +417,9 @@ void main() {
     expect(find.byKey(const Key('match-morale-pip')), findsNWidgets(4));
     final seal = tester.widget<Material>(find.byKey(const Key('soft-pass-strategy-seal')));
     expect(seal.color, FactionColors.lacquer);
-    expect(find.text('騎突擊'), findsOneWidget);
-    expect(find.text('槍迎撃'), findsOneWidget);
-    expect(find.text('弓教學'), findsOneWidget);
+    expect(find.text('快馬突擊'), findsOneWidget);
+    expect(find.text('槍擊退敵'), findsOneWidget);
+    expect(find.text('遠攻削敵'), findsOneWidget);
     expect(find.text('回城'), findsOneWidget);
     expect(find.byKey(const Key('tutorial-coach-tip')), findsOneWidget);
     expect(
@@ -442,9 +442,9 @@ void main() {
     expect(find.descendant(of: rail, matching: find.text('2')), findsOneWidget);
     expect(find.descendant(of: rail, matching: find.text('3')), findsOneWidget);
     expect(find.descendant(of: rail, matching: find.text('4')), findsOneWidget);
-    expect(find.descendant(of: rail, matching: find.text('5')), findsNothing);
-    expect(find.text('用計得宜'), findsNothing);
-    expect(find.text('槍擊退敵'), findsNothing);
+    expect(find.descendant(of: rail, matching: find.text('5')), findsOneWidget);
+    expect(find.text('用計得宜'), findsOneWidget);
+    expect(find.byKey(const Key('tutorial-lesson-lock-strategy')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('soft-pass-strategy-seal')));
     await tester.pump();

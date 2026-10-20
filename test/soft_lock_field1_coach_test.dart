@@ -7,7 +7,7 @@ import 'feel_gates_test.dart' show readyGame;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('Field1 Soft Lock coach: tip cannot skip 槍→弓→回城 gates', () {
+  test('Field1 Soft Lock coach: tip cannot skip 槍→弓→回城→用計 gates', () {
     final c = TutorialController()..resetToSession2();
     expect(c.s2, S2Phase.spearGlow);
     expect(c.tipSkippable, isFalse);
@@ -50,8 +50,16 @@ void main() {
     expect(c.strategyOrReturnDone, isFalse);
 
     c.onReturnCity();
-    expect(c.s2, S2Phase.tipDone);
+    expect(c.s2, S2Phase.strategyTeach);
     expect(c.strategyOrReturnDone, isTrue);
+    expect(c.strategyLessonLive, isTrue);
+
+    c.skipTip();
+    expect(c.s2, S2Phase.strategyTeach, reason: 'tip cannot skip 用計得宜');
+
+    c.onStrategy();
+    expect(c.s2, S2Phase.tipDone);
+    expect(c.tipSkippable, isTrue);
   });
 
   test('Session2 field stages spear+bow and allows Soft Lock return drag', () {
@@ -86,7 +94,7 @@ void main() {
       guard++;
     }
     expect(
-      coach.s2 == S2Phase.tipDone || (g.fieldInCastle.isNotEmpty && g.fieldInCastle[0]),
+      coach.s2 == S2Phase.strategyTeach || (g.fieldInCastle.isNotEmpty && g.fieldInCastle[0]),
       isTrue,
       reason: '歸城 park must advance or park the body',
     );

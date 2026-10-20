@@ -24,6 +24,9 @@ enum S2Phase {
   bowTeach,
   /// Soft Lock Field1: drag own into 歸城區 (after 弓). Was strategyOrReturn either/or.
   returnCity,
+  /// 英傑 stage 5 用計得宜: preview the caster's range, then cast and spend
+  /// the printed 士氣. The cast clears the tutorial (after 回城).
+  strategyTeach,
   /// Shot / legacy alias for [returnCity] stratagem stills.
   strategyOrReturn,
   tipDone,
@@ -31,8 +34,9 @@ enum S2Phase {
 }
 
 /// Ordered Soft Lock handoff. Locked steps stay named — the player can read
-/// the next troop lesson before it opens. Not an 英傑 stage list, stamina
-/// cost, or cut-in.
+/// the next lesson before it opens. Names follow the 英傑 戰鬥教學 stage list
+/// (快馬突擊 / 槍擊退敵 / 遠攻削敵 / 用計得宜). 回城 is a Soft Lock step with
+/// no 英傑 stage. No stamina cost and no cut-in.
 enum TutorialLessonGate { locked, current, done }
 
 class TutorialLesson {
@@ -82,19 +86,22 @@ class TutorialController extends ChangeNotifier {
   /// Soft-fix: charge pass requires drag-to-drop + aura≥1C (not tip-skip alone).
   bool didDragDrop = false;
 
-  /// Arcade order the player can always read: 騎突擊 → 槍迎撃 → 弓教學 → 回城.
+  /// Order the player can always read:
+  /// 快馬突擊 → 槍擊退敵 → 遠攻削敵 → 回城 → 用計得宜.
   /// Only the current step is playable. The next step hard-unlocks on Pass.
   /// 弓 stays locked until one aimed 迎撃 — a wait timer does not open it.
+  /// 用計得宜 is the closer, as in the 英傑 stage list.
   List<TutorialLesson> get lessons {
     final bowOpen = bowLessonUnlocked;
     final spearPlayable = session == TutorialSession.session2 ||
         (session == TutorialSession.session1 &&
             (s1 == S1Phase.tipNext || s1 == S1Phase.passed));
     final returnOpen = _returnLessonOpen;
+    final strategyOpen = _strategyLessonOpen;
     return [
       TutorialLesson(
         id: 'charge',
-        name: '騎突擊',
+        name: '快馬突擊',
         gate: session == TutorialSession.session1 &&
                 s1 != S1Phase.tipNext &&
                 s1 != S1Phase.passed
@@ -103,14 +110,14 @@ class TutorialController extends ChangeNotifier {
       ),
       TutorialLesson(
         id: 'spear',
-        name: '槍迎撃',
+        name: '槍擊退敵',
         gate: bowOpen || session == TutorialSession.complete
             ? TutorialLessonGate.done
             : (spearPlayable ? TutorialLessonGate.current : TutorialLessonGate.locked),
       ),
       TutorialLesson(
         id: 'bow',
-        name: '弓教學',
+        name: '遠攻削敵',
         gate: !bowOpen
             ? TutorialLessonGate.locked
             : (s2 == S2Phase.bowTeach ? TutorialLessonGate.current : TutorialLessonGate.done),
@@ -120,9 +127,16 @@ class TutorialController extends ChangeNotifier {
         name: '回城',
         gate: !returnOpen
             ? TutorialLessonGate.locked
-            : (s2 == S2Phase.tipDone || s2 == S2Phase.passed || session == TutorialSession.complete
-                ? TutorialLessonGate.done
-                : TutorialLessonGate.current),
+            : (strategyOpen ? TutorialLessonGate.done : TutorialLessonGate.current),
+      ),
+      TutorialLesson(
+        id: 'strategy',
+        name: '用計得宜',
+        gate: !strategyOpen
+            ? TutorialLessonGate.locked
+            : (s2 == S2Phase.strategyTeach
+                ? TutorialLessonGate.current
+                : TutorialLessonGate.done),
       ),
     ];
   }
@@ -137,6 +151,7 @@ class TutorialController extends ChangeNotifier {
     switch (s2) {
       case S2Phase.bowTeach:
       case S2Phase.returnCity:
+      case S2Phase.strategyTeach:
       case S2Phase.strategyOrReturn:
       case S2Phase.tipDone:
       case S2Phase.passed:
@@ -154,6 +169,7 @@ class TutorialController extends ChangeNotifier {
     if (session != TutorialSession.session2 || !interceptDone) return false;
     switch (s2) {
       case S2Phase.returnCity:
+      case S2Phase.strategyTeach:
       case S2Phase.strategyOrReturn:
       case S2Phase.tipDone:
       case S2Phase.passed:
@@ -162,6 +178,24 @@ class TutorialController extends ChangeNotifier {
         return false;
     }
   }
+
+  /// 用計得宜 opens only after 回城. The shot-only either/or gate
+  /// ([S2Phase.strategyOrReturn]) does not open it.
+  bool get _strategyLessonOpen {
+    if (session == TutorialSession.complete) return true;
+    if (session != TutorialSession.session2 || !interceptDone) return false;
+    switch (s2) {
+      case S2Phase.strategyTeach:
+      case S2Phase.tipDone:
+      case S2Phase.passed:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// Live 用計得宜. The seal, flick, and card→map cast clear it.
+  bool get strategyLessonLive => _strategyLessonOpen && s2 == S2Phase.strategyTeach;
 
   void resetToSession1() {
     session = TutorialSession.session1;
@@ -217,6 +251,7 @@ class TutorialController extends ChangeNotifier {
             s2 == S2Phase.failRetry ||
             s2 == S2Phase.bowTeach ||
             s2 == S2Phase.returnCity ||
+            s2 == S2Phase.strategyTeach ||
             s2 == S2Phase.strategyOrReturn)) {
       return;
     }
@@ -522,7 +557,7 @@ class TutorialController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Legacy stratagem shot / button — Soft Lock Field1 pass is 回城 only.
+  /// A 計略 cast that spent 士氣. Clears 用計得宜. On 回城 it is flavour only.
   void onStrategy() {
     if (session != TutorialSession.session2) return;
     if (s2 == S2Phase.strategyOrReturn) {
@@ -532,9 +567,14 @@ class TutorialController extends ChangeNotifier {
       _passS2();
       return;
     }
-    // Live Soft Lock: 計略 is flavour only — tip stays on 回城.
+    if (s2 == S2Phase.strategyTeach) {
+      if (!interceptDone) return;
+      _passS2();
+      return;
+    }
+    // 計略 before 回城 does not skip it — tip stays on 回城.
     if (s2 == S2Phase.returnCity) {
-      tipText = '計略用咗卡面士氣，但場2要拖返歸城區先過關';
+      tipText = '計略用咗卡面士氣，但要先拖返歸城區，下一課先教用計';
       tipSkippable = false;
       notifyListeners();
     }
@@ -545,12 +585,20 @@ class TutorialController extends ChangeNotifier {
     if (s2 != S2Phase.returnCity && s2 != S2Phase.strategyOrReturn) return;
     if (!interceptDone) return;
     strategyOrReturnDone = true;
-    _passS2();
+    if (s2 == S2Phase.strategyOrReturn) {
+      // Shot stills keep the old either/or close.
+      _passS2();
+      return;
+    }
+    s2 = S2Phase.strategyTeach;
+    tipText = '回城過關！最後用計得宜：點武將睇計略範圍，消耗士氣放計略';
+    tipSkippable = false;
+    notifyListeners();
   }
 
   void _passS2() {
     s2 = S2Phase.tipDone;
-    tipText = '槍→弓→回城搞掂！撳「跳過」去選勢力';
+    tipText = '戰鬥教學搞掂！撳「跳過」去選勢力';
     tipSkippable = true;
     notifyListeners();
   }
@@ -572,7 +620,7 @@ class TutorialController extends ChangeNotifier {
     shotPassMode = true;
     session = TutorialSession.session2;
     s2 = S2Phase.tipDone;
-    tipText = '槍→弓→回城搞掂！撳「跳過」去選勢力';
+    tipText = '戰鬥教學搞掂！撳「跳過」去選勢力';
     tipSkippable = true;
     interceptDone = true;
     strategyOrReturnDone = true;
