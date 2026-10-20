@@ -208,14 +208,23 @@ void main() {
       await _shootPair(hit, mash, 't1-t2-scrape-vs-mash.png');
 
       await _armReadability(hit);
-      final beat = _beatGame();
-      final readyPool = beat.matchMorale;
-      beat.selectedIndex = null;
-      beat.cancelStrategyPreview();
-      expect(beat.strategyPreviewVisible, isFalse);
-      expect(beat.selectedIndex, isNull);
-      await _shootBeat(beat, 'b1-seal-ready.png');
+      final ready = _beatGame();
+      final readyPool = ready.matchMorale;
+      ready.selectedIndex = null;
+      ready.cancelStrategyPreview();
+      ready.tutorialOwnIndex = null;
+      ready.tutorialEnemyIndex = null;
+      // Spear plate is tip-always-on. Park it so this frame is not a cast.
+      ready.fieldInCastle[0] = true;
+      expect(ready.spearTipExtendedAt(0), isFalse);
+      expect(ready.strategyPreviewVisible, isFalse);
+      expect(ready.debugStrategyFxLeft, 0);
+      expect(ready.debugStrategyBeamFrom, isNull);
+      expect(ready.debugHitLabel, isEmpty);
+      await _shootBeat(ready, 'b1-seal-ready.png');
 
+      final beat = _beatGame();
+      expect(beat.matchMorale, readyPool);
       final card = beat.tokenCenter(1);
       beat.selectedIndex = 1;
       beat.cancelStrategyPreview();
