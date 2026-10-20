@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../game/faction_colors.dart';
 import '../game/tutorial_controller.dart';
 
-/// Soft Lock 4-step rail. Unlock stays on the lesson gates.
-/// The hand sits on the current step. The yellow link is the 槍 drag
-/// that opens 弓. It is not drawn on 回城.
+/// Soft Lock 5-step rail on the 英傑 stage names. Unlock stays on the
+/// lesson gates. The hand sits on the current step. The yellow link is the
+/// 槍 drag that opens 弓. It is not drawn on 回城 or 用計得宜.
 class TutorialLessonRail extends StatelessWidget {
   const TutorialLessonRail({super.key, required this.controller});
 
@@ -51,17 +51,18 @@ class TutorialLessonRail extends StatelessWidget {
     );
   }
 
-  /// Yellow path while 槍迎撃 is the drag lesson. Hidden on 回城.
-  bool _spearDrag(List<TutorialLesson> lessons) {
-    if (lessons.length != 4) return false;
-    return lessons[1].current;
-  }
+  /// Yellow path while 槍擊退敵 is the drag lesson. Hidden on 回城.
+  bool _spearDrag(List<TutorialLesson> lessons) => _isCurrent(lessons, 'spear');
 
   /// Coach line for the 槍→弓 handoff. Backend string. Off once 回城 is current.
-  bool _handoffCopy(List<TutorialLesson> lessons) {
-    if (lessons.length != 4) return false;
-    if (lessons[3].current) return false;
-    return lessons[1].current || lessons[2].current;
+  bool _handoffCopy(List<TutorialLesson> lessons) =>
+      _isCurrent(lessons, 'spear') || _isCurrent(lessons, 'bow');
+
+  bool _isCurrent(List<TutorialLesson> lessons, String id) {
+    for (final l in lessons) {
+      if (l.id == id) return l.current;
+    }
+    return false;
   }
 }
 

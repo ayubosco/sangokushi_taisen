@@ -167,7 +167,7 @@ void main() {
     expect(idle.s2, isNot(S2Phase.bowTeach));
     expect(idle.interceptDone, isFalse);
     expect(idle.bowLessonUnlocked, isFalse);
-    expect(idle.lessons.firstWhere((l) => l.id == 'bow').name, '弓教學');
+    expect(idle.lessons.firstWhere((l) => l.id == 'bow').name, '遠攻削敵');
     expect(idle.lessons.firstWhere((l) => l.id == 'bow').gate, TutorialLessonGate.locked);
     expect(idleGame.debugUnitLife(enemy), UnitLife.alive);
 
