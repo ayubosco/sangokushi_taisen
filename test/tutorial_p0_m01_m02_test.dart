@@ -361,8 +361,8 @@ void main() {
 
   test('lesson rail reads the 英傑 stage names and bow drag still does not loose', () {
     final c = TutorialController()..resetToSession1();
-    expect(c.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
-    expect(c.lessons.map((l) => l.id).toList(), ['charge', 'spear', 'bow', 'return', 'strategy']);
+    expect(c.lessons.map((l) => l.name).toList(), ['逐一擊破', '快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(c.lessons.map((l) => l.id).toList(), ['ichigeki', 'charge', 'spear', 'bow', 'return', 'strategy']);
 
     c.resetToSession2();
     expect(c.tipText, contains('金光'));
@@ -378,7 +378,7 @@ void main() {
     c.onStrategy();
     expect(c.tipText, contains('士氣'));
     expect(c.s2, S2Phase.returnCity, reason: '計略 does not replace 回城');
-    expect(c.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(c.lessons.map((l) => l.name).toList(), ['逐一擊破', '快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
 
     final moving = readyGame();
     final at = _fieldAt(moving, 0.30, 0.46);
@@ -398,7 +398,7 @@ void main() {
     expect(moving.debugBowWinding, isFalse);
   });
 
-  testWidgets('seal tap spends 士氣, opens no cut-in, and 用計得宜 waits locked as step 5', (tester) async {
+  testWidgets('seal tap spends 士氣, opens no cut-in, and 用計得宜 waits locked as step 6', (tester) async {
     await tester.pumpWidget(const SangokushiApp());
     await tester.tap(find.text('輕觸繼續'));
     await tester.pump();
@@ -407,6 +407,16 @@ void main() {
     await tester.pump();
 
     final game = tester.widget<GameWidget<TaisenGame>>(find.byType(GameWidget<TaisenGame>)).game!;
+    // The shell opens on 逐一擊破. Rout the 刀兵 foe and take the real 跳過 handoff.
+    expect(find.text('逐一擊破'), findsWidgets);
+    expect(game.field.every((c) => c.troop == TroopType.infantry), isTrue);
+    game.debugForceHpZero(game.tutorialEnemyIndex!);
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.text('跳過'));
+    await tester.pump();
+    expect(game.field.first.troop, TroopType.cavalry);
+
     final own = game.tutorialOwnIndex!;
     game.selectOrDetailAt(game.tokenCenter(own));
     await tester.pump();
@@ -443,6 +453,7 @@ void main() {
     expect(find.descendant(of: rail, matching: find.text('3')), findsOneWidget);
     expect(find.descendant(of: rail, matching: find.text('4')), findsOneWidget);
     expect(find.descendant(of: rail, matching: find.text('5')), findsOneWidget);
+    expect(find.descendant(of: rail, matching: find.text('6')), findsOneWidget);
     expect(find.text('用計得宜'), findsOneWidget);
     expect(find.byKey(const Key('tutorial-lesson-lock-strategy')), findsOneWidget);
 

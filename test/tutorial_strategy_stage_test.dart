@@ -13,7 +13,7 @@ void main() {
   test('rail order follows the 英傑 stage names and closes on 用計得宜', () {
     final c = TutorialController()..resetToSession1();
     expect(c.lessons.map((l) => l.name).toList(),
-        ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+        ['逐一擊破', '快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
     expect(c.lessons.last.gate, TutorialLessonGate.locked);
 
     c.resetToSession2();

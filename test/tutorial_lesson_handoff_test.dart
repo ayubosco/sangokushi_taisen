@@ -6,11 +6,12 @@ import 'package:sangokushi_taisen/ui/tutorial_lesson_rail.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('handoff names stay readable and only the first lesson is open', () {
+  test('handoff names stay readable and only 快馬突擊 is open after 逐一擊破', () {
     final c = TutorialController()..resetToSession1();
     final names = c.lessons.map((l) => l.name).toList();
-    expect(names, ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(names, ['逐一擊破', '快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
     expect(c.lessons.map((l) => l.gate).toList(), [
+      TutorialLessonGate.done,
       TutorialLessonGate.current,
       TutorialLessonGate.locked,
       TutorialLessonGate.locked,
@@ -132,13 +133,15 @@ void main() {
     expect(find.text('遠攻削敵'), findsOneWidget);
   });
 
-  testWidgets('C1 hand cues 槍→弓 and stays off 回城 while step 1 is current', (tester) async {
+  testWidgets('C1 hand cues 槍→弓 and stays off 回城 while 快馬突擊 is current', (tester) async {
     final s1 = TutorialController()..resetToSession1();
     await tester.pumpWidget(
       MaterialApp(home: Scaffold(body: TutorialLessonRail(controller: s1))),
     );
-    expect(s1.lessons.first.current, isTrue);
-    expect(s1.lessons.first.name, '快馬突擊');
+    expect(s1.lessons.first.name, '逐一擊破');
+    expect(s1.lessons.first.gate, TutorialLessonGate.done);
+    expect(s1.lessons[1].current, isTrue);
+    expect(s1.lessons[1].name, '快馬突擊');
     expect(find.byKey(const Key('tutorial-handoff-link')), findsNothing);
     expect(find.text('迎撃後開弓'), findsNothing);
     expect(
@@ -186,8 +189,8 @@ void main() {
       ),
       findsNothing,
     );
-    expect(s2.lessons.map((l) => l.name).toList(), ['快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
-    expect(s2.lessons, hasLength(5));
+    expect(s2.lessons.map((l) => l.name).toList(), ['逐一擊破', '快馬突擊', '槍擊退敵', '遠攻削敵', '回城', '用計得宜']);
+    expect(s2.lessons, hasLength(6));
 
     s2.turnWindowOpen = true;
     s2.s2 = S2Phase.waitTurn;

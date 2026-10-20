@@ -1097,6 +1097,14 @@ class TaisenGame extends FlameGame {
     _cancelBowWindup();
   }
 
+  /// 逐一擊破 retry wait is over: re-seed the 刀兵 pair.
+  void consumeIchigekiRetry() {
+    final t = tutorial;
+    if (t == null || t.session != TutorialSession.ichigeki || !t.ichigekiNeedsField) return;
+    t.ichigekiNeedsField = false;
+    setupIchigekiField();
+  }
+
   /// Test hook: pursuit + 亂戰 contact + 氣勢 snap without Flame's component tree.
   /// Stop-fade stays in [debugDecayStoppedCharge] so arrival-frame travel stays lit.
   void debugStepPursuit(double dt) {
@@ -1288,6 +1296,59 @@ class TaisenGame extends FlameGame {
     return kMarchShadowOpacity * fade;
   }
 
+  /// 逐一擊破 lesson pool for the enemy 刀兵. Equal 刀兵 on the shared mutual
+  /// stub would rout on the same frame, so the lesson foe enters at half bar.
+  /// This is a lesson seed like the stage-5 士氣 pool, not a combat rule.
+  static const double kIchigekiEnemyHp = kRansenMaxHp * 0.5;
+
+  /// Fresh bodies for a new lesson field: full HP, alive, no 亂戰 pair.
+  void _resetLessonBodies() {
+    _unitHp.clear();
+    _hpCause.clear();
+    _unitLife.clear();
+    _reviveLeft.clear();
+    _ransenUnits.clear();
+    _meleeEnemyIndex = null;
+    _chargeResolvedThisContact = false;
+    dragging = false;
+    dragFrom = null;
+    dragTo = null;
+    _ensureHpSlots();
+    _ensureLifeSlots();
+  }
+
+  /// 英傑 stage 1 逐一擊破: one own 刀兵 vs one enemy 刀兵. No charge, no tip,
+  /// no bow. The roster has a single 刀兵 face, so both sides use it.
+  void setupIchigekiField() {
+    field.clear();
+    _clearPerUnitFacing();
+    fieldPos.clear();
+    fieldIsEnemy.clear();
+    fieldInCastle.clear();
+    selectedIndex = null;
+    final foot = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.infantry);
+    field.addAll([foot, foot]);
+    fieldIsEnemy.addAll([false, true]);
+    fieldInCastle.addAll([false, false]);
+    final wh = size.y > 0 ? watchH : 200.0;
+    final w = size.x > 0 ? size.x : 390.0;
+    final fh = size.y > 0 ? (size.y - wh) : 280.0;
+    fieldPos.addAll([
+      Offset(w * 0.32, wh + fh * 0.58), // own 刀兵
+      Offset(w * 0.60, wh + fh * 0.30), // enemy 刀兵
+    ]);
+    tutorialOwnIndex = 0;
+    tutorialEnemyIndex = 1;
+    _matchEnemyChargeIndex = null;
+    _matchEnemyChargeC = 0;
+    _matchSpearIndex = null;
+    ownFacing = -0.2;
+    enemyFacing = math.pi + 0.3;
+    _resetLessonBodies();
+    _unitHp[1] = kIchigekiEnemyHp;
+    _seedMatchMoraleFromPrintedCosts();
+  }
+
   void setupSession1Field() {
     field.clear();
     _clearPerUnitFacing();
@@ -1312,6 +1373,8 @@ class TaisenGame extends FlameGame {
     selectedIndex = null;
     ownFacing = -0.2;
     enemyFacing = math.pi + 0.3;
+    // A routed 逐一擊破 foe sat on slot 1. 快馬突擊 starts on fresh bodies.
+    _resetLessonBodies();
     _seedMatchMoraleFromPrintedCosts();
   }
 
@@ -1734,6 +1797,7 @@ class TaisenGame extends FlameGame {
     // Troop SpriteAnimations — independent of drag/buttons; never blocks input.
     troopSprites.update(dt);
     tutorial?.tick(dt);
+    consumeIchigekiRetry();
 
     _watchPhaseLeft -= dt;
     if (_watchPhaseLeft <= 0) {
@@ -4704,6 +4768,16 @@ class TaisenGame extends FlameGame {
       return;
     }
 
+    if (t != null && t.session == TutorialSession.ichigeki) {
+      // 逐一擊破: only the own 刀兵 selects. The enemy card stays read-only.
+      if (i != tutorialOwnIndex) return;
+      selectedIndex = i;
+      _openStrategyPreview(i);
+      t.onSelectOwnFoot();
+      onTutorialChanged?.call();
+      return;
+    }
+
     if (t != null && t.session == TutorialSession.session1) {
       if (i == tutorialOwnIndex) {
         selectedIndex = i;
@@ -4855,6 +4929,20 @@ class TaisenGame extends FlameGame {
           _cancelBowWindup();
           t.onSelectBow();
         }
+        onTutorialChanged?.call();
+        return;
+      }
+      if (t.session == TutorialSession.ichigeki) {
+        // 逐一擊破: drag the own 刀兵 into the foe. No meter to keep.
+        if (i != tutorialOwnIndex) return;
+        if (t.s0 == IchigekiPhase.failRetry || t.s0 == IchigekiPhase.passed) return;
+        selectedIndex = i;
+        _openStrategyPreview(i);
+        t.onSelectOwnFoot();
+        dragging = true;
+        _resetMeterForFreshMarch();
+        dragFrom = tokenCenter(i);
+        dragTo = _clampFieldPos(local);
         onTutorialChanged?.call();
         return;
       }
@@ -5177,6 +5265,16 @@ class TaisenGame extends FlameGame {
       _matchChargeIndex = null;
       _matchChargeC = 0;
     }
+    final t = tutorial;
+    if (t != null && t.session == TutorialSession.ichigeki) {
+      // The rout keeps the shared 撤退 splash. No new fly string.
+      if (i == tutorialEnemyIndex) {
+        t.onIchigekiEnemyRouted();
+      } else if (i == tutorialOwnIndex) {
+        t.onIchigekiOwnRouted();
+      }
+      onTutorialChanged?.call();
+    }
   }
 
   /// Test hook: set playtest HP without starting retreat. 0 still needs [debugForceHpZero].
@@ -5424,6 +5522,8 @@ class TaisenGame extends FlameGame {
       }
     }
 
+    _syncIchigekiRansen(overlapping);
+
     if (overlapping.isEmpty) {
       _ransenUnits.clear();
       _meleeEnemyIndex = null;
@@ -5450,6 +5550,23 @@ class TaisenGame extends FlameGame {
     }
     _ransenUnits.removeWhere((i) => i < 0 || i >= field.length || _lifeAt(i) != UnitLife.alive);
     if (_ransenUnits.length < 2) _ransenUnits.clear();
+  }
+
+  /// 逐一擊破 coach follows the lesson pair: overlap is 亂戰, a split drops it.
+  void _syncIchigekiRansen(Set<int> overlapping) {
+    final t = tutorial;
+    if (t == null || t.session != TutorialSession.ichigeki) return;
+    final own = tutorialOwnIndex;
+    final foe = tutorialEnemyIndex;
+    if (own == null || foe == null) return;
+    final paired = overlapping.contains(own) && overlapping.contains(foe);
+    if (paired && t.s0 == IchigekiPhase.selectFoot) {
+      t.onIchigekiRansen();
+      onTutorialChanged?.call();
+    } else if (!paired && t.s0 == IchigekiPhase.ransen) {
+      t.onIchigekiRansenBroken();
+      onTutorialChanged?.call();
+    }
   }
 
   /// Playtest outgoing 亂戰 rate. 攻城 is a fraction of the shared stub. Not wiki DPS.

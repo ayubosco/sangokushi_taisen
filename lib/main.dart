@@ -542,10 +542,17 @@ class _TutorialShellState extends State<TutorialShell> {
         _game.setupSession2Field();
         _bannerFor = TutorialSession.session2;
         _showSessionBanner = true;
-      } else {
+      } else if (kChargeAutoVerify || kSpeedCompareVerify) {
+        // Charge / speed verifies drive the 場1 cavalry directly.
         _tutorial.resetToSession1();
         _game.setupSession1Field();
         _bannerFor = TutorialSession.session1;
+        _showSessionBanner = true;
+      } else {
+        // Live tutorial opens on 英傑 stage 1 逐一擊破, then 快馬突擊.
+        _tutorial.resetToIchigeki();
+        _game.setupIchigekiField();
+        _bannerFor = TutorialSession.ichigeki;
         _showSessionBanner = true;
       }
       // Freeze C only for FEEL_SHOT / TUTORIAL_SHOT / DEMO_SHOT captures.
@@ -769,7 +776,8 @@ class _TutorialShellState extends State<TutorialShell> {
 
   void _maybeShowSessionBanner() {
     if (_bannerFor != _tutorial.session &&
-        (_tutorial.session == TutorialSession.session1 ||
+        (_tutorial.session == TutorialSession.ichigeki ||
+            _tutorial.session == TutorialSession.session1 ||
             _tutorial.session == TutorialSession.session2)) {
       _bannerFor = _tutorial.session;
       _showSessionBanner = true;
@@ -808,7 +816,13 @@ class _TutorialShellState extends State<TutorialShell> {
   void _onSkipTip() {
     final wasS2Tip = _tutorial.session == TutorialSession.session2 && _tutorial.s2 == S2Phase.tipDone;
     final wasS1Tip = _tutorial.session == TutorialSession.session1 && _tutorial.s1 == S1Phase.tipNext;
+    final wasS0Tip =
+        _tutorial.session == TutorialSession.ichigeki && _tutorial.s0 == IchigekiPhase.tipNext;
     _tutorial.skipTip();
+    if (wasS0Tip) {
+      _game.setupSession1Field();
+      setState(() {});
+    }
     if (wasS1Tip) {
       _game.setupSession2Field();
       setState(() {});
@@ -819,6 +833,7 @@ class _TutorialShellState extends State<TutorialShell> {
   }
 
   String get _sessionTitle {
+    if (_tutorial.session == TutorialSession.ichigeki) return '教學：逐一擊破';
     if (_tutorial.session == TutorialSession.session1) return '教學場1：突撃';
     if (_tutorial.session == TutorialSession.session2) return '教學場2：槍→弓→回城';
     return '教學';
@@ -834,7 +849,11 @@ class _TutorialShellState extends State<TutorialShell> {
           children: [
             _Hud(
               game: _game,
-              subtitle: _tutorial.session == TutorialSession.session1 ? '場1' : '場2',
+              subtitle: switch (_tutorial.session) {
+                TutorialSession.ichigeki => '逐一擊破',
+                TutorialSession.session1 => '場1',
+                _ => '場2',
+              },
               bingfaLabel: widget.bingfaLabel,
             ),
             TutorialLessonRail(controller: _tutorial),
@@ -873,7 +892,8 @@ class _TutorialShellState extends State<TutorialShell> {
                   ),
                   if (_showSessionBanner &&
                       _tutorial.tipText == null &&
-                      (_tutorial.session == TutorialSession.session1 ||
+                      (_tutorial.session == TutorialSession.ichigeki ||
+                          _tutorial.session == TutorialSession.session1 ||
                           _tutorial.session == TutorialSession.session2))
                     Positioned(
                       top: 10,

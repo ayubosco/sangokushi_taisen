@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../game/faction_colors.dart';
 import '../game/tutorial_controller.dart';
 
-/// Soft Lock 5-step rail on the 英傑 stage names. Unlock stays on the
+/// Soft Lock 6-step rail on the 英傑 stage names (逐一擊破 first). Unlock stays on the
 /// lesson gates. The hand sits on the current step. The yellow link is the
 /// 槍 drag that opens 弓. It is not drawn on 回城 or 用計得宜.
 class TutorialLessonRail extends StatelessWidget {
