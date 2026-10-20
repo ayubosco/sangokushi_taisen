@@ -2,8 +2,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flame/game.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangokushi_taisen/data/card_models.dart';
+import 'package:sangokushi_taisen/game/faction_colors.dart';
 import 'package:sangokushi_taisen/game/fx_windows.dart';
 import 'package:sangokushi_taisen/game/taisen_game.dart';
 
@@ -125,6 +128,11 @@ void main() {
     g.cancelStrategyPreview();
     expect(g.strategyPreviewVisible, isFalse);
     expect(g.matchMorale, before - cost);
+    // K4 Soft note: headless pt size only. Not a device millimetre pass.
+    expect(TaisenGame.kStrategySealPt, 64);
+    expect(TaisenGame.kStrategySealCenter, const Offset(350, 814));
+    expect(TaisenGame.kSoftPassFrameW, 402);
+    expect(TaisenGame.kSoftPassFrameH, 874);
   });
 
   testWidgets('headless stills for W/T/K re-Gate', (tester) async {
@@ -198,6 +206,65 @@ void main() {
       await _armReadability(mash);
       await _shoot(mash, 't2-body-ransen.png');
       await _shootPair(hit, mash, 't1-t2-scrape-vs-mash.png');
+
+      await _armReadability(hit);
+      final beat = _beatGame();
+      final readyPool = beat.matchMorale;
+      beat.selectedIndex = null;
+      beat.cancelStrategyPreview();
+      expect(beat.strategyPreviewVisible, isFalse);
+      expect(beat.selectedIndex, isNull);
+      await _shootBeat(beat, 'b1-seal-ready.png');
+
+      final card = beat.tokenCenter(1);
+      beat.selectedIndex = 1;
+      beat.cancelStrategyPreview();
+      beat.dragging = true;
+      beat.dragFrom = card;
+      beat.dragTo = card + const Offset(0, -36);
+      expect(beat.pinnedMarchAt(1), isTrue);
+      expect(beat.strategyPreviewVisible, isFalse);
+      expect(beat.matchMorale, readyPool);
+      await _shootBeat(beat, 'b2-card-lift.png');
+
+      beat.dragging = false;
+      beat.dragTo = null;
+      beat.selectOrDetailAt(beat.tokenCenter(1));
+      expect(beat.strategyPreviewVisible, isTrue);
+      expect(beat.strategyPreviewCaption, isNot(contains('6vs2')));
+      expect(beat.strategyPreviewCaption, isNot(contains('6/2')));
+      expect(beat.matchMorale, readyPool);
+      await _shootBeat(beat, 'b3-range-on.png');
+
+      final cancel = _beatGame();
+      cancel.selectOrDetailAt(cancel.tokenCenter(1));
+      final cancelPool = cancel.matchMorale;
+      expect(cancel.strategyPreviewVisible, isTrue);
+      cancel.cancelStrategyPreview();
+      expect(cancel.strategyPreviewVisible, isFalse);
+      expect(cancel.matchMorale, cancelPool);
+      await _shootBeat(cancel, 'k2-cancel-range-clear.png');
+
+      final aimCenter = beat.strategyPreviewCenter!;
+      final aim = aimCenter + const Offset(40, -16);
+      expect(beat.strategyPreviewContains(aim), isTrue);
+      final cost = beat.strategyMoraleCostAt(1);
+      expect(cost, isNotNull);
+      expect(beat.castStrategyOnMap(aim), isTrue);
+      expect(beat.matchMorale, readyPool - cost!);
+      expect(beat.strategyPreviewVisible, isFalse);
+      expect(beat.debugStrategyBeamFrom, isNotNull);
+      expect(beat.debugStrategyBeamTo, isNotNull);
+      expect(beat.debugStrategyFxLeft, greaterThan(0));
+      expect(beat.strategyCastBlocksField, isFalse);
+      await _shootBeat(beat, 'b5-beam-mid.png');
+
+      beat.debugAdvanceStrategyFx(beat.debugStrategyFxLeft + 0.05);
+      expect(beat.debugStrategyFxLeft, 0);
+      expect(beat.matchMorale, readyPool - cost);
+      expect(beat.strategyPreviewVisible, isFalse);
+      expect(beat.strategyCastBlocksField, isFalse);
+      await _shootBeat(beat, 'b6-morale-aftermath.png');
     });
   });
 }
@@ -287,4 +354,111 @@ void _turn(TaisenGame g, Offset at, Offset delta) {
   g.panEnd(at + delta);
   g.dragTo = null;
   g.dragging = false;
+}
+
+const double _kBeatHudH = 40;
+
+double get _beatFooterH =>
+    TaisenGame.kSoftPassFrameH -
+    (TaisenGame.kStrategySealCenter.dy - TaisenGame.kStrategySealPt / 2);
+
+double get _beatFieldH => TaisenGame.kSoftPassFrameH - _kBeatHudH - _beatFooterH;
+
+/// Session-2 board inside the Soft Pass frame. Seal and 士氣 are the real chrome.
+TaisenGame _beatGame() {
+  final g = readyGame();
+  g.onGameResize(Vector2(TaisenGame.kSoftPassFrameW, _beatFieldH));
+  g.setupSession2Field();
+  return g;
+}
+
+Future<void> _shootBeat(TaisenGame g, String name) async {
+  expect(g.watchH / g.size.y, closeTo(0.125, 1e-9));
+  const w = TaisenGame.kSoftPassFrameW;
+  const h = TaisenGame.kSoftPassFrameH;
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  final lacquer = ui.Paint()..color = FactionColors.lacquer;
+  canvas.drawRect(const ui.Rect.fromLTWH(0, 0, w, h), lacquer);
+  _paintMoraleHud(canvas, g.matchMorale, w);
+  canvas.save();
+  canvas.translate(0, _kBeatHudH);
+  canvas.clipRect(ui.Rect.fromLTWH(0, 0, w, _beatFieldH));
+  g.render(canvas);
+  canvas.restore();
+  final footerTop = _kBeatHudH + _beatFieldH;
+  canvas.drawRect(ui.Rect.fromLTWH(0, footerTop, w, _beatFooterH), lacquer);
+  _ink(canvas, 'Cost 6', Offset.zero, 16).paint(canvas, Offset(12, footerTop + 28));
+  _paintSeal(canvas);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(w.ceil(), h.ceil());
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  final file = File('$kStillDir/$name');
+  await file.writeAsBytes(bytes!.buffer.asUint8List());
+  expect(file.lengthSync(), greaterThan(8000));
+}
+
+void _paintMoraleHud(ui.Canvas canvas, int morale, double width) {
+  final label = _ink(canvas, '士氣 $morale', Offset.zero, 14);
+  final textX = width - 12 - label.width;
+  label.paint(canvas, Offset(textX, 11));
+  var x = textX - 6;
+  for (var i = 0; i < morale; i++) {
+    x -= 11;
+    _paintHex(canvas, Offset(x, 14));
+  }
+}
+
+void _paintHex(ui.Canvas canvas, Offset origin) {
+  const w = 9.0;
+  const h = 10.0;
+  final path = ui.Path()
+    ..moveTo(origin.dx + w * 0.5, origin.dy)
+    ..lineTo(origin.dx + w, origin.dy + h * 0.25)
+    ..lineTo(origin.dx + w, origin.dy + h * 0.75)
+    ..lineTo(origin.dx + w * 0.5, origin.dy + h)
+    ..lineTo(origin.dx, origin.dy + h * 0.75)
+    ..lineTo(origin.dx, origin.dy + h * 0.25)
+    ..close();
+  canvas.drawPath(path, ui.Paint()..color = FactionColors.gold);
+}
+
+void _paintSeal(ui.Canvas canvas) {
+  final rect = ui.Rect.fromCenter(
+    center: TaisenGame.kStrategySealCenter,
+    width: TaisenGame.kStrategySealPt,
+    height: TaisenGame.kStrategySealPt,
+  );
+  final r = ui.RRect.fromRectAndRadius(rect, const ui.Radius.circular(4));
+  canvas.drawRRect(r, ui.Paint()..color = FactionColors.lacquer);
+  canvas.drawRRect(
+    r,
+    ui.Paint()
+      ..color = FactionColors.gold
+      ..style = ui.PaintingStyle.stroke
+      ..strokeWidth = 2,
+  );
+  final label = _ink(canvas, '計略', Offset.zero, 18);
+  label.paint(
+    canvas,
+    Offset(rect.center.dx - label.width / 2, rect.center.dy - label.height / 2),
+  );
+}
+
+TextPainter _ink(ui.Canvas canvas, String text, Offset at, double fontSize) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: text,
+      style: TextStyle(
+        color: FactionColors.gold,
+        fontSize: fontSize,
+        fontWeight: FontWeight.w800,
+        fontFamily: TaisenGame.kInkFontFamily,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  if (at != Offset.zero) painter.paint(canvas, at);
+  return painter;
 }

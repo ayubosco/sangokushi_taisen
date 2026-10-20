@@ -6206,6 +6206,13 @@ class TaisenGame extends FlameGame {
   Offset? get debugStrategyCastAt => _stratAt;
   Offset? get debugStrategyBeamFrom => _strategyBeamFrom;
   Offset? get debugStrategyBeamTo => _strategyBeamTo;
+  double get debugStrategyFxLeft => _stratLeft;
+
+  /// Decay only the ≤1C cast strip. Does not march, spend, or open a cut-in.
+  void debugAdvanceStrategyFx(double dt) {
+    if (_stratLeft <= 0) return;
+    _stratLeft = math.max(0, _stratLeft - dt);
+  }
 
   /// Cast never opens a modal. The board stays tappable through the ≤1C strip.
   bool get strategyCastBlocksField => false;
