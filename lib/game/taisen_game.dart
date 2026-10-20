@@ -417,6 +417,10 @@ class TaisenGame extends FlameGame {
   bool debugRecordWatchPaint = false;
   final List<String> _watchPaint = [];
   List<String> get debugWatchPaintLog => List.unmodifiable(_watchPaint);
+  /// Set by tests that need the 計略 range / beam tags for one frame.
+  bool debugRecordStrategyPaint = false;
+  final List<String> _strategyPaint = [];
+  List<String> get debugStrategyPaintLog => List.unmodifiable(_strategyPaint);
   double _watchPhaseLeft = FxWindows.toSeconds(FxWindows.chargeAuraVisibleC);
   double _pulse = 0;
 
@@ -2819,6 +2823,10 @@ class TaisenGame extends FlameGame {
     if (debugRecordWatchPaint) _watchPaint.add(tag);
   }
 
+  void _noteStrategyPaint(String tag) {
+    if (debugRecordStrategyPaint) _strategyPaint.add(tag);
+  }
+
   bool _watchOwnIsSiege(int? own) =>
       own != null && own >= 0 && own < field.length && field[own].troop == TroopType.siege;
 
@@ -4467,10 +4475,12 @@ class TaisenGame extends FlameGame {
   /// The ring clears on cast and on cancel. A card→map beam can outlive it
   /// for the ≤1C strip. Not a cut-in.
   void _drawStrategyRangePreview(Canvas canvas) {
+    if (debugRecordStrategyPaint) _strategyPaint.clear();
     canvas.save();
     canvas.clipRect(_fieldFxClip());
     final caster = _strategyPreviewCaster;
     if (caster != null) {
+      _noteStrategyPaint('strategy-range');
       final center = tokenCenter(caster);
       final radius = strategyPreviewRadius;
       canvas.drawCircle(
@@ -4483,6 +4493,7 @@ class TaisenGame extends FlameGame {
       );
       final caption = strategyPreviewCaption;
       if (caption != null) {
+        _noteStrategyPaint('strategy-range-caption');
         _drawText(
           canvas,
           caption,
@@ -4494,25 +4505,33 @@ class TaisenGame extends FlameGame {
     }
     final from = _strategyBeamFrom;
     final to = _strategyBeamTo;
+    final beamLive =
+        _stratLeft > 0 && from != null && to != null && (to - from).distance >= 1;
+    if (!beamLive && caster == null) {
+      _noteStrategyPaint('strategy-range-clear');
+    }
     // B4 card→map. A shaft plus a point on the lower field. Not a cut-in.
-    if (_stratLeft > 0 && from != null && to != null && (to - from).distance >= 1) {
+    if (beamLive) {
+      _noteStrategyPaint('strategy-beam');
+      final beamFrom = from!;
+      final beamTo = to!;
       canvas.drawLine(
-        from,
-        to,
+        beamFrom,
+        beamTo,
         Paint()
           ..color = FactionColors.gold.withValues(alpha: 0.32)
           ..strokeWidth = 9
           ..strokeCap = StrokeCap.round,
       );
       canvas.drawLine(
-        from,
-        to,
+        beamFrom,
+        beamTo,
         Paint()
           ..color = const Color(0xFFFFF3C4).withValues(alpha: 0.95)
           ..strokeWidth = 2.6
           ..strokeCap = StrokeCap.round,
       );
-      canvas.drawCircle(to, 5.5, Paint()..color = const Color(0xFFFFF8E1).withValues(alpha: 0.96));
+      canvas.drawCircle(beamTo, 5.5, Paint()..color = const Color(0xFFFFF8E1).withValues(alpha: 0.96));
       canvas.drawCircle(
         to,
         11,

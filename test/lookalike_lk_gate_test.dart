@@ -136,6 +136,70 @@ void main() {
     expect(TaisenGame.kSoftPassFrameH, 874);
   });
 
+  test('K2c cancel drops the range ring and keeps 士氣', () {
+    final g = _beatGame();
+    final pool = g.matchMorale;
+    g.selectOrDetailAt(g.tokenCenter(1));
+    expect(g.strategyPreviewVisible, isTrue);
+    expect(g.strategyPreviewCaption, isNot(contains('6vs2')));
+    expect(g.strategyPreviewCaption, isNot(contains('6/2')));
+    _paintStrategy(g);
+    expect(g.debugStrategyPaintLog, contains('strategy-range'));
+    expect(g.debugStrategyPaintLog, contains('strategy-range-caption'));
+    expect(g.debugStrategyPaintLog, isNot(contains('strategy-range-clear')));
+
+    // Empty-field tap is the player cancel. The ring drops. 士氣 stays.
+    final miss = Offset(6, g.watchH + 8);
+    expect(g.hitTokenAt(miss), isNull);
+    g.selectOrDetailAt(miss);
+    expect(g.selectedIndex, isNull);
+    expect(g.strategyPreviewVisible, isFalse);
+    expect(g.strategyPreviewCaption, isNull);
+    expect(g.debugStrategyBeamFrom, isNull);
+    expect(g.debugStrategyBeamTo, isNull);
+    expect(g.matchMorale, pool);
+    _paintStrategy(g);
+    expect(g.debugStrategyPaintLog, contains('strategy-range-clear'));
+    expect(g.debugStrategyPaintLog, isNot(contains('strategy-range')));
+    expect(g.debugStrategyPaintLog, isNot(contains('strategy-beam')));
+
+    // Cast half stays the held K2 path: ring gone, beam up, pool spent.
+    final cast = _beatGame();
+    final before = cast.matchMorale;
+    cast.selectOrDetailAt(cast.tokenCenter(1));
+    final cost = cast.strategyMoraleCostAt(1);
+    expect(cost, isNotNull);
+    final aim = cast.strategyPreviewCenter! + const Offset(40, -16);
+    expect(cast.castStrategyOnMap(aim), isTrue);
+    expect(cast.strategyPreviewVisible, isFalse);
+    expect(cast.matchMorale, before - cost!);
+    expect(cast.debugStrategyBeamFrom, isNotNull);
+    _paintStrategy(cast);
+    expect(cast.debugStrategyPaintLog, contains('strategy-beam'));
+    expect(cast.debugStrategyPaintLog, isNot(contains('strategy-range')));
+  });
+
+  testWidgets('K2c headless stills: range on beside cancel clear', (tester) async {
+    await tester.runAsync(() async {
+      await _armReadability(_beatGame());
+      final range = _beatGame();
+      final pool = range.matchMorale;
+      range.selectOrDetailAt(range.tokenCenter(1));
+      expect(range.strategyPreviewVisible, isTrue);
+      final cancel = _beatGame();
+      expect(cancel.matchMorale, pool);
+      cancel.selectOrDetailAt(cancel.tokenCenter(1));
+      cancel.selectOrDetailAt(Offset(6, cancel.watchH + 8));
+      expect(cancel.strategyPreviewVisible, isFalse);
+      expect(cancel.matchMorale, pool);
+      expect(cancel.debugStrategyBeamFrom, isNull);
+      _paintStrategy(cancel);
+      expect(cancel.debugStrategyPaintLog, contains('strategy-range-clear'));
+      await _shootBeat(cancel, 'k2c-cancel-clear.png');
+      await _shootBeatPair(range, cancel, 'k2c-range-vs-cancel.png');
+    });
+  });
+
   testWidgets('headless stills for W/T/K re-Gate', (tester) async {
     await tester.runAsync(() async {
       final dir = Directory(kStillDir);
@@ -286,6 +350,13 @@ void _paint(TaisenGame g) {
   recorder.endRecording().dispose();
 }
 
+void _paintStrategy(TaisenGame g) {
+  g.debugRecordStrategyPaint = true;
+  final recorder = ui.PictureRecorder();
+  g.render(ui.Canvas(recorder));
+  recorder.endRecording().dispose();
+}
+
 Future<void> _armReadability(TaisenGame g) async {
   final font = File('/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf');
   if (font.existsSync()) {
@@ -388,6 +459,37 @@ Future<void> _shootBeat(TaisenGame g, String name) async {
   const h = TaisenGame.kSoftPassFrameH;
   final recorder = ui.PictureRecorder();
   final canvas = ui.Canvas(recorder);
+  _paintBeatFrame(canvas, g, 0);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(w.ceil(), h.ceil());
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  final file = File('$kStillDir/$name');
+  await file.writeAsBytes(bytes!.buffer.asUint8List());
+  expect(file.lengthSync(), greaterThan(8000));
+}
+
+Future<void> _shootBeatPair(TaisenGame left, TaisenGame right, String name) async {
+  const w = TaisenGame.kSoftPassFrameW;
+  const h = TaisenGame.kSoftPassFrameH;
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  _paintBeatFrame(canvas, left, 0);
+  _paintBeatFrame(canvas, right, w.toDouble());
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(w.ceil() * 2, h.ceil());
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  final file = File('$kStillDir/$name');
+  await file.writeAsBytes(bytes!.buffer.asUint8List());
+  expect(file.lengthSync(), greaterThan(12000));
+}
+
+void _paintBeatFrame(ui.Canvas canvas, TaisenGame g, double dx) {
+  const w = TaisenGame.kSoftPassFrameW;
+  const h = TaisenGame.kSoftPassFrameH;
+  canvas.save();
+  canvas.translate(dx, 0);
   final lacquer = ui.Paint()..color = FactionColors.lacquer;
   canvas.drawRect(const ui.Rect.fromLTWH(0, 0, w, h), lacquer);
   _paintMoraleHud(canvas, g.matchMorale, w);
@@ -400,13 +502,7 @@ Future<void> _shootBeat(TaisenGame g, String name) async {
   canvas.drawRect(ui.Rect.fromLTWH(0, footerTop, w, _beatFooterH), lacquer);
   _ink(canvas, 'Cost 6', Offset.zero, 16).paint(canvas, Offset(12, footerTop + 28));
   _paintSeal(canvas);
-  final picture = recorder.endRecording();
-  final image = await picture.toImage(w.ceil(), h.ceil());
-  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-  image.dispose();
-  final file = File('$kStillDir/$name');
-  await file.writeAsBytes(bytes!.buffer.asUint8List());
-  expect(file.lengthSync(), greaterThan(8000));
+  canvas.restore();
 }
 
 void _paintMoraleHud(ui.Canvas canvas, int morale, double width) {
