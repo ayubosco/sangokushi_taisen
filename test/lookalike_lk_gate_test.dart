@@ -53,6 +53,7 @@ void main() {
     expect(g.debugHitLabel, isNot('3450'));
     _paint(g);
     expect(g.debugWatchPaintLog, contains('watch-tip-scrape'));
+    expect(g.debugWatchPaintLog, contains('watch-geigeki'));
     expect(g.debugWatchPaintLog, isNot(contains('watch-tip-gold')));
     expect(g.watchH / g.size.y, closeTo(0.125, 1e-9));
   });
@@ -162,6 +163,15 @@ void main() {
       expect(whiff.watchTipMirrorAt(0), WatchTipMirror.gold);
       await _shoot(whiff, 't5-whiff-gold.png');
 
+      final cast = readyGame();
+      cast.setupSession2Field();
+      final before = cast.matchMorale;
+      final center = cast.strategyPreviewCenter!;
+      expect(cast.castStrategyOnMap(center), isTrue);
+      expect(cast.matchMorale, lessThan(before));
+      expect(cast.strategyPreviewVisible, isFalse);
+      await _shoot(cast, 'k2-beam-after-spend.png');
+
       final hit = readyGame();
       final hAt = _fieldAt(hit, 0.42, 0.50);
       _placeOwn(hit, hAt, TroopType.spear);
@@ -172,6 +182,7 @@ void main() {
       hit.debugArmEnemyChargeAura();
       hit.debugStepPursuit(1 / 60);
       expect(hit.watchTipMirrorAt(0), WatchTipMirror.scrape);
+      await _armReadability(hit);
       await _shoot(hit, 'w3-watch-scrape.png');
       await _shoot(hit, 't1-tip-geigeki.png');
 
@@ -183,16 +194,10 @@ void main() {
       _addCavalry(mash, mAt);
       mash.debugStepPursuit(1 / 60);
       expect(mash.watchTipMirrorAt(0), WatchTipMirror.clear);
+      expect(mash.debugHitLabel, isNot('迎擊'));
+      await _armReadability(mash);
       await _shoot(mash, 't2-body-ransen.png');
-
-      final cast = readyGame();
-      cast.setupSession2Field();
-      final before = cast.matchMorale;
-      final center = cast.strategyPreviewCenter!;
-      expect(cast.castStrategyOnMap(center), isTrue);
-      expect(cast.matchMorale, lessThan(before));
-      expect(cast.strategyPreviewVisible, isFalse);
-      await _shoot(cast, 'k2-beam-after-spend.png');
+      await _shootPair(hit, mash, 't1-t2-scrape-vs-mash.png');
     });
   });
 }
@@ -202,6 +207,34 @@ void _paint(TaisenGame g) {
   final recorder = ui.PictureRecorder();
   g.render(ui.Canvas(recorder));
   recorder.endRecording().dispose();
+}
+
+Future<void> _armReadability(TaisenGame g) async {
+  final font = File('/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf');
+  if (font.existsSync()) {
+    await ui.loadFontFromList(await font.readAsBytes(), fontFamily: TaisenGame.kInkFontFamily);
+  }
+  await g.softLockCues.loadAll();
+}
+
+Future<void> _shootPair(TaisenGame left, TaisenGame right, String name) async {
+  final w = left.size.x.ceil();
+  final h = left.size.y.ceil();
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  canvas.drawRect(ui.Rect.fromLTWH(0, 0, w * 2.0, h.toDouble()), ui.Paint()..color = const ui.Color(0xFF0A0A0A));
+  left.render(canvas);
+  canvas.save();
+  canvas.translate(w.toDouble(), 0);
+  right.render(canvas);
+  canvas.restore();
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(w * 2, h);
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  final file = File('$kStillDir/$name');
+  await file.writeAsBytes(bytes!.buffer.asUint8List());
+  expect(file.lengthSync(), greaterThan(8000));
 }
 
 Future<void> _shoot(TaisenGame g, String name) async {

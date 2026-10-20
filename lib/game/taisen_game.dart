@@ -2097,10 +2097,13 @@ class TaisenGame extends FlameGame {
         );
 
         // Facing follows this body's travel, then its card. Not a shared aim.
-        if (isEnemy) {
-          _drawFacingArrow(canvas, center, tipFacingAt(i), const Color(0xFFFFF59D), enemyHard: true);
-        } else if (selected || tutorialOwnIndex == i) {
-          _drawFacingArrow(canvas, center, tipFacingAt(i), FactionColors.gold);
+        // 迎撃 / 亂戰 frames drop the chevron so the fat word is the glance.
+        if (!_labelCoversFacingArrow(i)) {
+          if (isEnemy) {
+            _drawFacingArrow(canvas, center, tipFacingAt(i), const Color(0xFFFFF59D), enemyHard: true);
+          } else if (selected || tutorialOwnIndex == i) {
+            _drawFacingArrow(canvas, center, tipFacingAt(i), FactionColors.gold);
+          }
         }
 
         final labelY = center.dy + tokenSize.height / 2 + 4;
@@ -2195,11 +2198,15 @@ class TaisenGame extends FlameGame {
         );
       }
       if (n > 0) {
+        final at = Offset(sx / n, sy / n - tokenSize.height * 0.55);
+        _drawMashSparks(canvas, at + const Offset(0, 22));
         _drawFatFloatText(
           canvas,
           '亂戰',
-          Offset(sx / n, sy / n - tokenSize.height * 0.72),
-          fontSize: 16,
+          at,
+          fontSize: 36,
+          ink: const Color(0xFFFF5252),
+          edge: const Color(0xFF3E0000),
         );
       }
     }
@@ -2246,7 +2253,8 @@ class TaisenGame extends FlameGame {
             canvas,
             'fly-geigeki',
             flyAt,
-            scale: debugGeigekiReadScale,
+            scale: debugGeigekiReadScale * 1.35,
+            tint: FactionColors.gold,
           );
         }
         if (!drewGeigekiFly) {
@@ -2260,8 +2268,10 @@ class TaisenGame extends FlameGame {
                 : (isKisei || isRetreatSplash)
                     ? 32
                     : isGeigeki
-                        ? (debugInterceptDouble ? 30 : 22)
+                        ? (debugInterceptDouble ? 52 : 44)
                         : 22,
+            ink: isGeigeki ? FactionColors.gold : null,
+            edge: isGeigeki ? const Color(0xFF1A1204) : null,
           );
         }
         final punchCyan = (isChargePunch || isGeigeki) &&
@@ -2758,7 +2768,9 @@ class TaisenGame extends FlameGame {
     }
     _drawMiniToken(canvas, enemyC, enemyFill, enemy: true, scale: enemyScale, troop: enemyTroop);
     _drawWatchSiegeMirrors(canvas, band);
-    if (ownSafe == null || _chargeCyanOnUnit(ownSafe)) {
+    final ownScrape = ownSafe != null && watchTipMirrorAt(ownSafe) == WatchTipMirror.scrape;
+    final ownMash = ownSafe != null && _ransenUnits.contains(ownSafe);
+    if ((ownSafe == null || _chargeCyanOnUnit(ownSafe)) && !ownScrape && !ownMash) {
       _drawFacingArrow(
         canvas,
         ownC,
@@ -2766,13 +2778,26 @@ class TaisenGame extends FlameGame {
         FactionColors.gold,
       );
     }
-    _drawFacingArrow(
-      canvas,
-      enemyC,
-      enemySafe != null ? tipFacingAt(enemySafe) : enemyFacing,
-      const Color(0xFFFFF59D),
-      enemyHard: true,
-    );
+    if (ownMash) {
+      _drawMashSparks(canvas, ownC);
+      _drawFatFloatText(
+        canvas,
+        '亂戰',
+        ownC + const Offset(0, -16),
+        fontSize: 22,
+        ink: const Color(0xFFFF5252),
+        edge: const Color(0xFF3E0000),
+      );
+    }
+    if (!ownScrape && !ownMash) {
+      _drawFacingArrow(
+        canvas,
+        enemyC,
+        enemySafe != null ? tipFacingAt(enemySafe) : enemyFacing,
+        const Color(0xFFFFF59D),
+        enemyHard: true,
+      );
+    }
     if (showAWindowDebugLabels && paintOwnDemo) {
       final label = switch (kind) {
         AWindowKind.charge => '突撃氣場 蓄勢',
@@ -2908,6 +2933,13 @@ class TaisenGame extends FlameGame {
       return;
     }
     final tipAt = ownC + Offset(0, -22 * ownScale);
+    if (mirror == WatchTipMirror.scrape) {
+      _noteWatchPaint('watch-tip');
+      _drawWatchScrapeFlash(canvas, ownC, ownScale, tipFacingAt(own));
+      _noteWatchPaint('watch-tip-scrape');
+      _noteWatchPaint('watch-geigeki');
+      return;
+    }
     _drawInterceptStance(
       canvas,
       ownC,
@@ -2927,12 +2959,75 @@ class TaisenGame extends FlameGame {
     if (mirror == WatchTipMirror.gold) {
       _drawWatchGoldTip(canvas, tipAt, ownScale);
       _noteWatchPaint('watch-tip-gold');
-    } else if (mirror == WatchTipMirror.scrape) {
-      softLockCues.draw(canvas, 'tip-scrape', tipAt, alpha: 0.95, scale: ownScale);
-      _noteWatchPaint('watch-tip-scrape');
     } else {
       _noteWatchPaint('watch-tip-idle');
     }
+  }
+
+  /// Fat gold「迎撃」on the Watch, with a slim spear — not the direction chevron.
+  void _drawWatchScrapeFlash(
+    Canvas canvas,
+    Offset ownC,
+    double ownScale,
+    double facing,
+  ) {
+    final tipAt = _drawWatchReleaseSpear(canvas, ownC, ownScale, facing);
+    softLockCues.draw(
+      canvas,
+      'watch-tip',
+      tipAt,
+      alpha: 0.7,
+      scale: ownScale,
+      rotation: facing,
+    );
+    softLockCues.draw(canvas, 'tip-scrape', tipAt, alpha: 0.95, scale: ownScale.clamp(0.7, 1.3));
+    final clip = _watchFxClip();
+    final flyAt = Offset(
+      ownC.dx.clamp(64.0, math.max(64.0, size.x - 64)),
+      (ownC.dy - 30 * ownScale).clamp(26.0, math.max(26.0, clip.bottom - 22)),
+    );
+    final drew = softLockCues.draw(
+      canvas,
+      'fly-geigeki',
+      flyAt,
+      scale: 1.55,
+      tint: FactionColors.gold,
+    );
+    if (!drew) {
+      _drawFatFloatText(
+        canvas,
+        '迎擊',
+        flyAt,
+        fontSize: 32,
+        ink: FactionColors.gold,
+        edge: const Color(0xFF1A1204),
+      );
+    }
+  }
+
+  /// Gold shaft along the spear facing. Narrow head, so it is not a tip-arrow.
+  Offset _drawWatchReleaseSpear(Canvas canvas, Offset ownC, double ownScale, double facing) {
+    canvas.save();
+    canvas.translate(ownC.dx, ownC.dy);
+    canvas.rotate(facing);
+    final len = 30.0 * ownScale.clamp(0.7, 1.1);
+    canvas.drawLine(
+      const Offset(0, -4),
+      Offset(0, -len),
+      Paint()
+        ..color = FactionColors.gold
+        ..strokeWidth = 3.0
+        ..strokeCap = StrokeCap.round,
+    );
+    final head = Path()
+      ..moveTo(0, -len - 7)
+      ..lineTo(-3.5, -len + 1)
+      ..lineTo(3.5, -len + 1)
+      ..close();
+    canvas.drawPath(head, Paint()..color = const Color(0xFFFFE082));
+    canvas.restore();
+    final reach = len + 6;
+    return ownC + Offset(math.sin(facing) * reach, -math.cos(facing) * reach);
   }
 
   /// Additive gold on the Watch tip point. Paint only — Watch height stays 0.125.
@@ -3746,6 +3841,12 @@ class TaisenGame extends FlameGame {
     }
   }
 
+  /// True while a fat「迎撃」or「亂戰」covers this body, so the chevron stays off.
+  bool _labelCoversFacingArrow(int i) {
+    if (i < 0 || _ransenUnits.contains(i)) return true;
+    return _hitFlashLeft > 0 && _hitFlashLabel == '迎擊';
+  }
+
   void _drawFacingArrow(Canvas canvas, Offset c, double facing, Color color, {bool enemyHard = false}) {
     canvas.save();
     canvas.translate(c.dx, c.dy);
@@ -3790,19 +3891,41 @@ class TaisenGame extends FlameGame {
     canvas.restore();
   }
 
-  void _drawFatFloatText(Canvas canvas, String text, Offset center, {double alpha = 1, double fontSize = 22}) {
+  void _drawMashSparks(Canvas canvas, Offset at) {
+    final paint = Paint()..color = const Color(0xFFFFB300);
+    for (final o in const [
+      Offset(-14, 2),
+      Offset(-6, -10),
+      Offset(4, 8),
+      Offset(12, -6),
+      Offset(0, 0),
+    ]) {
+      canvas.drawCircle(at + o, o.dx.abs() < 1 ? 3.2 : 2.0, paint);
+    }
+  }
+
+  void _drawFatFloatText(
+    Canvas canvas,
+    String text,
+    Offset center, {
+    double alpha = 1,
+    double fontSize = 22,
+    Color? ink,
+    Color? edge,
+  }) {
+    final rim = edge ?? FactionColors.gold;
     final style = TextStyle(
-      color: Colors.white.withValues(alpha: alpha),
+      color: (ink ?? Colors.white).withValues(alpha: alpha),
       fontSize: fontSize,
       fontWeight: FontWeight.w900,
       letterSpacing: 1.2,
       fontFamily: kInkFontFamily,
       shadows: [
-        Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(-1.5, 0)),
-        Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(1.5, 0)),
-        Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(0, -1.5)),
-        Shadow(color: FactionColors.gold.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(0, 1.5)),
-        Shadow(color: FactionColors.gold.withValues(alpha: alpha * 0.8), blurRadius: 6),
+        Shadow(color: rim.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(-1.5, 0)),
+        Shadow(color: rim.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(1.5, 0)),
+        Shadow(color: rim.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(0, -1.5)),
+        Shadow(color: rim.withValues(alpha: alpha), blurRadius: 0, offset: const Offset(0, 1.5)),
+        Shadow(color: rim.withValues(alpha: alpha * 0.8), blurRadius: 6),
       ],
     );
     final tp = TextPainter(
@@ -3841,6 +3964,7 @@ class TaisenGame extends FlameGame {
       if (isOwn && card.troop == TroopType.spear) {
         // Tip stays out for coaching, and retracts for the whole overlap (亂戰).
         if (spearTipExtendedAt(index)) {
+          final releasing = _hitFlashLeft > 0 && _hitFlashLabel == '迎擊' && _hitFlashIndex == index;
           _drawInterceptStance(
             canvas,
             c,
@@ -3848,6 +3972,7 @@ class TaisenGame extends FlameGame {
             const Color(0xFFB2EBF2).withValues(alpha: 0.88),
             facing: tipFacingAt(index),
             goldArmed: spearQiangjiGoldAt(index),
+            plate: !releasing,
           );
         }
         return;
@@ -3899,6 +4024,7 @@ class TaisenGame extends FlameGame {
       case TroopType.spear:
         // Idle facing still shows tip glow (槍尖光常在) — retracted during 亂戰 / 攻城.
         if (!spearTipExtendedAt(index)) break;
+        final releasing = _hitFlashLeft > 0 && _hitFlashLabel == '迎擊' && _hitFlashIndex == index;
         _drawInterceptStance(
           canvas,
           c,
@@ -3906,6 +4032,7 @@ class TaisenGame extends FlameGame {
           const Color(0xFFB2EBF2).withValues(alpha: 0.82),
           facing: tipFacingAt(index),
           goldArmed: spearQiangjiGoldAt(index),
+          plate: !releasing,
         );
         break;
       case TroopType.bow:
@@ -4084,35 +4211,38 @@ class TaisenGame extends FlameGame {
     Color color, {
     double facing = 0,
     bool goldArmed = false,
+    bool plate = true,
   }) {
     canvas.save();
     canvas.translate(c.dx, c.dy);
     canvas.rotate(facing);
     canvas.translate(-c.dx, -c.dy);
 
-    final oval = Rect.fromCenter(center: c, width: rx * 2.6, height: rx * 1.35);
-    canvas.drawOval(
-      oval,
-      Paint()
-        ..color = color.withValues(alpha: 0.4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.6,
-    );
-    // Spear-tip wedge — bottom field larger via tipScale below.
-    final wedgeScale = rx >= 40 ? 1.22 : 1.0;
-    final wedge = Path()
-      ..moveTo(c.dx, c.dy - 52 * wedgeScale)
-      ..lineTo(c.dx - 28 * wedgeScale, c.dy + 10)
-      ..lineTo(c.dx + 28 * wedgeScale, c.dy + 10)
-      ..close();
-    canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.5));
-    canvas.drawPath(
-      wedge,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.55)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2,
-    );
+    if (plate) {
+      final oval = Rect.fromCenter(center: c, width: rx * 2.6, height: rx * 1.35);
+      canvas.drawOval(
+        oval,
+        Paint()
+          ..color = color.withValues(alpha: 0.4)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6,
+      );
+      // Spear-tip wedge — bottom field larger via tipScale below.
+      final wedgeScale = rx >= 40 ? 1.22 : 1.0;
+      final wedge = Path()
+        ..moveTo(c.dx, c.dy - 52 * wedgeScale)
+        ..lineTo(c.dx - 28 * wedgeScale, c.dy + 10)
+        ..lineTo(c.dx + 28 * wedgeScale, c.dy + 10)
+        ..close();
+      canvas.drawPath(wedge, Paint()..color = color.withValues(alpha: 0.5));
+      canvas.drawPath(
+        wedge,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.55)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2,
+      );
+    }
     // Persistent spear tip / 槍尖光 — Design sprite when loaded; canvas fallback otherwise.
     final glow = 0.65 + 0.35 * math.sin(_pulse * 4);
     final tipScale = rx >= 40 ? 1.28 : (rx / 36.0).clamp(0.75, 1.05);
