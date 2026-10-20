@@ -1,8 +1,23 @@
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
-/// W2 two-session tutorial state machine (C-tick driven externally via [tick]).
-enum TutorialSession { session1, session2, complete }
+/// W2 tutorial state machine (C-tick driven externally via [tick]).
+/// [ichigeki] is 英傑 stage 1 逐一擊破 and runs before 快馬突擊.
+enum TutorialSession { ichigeki, session1, session2, complete }
+
+/// 英傑 stage 1 逐一擊破: own 刀兵 vs enemy 刀兵. 刀兵 has no troop
+/// specialty, so the only way to win is 亂戰 until the enemy routs.
+enum IchigekiPhase {
+  /// Own 刀兵 glows. Select it and drag it into the enemy 刀兵.
+  selectFoot,
+  /// Bodies overlap. Mutual 亂戰 runs on the shared playtest stub.
+  ransen,
+  /// Own 刀兵 routed first. The field re-seeds after the retry wait.
+  failRetry,
+  /// Enemy 刀兵 routed. Skip opens 快馬突擊.
+  tipNext,
+  passed,
+}
 
 enum S1Phase {
   highlightSelect,
@@ -35,7 +50,7 @@ enum S2Phase {
 
 /// Ordered Soft Lock handoff. Locked steps stay named — the player can read
 /// the next lesson before it opens. Names follow the 英傑 戰鬥教學 stage list
-/// (快馬突擊 / 槍擊退敵 / 遠攻削敵 / 用計得宜). 回城 is a Soft Lock step with
+/// (逐一擊破 / 快馬突擊 / 槍擊退敵 / 遠攻削敵 / 用計得宜). 回城 is a Soft Lock step with
 /// no 英傑 stage. No stamina cost and no cut-in.
 enum TutorialLessonGate { locked, current, done }
 
@@ -59,6 +74,7 @@ class TutorialController extends ChangeNotifier {
 
   TutorialSession startSession;
   TutorialSession session = TutorialSession.session1;
+  IchigekiPhase s0 = IchigekiPhase.selectFoot;
   S1Phase s1 = S1Phase.highlightSelect;
   S2Phase s2 = S2Phase.spearGlow;
 
@@ -86,8 +102,11 @@ class TutorialController extends ChangeNotifier {
   /// Soft-fix: charge pass requires drag-to-drop + aura≥1C (not tip-skip alone).
   bool didDragDrop = false;
 
+  /// 逐一擊破 retry: the game re-seeds the 刀兵 field and clears this.
+  bool ichigekiNeedsField = false;
+
   /// Order the player can always read:
-  /// 快馬突擊 → 槍擊退敵 → 遠攻削敵 → 回城 → 用計得宜.
+  /// 逐一擊破 → 快馬突擊 → 槍擊退敵 → 遠攻削敵 → 回城 → 用計得宜.
   /// Only the current step is playable. The next step hard-unlocks on Pass.
   /// 弓 stays locked until one aimed 迎撃 — a wait timer does not open it.
   /// 用計得宜 is the closer, as in the 英傑 stage list.
@@ -98,15 +117,26 @@ class TutorialController extends ChangeNotifier {
             (s1 == S1Phase.tipNext || s1 == S1Phase.passed));
     final returnOpen = _returnLessonOpen;
     final strategyOpen = _strategyLessonOpen;
+    final ichigekiLive = session == TutorialSession.ichigeki &&
+        s0 != IchigekiPhase.tipNext &&
+        s0 != IchigekiPhase.passed;
     return [
+      TutorialLesson(
+        id: 'ichigeki',
+        name: '逐一擊破',
+        gate: ichigekiLive ? TutorialLessonGate.current : TutorialLessonGate.done,
+      ),
       TutorialLesson(
         id: 'charge',
         name: '快馬突擊',
-        gate: session == TutorialSession.session1 &&
-                s1 != S1Phase.tipNext &&
-                s1 != S1Phase.passed
-            ? TutorialLessonGate.current
-            : TutorialLessonGate.done,
+        gate: ichigekiLive
+            ? TutorialLessonGate.locked
+            : (session == TutorialSession.ichigeki ||
+                    (session == TutorialSession.session1 &&
+                        s1 != S1Phase.tipNext &&
+                        s1 != S1Phase.passed)
+                ? TutorialLessonGate.current
+                : TutorialLessonGate.done),
       ),
       TutorialLesson(
         id: 'spear',
@@ -197,6 +227,28 @@ class TutorialController extends ChangeNotifier {
   /// Live 用計得宜. The seal, flick, and card→map cast clear it.
   bool get strategyLessonLive => _strategyLessonOpen && s2 == S2Phase.strategyTeach;
 
+  /// 英傑 stage 1 逐一擊破. The live tutorial opens here.
+  void resetToIchigeki() {
+    session = TutorialSession.ichigeki;
+    s0 = IchigekiPhase.selectFoot;
+    s1 = S1Phase.highlightSelect;
+    s2 = S2Phase.spearGlow;
+    phaseC = 0;
+    tipText = '刀兵無兵種特性，只能發動亂戰 — 點發光己方刀兵，拖去撞敵刀兵';
+    tipSkippable = false;
+    failed = false;
+    failReason = null;
+    auraReady = false;
+    didDragDrop = false;
+    ichigekiNeedsField = false;
+    enemyAuraVisible = false;
+    turnWindowOpen = false;
+    facingCorrect = false;
+    interceptDone = false;
+    strategyOrReturnDone = false;
+    notifyListeners();
+  }
+
   void resetToSession1() {
     session = TutorialSession.session1;
     s1 = S1Phase.highlightSelect;
@@ -234,6 +286,14 @@ class TutorialController extends ChangeNotifier {
 
   void skipTip() {
     if (!tipSkippable || tipText == null) return;
+    if (session == TutorialSession.ichigeki) {
+      // Only the routed-enemy Pass skips. 亂戰 itself cannot be tipped past.
+      if (s0 != IchigekiPhase.tipNext) return;
+      s0 = IchigekiPhase.passed;
+      tipText = null;
+      resetToSession1();
+      return;
+    }
     // Soft-fix: tips must NOT skip drag+aura/collide gate (no charge/intercept buttons).
     if (session == TutorialSession.session1 &&
         (s1 == S1Phase.highlightSelect ||
@@ -276,11 +336,73 @@ class TutorialController extends ChangeNotifier {
     if (shotPassMode) return;
     phaseC += dtSeconds / 3.03;
 
-    if (session == TutorialSession.session1) {
+    if (session == TutorialSession.ichigeki) {
+      _tickS0();
+    } else if (session == TutorialSession.session1) {
       _tickS1();
     } else if (session == TutorialSession.session2) {
       _tickS2();
     }
+  }
+
+  void _tickS0() {
+    if (s0 != IchigekiPhase.failRetry || phaseC < 0.8) return;
+    failed = false;
+    failReason = null;
+    phaseC = 0;
+    s0 = IchigekiPhase.selectFoot;
+    ichigekiNeedsField = true;
+    tipText = '再嚟過：拖己方刀兵撞敵刀兵，亂戰擊破佢';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  void onSelectOwnFoot() {
+    if (session != TutorialSession.ichigeki || s0 != IchigekiPhase.selectFoot) return;
+    tipText = '按住拖行：刀兵冇突撃、冇槍頭，撞埋敵刀兵就亂戰';
+    tipSkippable = false;
+    _notifyUi();
+  }
+
+  /// Own 刀兵 body overlaps the enemy 刀兵.
+  void onIchigekiRansen() {
+    if (session != TutorialSession.ichigeki || s0 != IchigekiPhase.selectFoot) return;
+    s0 = IchigekiPhase.ransen;
+    tipText = '亂戰中 — 貼住打，敵刀兵兵力見底就擊破';
+    tipSkippable = false;
+    _notifyUi();
+  }
+
+  /// Bodies split before either side routed. Back to the drag step.
+  void onIchigekiRansenBroken() {
+    if (session != TutorialSession.ichigeki || s0 != IchigekiPhase.ransen) return;
+    s0 = IchigekiPhase.selectFoot;
+    tipText = '分開咗 — 拖返去撞敵刀兵，亂戰先會扣兵力';
+    tipSkippable = false;
+    _notifyUi();
+  }
+
+  /// Enemy 刀兵 hit 0 兵力 in 亂戰. Clears 逐一擊破.
+  void onIchigekiEnemyRouted() {
+    if (session != TutorialSession.ichigeki) return;
+    if (s0 != IchigekiPhase.selectFoot && s0 != IchigekiPhase.ransen) return;
+    s0 = IchigekiPhase.tipNext;
+    tipText = '擊破！逐一擊破過關 — 撳「跳過」入快馬突擊';
+    tipSkippable = true;
+    _notifyUi();
+  }
+
+  /// Own 刀兵 routed first. Fail and re-seed the field.
+  void onIchigekiOwnRouted() {
+    if (session != TutorialSession.ichigeki) return;
+    if (s0 != IchigekiPhase.selectFoot && s0 != IchigekiPhase.ransen) return;
+    failed = true;
+    failReason = '己方刀兵撤退 — 再嚟過';
+    phaseC = 0;
+    s0 = IchigekiPhase.failRetry;
+    tipText = failReason;
+    tipSkippable = false;
+    _notifyUi();
   }
 
   void _tickS1() {
