@@ -549,7 +549,9 @@ class _TutorialShellState extends State<TutorialShell> {
         _bannerFor = TutorialSession.session1;
         _showSessionBanner = true;
       } else {
-        // Live tutorial opens on 英傑 stage 1 逐一擊破, then 快馬突擊.
+        // Live tutorial opens on 英傑 stage 1 逐一擊破, then 快馬突擊. Each
+        // stage clear goes back to 章節選擇 before the next stage opens.
+        _tutorial.chapterSelectShell = true;
         _tutorial.resetToIchigeki();
         _game.setupIchigekiField();
         _bannerFor = TutorialSession.ichigeki;
@@ -819,6 +821,29 @@ class _TutorialShellState extends State<TutorialShell> {
     final wasS0Tip =
         _tutorial.session == TutorialSession.ichigeki && _tutorial.s0 == IchigekiPhase.tipNext;
     _tutorial.skipTip();
+    if (_tutorial.chapterSelectOpen) {
+      // Victory → 章節選擇. The field re-seeds on its button, not here.
+      setState(() {});
+      return;
+    }
+    _reseedAfterClear(wasS0Tip: wasS0Tip, wasS1Tip: wasS1Tip, wasS2Tip: wasS2Tip);
+  }
+
+  /// 章節選擇 bottom button (開始 / 開戰) starts the selected stage.
+  void _onChapterStart() {
+    final wasS1Tip = _tutorial.session == TutorialSession.session1 && _tutorial.s1 == S1Phase.tipNext;
+    final wasS0Tip =
+        _tutorial.session == TutorialSession.ichigeki && _tutorial.s0 == IchigekiPhase.tipNext;
+    _tutorial.startChapter();
+    _reseedAfterClear(wasS0Tip: wasS0Tip, wasS1Tip: wasS1Tip, wasS2Tip: false);
+    setState(() {});
+  }
+
+  void _reseedAfterClear({
+    required bool wasS0Tip,
+    required bool wasS1Tip,
+    required bool wasS2Tip,
+  }) {
     if (wasS0Tip) {
       _game.setupSession1Field();
       setState(() {});
@@ -920,7 +945,7 @@ class _TutorialShellState extends State<TutorialShell> {
                         ),
                       ),
                     ),
-                  if (_tutorial.tipText != null)
+                  if (_tutorial.tipText != null && !_tutorial.chapterSelectOpen)
                     Positioned(
                       left: 12,
                       right: 12,
@@ -932,6 +957,18 @@ class _TutorialShellState extends State<TutorialShell> {
                         text: _tutorial.tipText!,
                         failed: _tutorial.failed,
                         onSkip: _tutorial.tipSkippable ? _onSkipTip : null,
+                      ),
+                    ),
+                  if (_tutorial.chapterSelectOpen)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: Colors.black54,
+                        child: Center(
+                          child: ChapterSelectShell(
+                            controller: _tutorial,
+                            onStart: _onChapterStart,
+                          ),
+                        ),
                       ),
                     ),
                   if (!_fieldReady)

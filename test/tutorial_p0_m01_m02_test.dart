@@ -455,6 +455,12 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('跳過'));
     await tester.pump();
+    // Victory goes back to 章節選擇. 開始 opens 快馬突擊.
+    expect(find.byKey(const Key('chapter-select-shell')), findsOneWidget);
+    expect(game.field.first.troop, TroopType.infantry);
+    await tester.tap(find.byKey(const Key('chapter-select-start')));
+    await tester.pump();
+    expect(find.byKey(const Key('chapter-select-shell')), findsNothing);
     expect(game.field.first.troop, TroopType.cavalry);
 
     final own = game.tutorialOwnIndex!;
