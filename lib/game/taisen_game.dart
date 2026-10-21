@@ -188,12 +188,36 @@ class TaisenGame extends FlameGame {
 
   String debugSortiePrepCaption(int i) => debugSortiePrepVisible(i) ? kSortiePrepCaption : '';
 
-  /// Visible yellow prep while this siege's body is inside the enemy castle zone.
+  /// Visible yellow prep while a sieging body is inside the enemy castle zone.
   bool debugSiegePrepVisible(int i) {
     if (i < 0 || i >= field.length || i >= fieldPos.length) return false;
-    if (field[i].troop != TroopType.siege) return false;
+    if (!sieges(field[i].troop)) return false;
     if (_lifeAt(i) != UnitLife.alive) return false;
     return inEnemyCastleZone(i);
+  }
+
+  /// Troops that run siege prep on the enemy castle zone.
+  /// 弓: Observed-from-英傑 stage 4 遠攻削敵「速派單一弓兵攻城」— one archer on
+  /// the enemy gate shows「攻城中」+ countdown (AUTH-GAP §3). Same gauge, fill
+  /// rate, and gate/wall nick as 攻城 — no bow-specific siege number is known.
+  /// 槍 / 騎 / 歩 on the gate were not observed and stay out.
+  static bool sieges(TroopType troop) =>
+      troop == TroopType.siege || troop == TroopType.bow;
+
+  /// Caption over a sieging body while its gauge is up. Empty otherwise.
+  static const kSiegingCaption = '攻城中';
+
+  String debugSiegeCaption(int i) => debugSiegePrepVisible(i) ? kSiegingCaption : '';
+
+  /// Whole seconds until this prep completes at the last tick's rate. Derived
+  /// from the playtest fill rate, not an Official second. 0 when the gauge is down.
+  /// A pause holds the number; it does not count down.
+  int debugSiegeCountdownSec(int i) {
+    if (!debugSiegePrepVisible(i)) return 0;
+    var rate = kSiegePrepFillPerSec;
+    if (debugSiegePrepSlowed(i)) rate *= kSiegePrepBowSlowMul;
+    final left = (1.0 - debugSiegePrep01(i)).clamp(0.0, 1.0) / rate;
+    return math.max(1, (left - 1e-9).ceil());
   }
 
   /// 0–1 prep. 0 when the gauge is down or has just completed and restarted.
@@ -2207,6 +2231,13 @@ class TaisenGame extends FlameGame {
           ),
           debugSiegePrep01(i),
         );
+        _drawText(
+          canvas,
+          '${debugSiegeCaption(i)} ${debugSiegeCountdownSec(i)}',
+          Offset(anchor.dx - tokenSize.width / 2, anchor.dy - tokenSize.height / 2 - 38),
+          const Color(0xFFFFD54F),
+          10,
+        );
       }
     }
 
@@ -2892,8 +2923,12 @@ class TaisenGame extends FlameGame {
     if (debugRecordStrategyPaint) _strategyPaint.add(tag);
   }
 
+  /// Siege troop, or a bow while it is sieging (its gauge is up).
   bool _watchOwnIsSiege(int? own) =>
-      own != null && own >= 0 && own < field.length && field[own].troop == TroopType.siege;
+      own != null &&
+      own >= 0 &&
+      own < field.length &&
+      (field[own].troop == TroopType.siege || debugSiegePrepVisible(own));
 
   /// True when Watch will not paint the demo [AWindowKind] plate on [own].
   bool debugWatchDemoPlateSuppressed(int? own) =>
@@ -5981,8 +6016,8 @@ class TaisenGame extends FlameGame {
 
   /// Release 槍擊. Hit is [_disarmQiangji] at the contact.
   /// 亂戰, siege prep, and death release here. Tip retract (歸城) does too.
-  /// Siege prep is [debugSiegePrepVisible] — siege troops only. A spear in the
-  /// enemy castle zone is not that prep (弓攻城 stays HOLD).
+  /// Siege prep is [debugSiegePrepVisible] — [sieges] troops only. A spear in the
+  /// enemy castle zone is not that prep.
   void _releaseQiangji(int i) {
     if (i < 0 || i >= _qiangjiArmed.length) return;
     final dead = _lifeAt(i) != UnitLife.alive;
@@ -6050,7 +6085,8 @@ class TaisenGame extends FlameGame {
     }
   }
 
-  /// SGE-01..05. Enter the enemy castle zone → yellow prep gauge.
+  /// SGE-01..05. Enter the enemy castle zone → yellow prep gauge. 攻城 and 弓
+  /// ([sieges]) share it — 弓攻城 is AUTH-GAP §3.
   /// Fills only while stationary and not 亂戰. Ally bump pauses. Leave clears.
   /// An opposing bow inside the existing half-field range slows the fill.
   /// A completed prep nicks the castle race once (gate > wall). No assault button.
@@ -6061,7 +6097,7 @@ class TaisenGame extends FlameGame {
       _siegePrepPause[i] = '';
       _siegePrepSlowed[i] = false;
       final sieging = _lifeAt(i) == UnitLife.alive &&
-          field[i].troop == TroopType.siege &&
+          sieges(field[i].troop) &&
           inEnemyCastleZone(i);
       if (!sieging) {
         _siegePrep[i] = 0;
