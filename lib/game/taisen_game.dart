@@ -382,6 +382,12 @@ class TaisenGame extends FlameGame {
   /// 英傑: 「士氣值會隨時間回復」. That tip gives no rate, and the ~6→~2 still is
   /// one cast readout. Adapted / Unverified: one point per this many C.
   static const double kMoraleRegenCPerPoint = 3.0;
+  /// 英傑: 「差距越大，雷擊便越有效」. Qualitative only — no Official formula.
+  /// Adapted / Unverified: HP lost at an even 智力 match.
+  static const double kIntelGapStrikeBaseHp = 20.0;
+  /// Adapted / Unverified: extra HP per point of caster-minus-target 智力.
+  /// Linear in the gap. Not keyed on the teaching cards' 6 vs 2.
+  static const double kIntelGapStrikeHpPerIntel = 8.0;
 
   /// Playtest bursts, counted in seconds of [kRansenTickPerSec]. Not wiki DPS.
   /// 突撃 is a sharp drop and still leaves a full bar in 亂戰.
@@ -1080,9 +1086,10 @@ class TaisenGame extends FlameGame {
     required String ownId,
     required Offset ownAt,
     required Offset enemyAt,
+    String enemyId = 'caocao',
   }) {
     final own = Cost6Roster.all.firstWhere((c) => c.id == ownId);
-    final enemy = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
+    final enemy = Cost6Roster.all.firstWhere((c) => c.id == enemyId);
     field.clear();
     _clearPerUnitFacing();
     fieldPos.clear();
@@ -6600,7 +6607,8 @@ class TaisenGame extends FlameGame {
       castStrategyAtSelected(notifyTutorial: notifyTutorial);
 
   /// Card → map. [fieldPoint] must sit in the preview on the lower field.
-  /// Refuses when 士氣 is short. No 雷擊, no 智力差, no fullscreen cut-in.
+  /// Refuses when 士氣 is short. A 智力差 計略 also strikes the enemies in the
+  /// ring ([intelGapStrikeHp]). No 軍心大亂, no fullscreen cut-in.
   bool castStrategyOnMap(Offset fieldPoint, {bool notifyTutorial = true}) {
     final caster = _strategyCaster;
     final preview = _strategyPreviewCaster;
@@ -6613,12 +6621,39 @@ class TaisenGame extends FlameGame {
     _strategyBeamFrom = tokenCenter(caster);
     _strategyBeamTo = fieldPoint;
     _stratLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
+    _strikeIntelGapTargets(caster);
     cancelStrategyPreview();
     if (notifyTutorial) {
       tutorial?.onStrategy();
       onTutorialChanged?.call();
     }
     return true;
+  }
+
+  /// HP one 智力差 cast takes from [target]. Grows with caster minus target
+  /// 智力 and never goes below 0. 0 when either card is not a strike pair.
+  /// Adapted / Unverified — the research gives the direction, not the figure.
+  double intelGapStrikeHp(int caster, int target) {
+    if (caster < 0 || caster >= field.length) return 0;
+    if (target < 0 || target >= field.length) return 0;
+    if (!field[caster].strategyScalesWithIntelGap) return 0;
+    if (isEnemyAt(caster) == isEnemyAt(target)) return 0;
+    final mine = field[caster].intelValue;
+    final theirs = field[target].intelValue;
+    if (mine == null || theirs == null) return 0;
+    final hp = kIntelGapStrikeBaseHp + kIntelGapStrikeHpPerIntel * (mine - theirs);
+    return hp.clamp(0.0, kRansenMaxHp).toDouble();
+  }
+
+  /// Living enemies inside the caster's ring. Same ring as the preview.
+  void _strikeIntelGapTargets(int caster) {
+    if (!field[caster].strategyScalesWithIntelGap) return;
+    final center = tokenCenter(caster);
+    for (var i = 0; i < field.length; i++) {
+      if (!isEnemyAt(i) || _lifeAt(i) != UnitLife.alive) continue;
+      if ((tokenCenter(i) - center).distance > strategyPreviewRadius + 0.01) continue;
+      _applyHpLoss(i, intelGapStrikeHp(caster, i), cause: '計');
+    }
   }
 
   /// Cast through the spend path. No card, no preview, or a short pool: no FX.

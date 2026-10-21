@@ -51,6 +51,16 @@ class CardFace {
     }
   }
 
+  /// Printed 智力 as a number. "10+" reads 10; a gap glyph ("—") reads null.
+  int? get intelValue => int.tryParse(RegExp(r'\d+').stringMatch(intel) ?? '');
+
+  /// 英傑: 「雷擊的效果受雙方智力差距影響」. True for a printed 雷擊, or a printed
+  /// effect whose damage already tracks both sides' 知力. Reads card text only.
+  bool get strategyScalesWithIntelGap =>
+      strategyName.contains('雷擊') ||
+      strategyName.contains('雷撃') ||
+      (strategyEffect.contains('傷害') && strategyEffect.contains('雙方知力'));
+
   String get troopLabel {
     switch (troop) {
       case TroopType.cavalry:
