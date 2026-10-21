@@ -66,6 +66,59 @@ class TutorialLessonRail extends StatelessWidget {
   }
 }
 
+/// 英傑 章節選擇 on the victory path: the five stage names in order and one
+/// bottom button (開始, or 開戰 on 用計得宜). The foil gave the names, order
+/// and button copy only, so the chips and colours are the rail's own. No
+/// victory banner copy, title, timing or px of its own.
+class ChapterSelectShell extends StatelessWidget {
+  const ChapterSelectShell({super.key, required this.controller, required this.onStart});
+
+  final TutorialController controller;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final stages = controller.chapterStages;
+        final label = controller.chapterStartLabel;
+        return Container(
+          key: const Key('chapter-select-shell'),
+          width: double.infinity,
+          color: FactionColors.lacquer,
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < stages.length; i++)
+                _LessonChip(
+                  index: i + 1,
+                  lesson: stages[i],
+                  showHand: stages[i].current,
+                  onHandoff: false,
+                ),
+              if (label != null)
+                TextButton(
+                  key: const Key('chapter-select-start'),
+                  onPressed: onStart,
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      color: FactionColors.gold,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _HandoffBubble extends StatelessWidget {
   const _HandoffBubble();
 

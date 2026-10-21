@@ -105,6 +105,13 @@ class TutorialController extends ChangeNotifier {
   /// 逐一擊破 retry: the game re-seeds the 刀兵 field and clears this.
   bool ichigekiNeedsField = false;
 
+  /// 英傑 victory path: a stage clear goes back to 章節選擇 before the next
+  /// stage opens. Off keeps the bare state machine for stills and unit tests.
+  bool chapterSelectShell = false;
+
+  /// 章節選擇 is up. The next stage waits for its bottom button.
+  bool chapterSelectOpen = false;
+
   /// Order the player can always read:
   /// 逐一擊破 → 快馬突擊 → 槍擊退敵 → 遠攻削敵 → 回城 → 用計得宜.
   /// Only the current step is playable. The next step hard-unlocks on Pass.
@@ -171,6 +178,52 @@ class TutorialController extends ChangeNotifier {
     ];
   }
 
+  /// The five 英傑 戰鬥教學 stages as 章節選擇 lists them. 回城 is a Soft Lock
+  /// step with no 英傑 stage, so it is not on this list.
+  List<TutorialLesson> get chapterStages =>
+      lessons.where((l) => l.id != 'return').toList();
+
+  /// The stage the 章節選擇 button starts: the one the rail marks current.
+  TutorialLesson? get chapterSelectNext {
+    for (final l in chapterStages) {
+      if (l.current) return l;
+    }
+    return null;
+  }
+
+  /// Bottom button on 章節選擇. The foil read 開戰 on 用計得宜 and 開始 on
+  /// the earlier stages.
+  static String chapterStartLabelFor(String stageId) =>
+      stageId == 'strategy' ? '開戰' : '開始';
+
+  String? get chapterStartLabel {
+    final next = chapterSelectNext;
+    return next == null ? null : chapterStartLabelFor(next.id);
+  }
+
+  /// The 章節選擇 button: start the selected stage. Stages 1→2 and 2→3 re-seed
+  /// through the session reset. Stages 4 and 5 share the 場2 field and resume.
+  void startChapter() {
+    if (!chapterSelectOpen) return;
+    chapterSelectOpen = false;
+    if (session == TutorialSession.ichigeki && s0 == IchigekiPhase.tipNext) {
+      s0 = IchigekiPhase.passed;
+      resetToSession1();
+      return;
+    }
+    if (session == TutorialSession.session1 && s1 == S1Phase.tipNext) {
+      s1 = S1Phase.passed;
+      resetToSession2();
+      return;
+    }
+    notifyListeners();
+  }
+
+  void _openChapterSelect() {
+    if (!chapterSelectShell || shotPassMode) return;
+    chapterSelectOpen = true;
+  }
+
   /// 弓教學 is on the queue after a geometry-clear aimed 迎撃, including the
   /// steps that follow it. Idle contact and the ≥1C wait do not set this.
   bool get bowLessonUnlocked {
@@ -192,7 +245,8 @@ class TutorialController extends ChangeNotifier {
   }
 
   /// Live 弓 lesson. Standing fire and bow select use this, not a clock.
-  bool get bowLessonLive => bowLessonUnlocked && s2 == S2Phase.bowTeach;
+  bool get bowLessonLive =>
+      bowLessonUnlocked && s2 == S2Phase.bowTeach && !chapterSelectOpen;
 
   bool get _returnLessonOpen {
     if (session == TutorialSession.complete) return true;
@@ -225,10 +279,12 @@ class TutorialController extends ChangeNotifier {
   }
 
   /// Live 用計得宜. The seal, flick, and card→map cast clear it.
-  bool get strategyLessonLive => _strategyLessonOpen && s2 == S2Phase.strategyTeach;
+  bool get strategyLessonLive =>
+      _strategyLessonOpen && s2 == S2Phase.strategyTeach && !chapterSelectOpen;
 
   /// 英傑 stage 1 逐一擊破. The live tutorial opens here.
   void resetToIchigeki() {
+    chapterSelectOpen = false;
     session = TutorialSession.ichigeki;
     s0 = IchigekiPhase.selectFoot;
     s1 = S1Phase.highlightSelect;
@@ -250,6 +306,7 @@ class TutorialController extends ChangeNotifier {
   }
 
   void resetToSession1() {
+    chapterSelectOpen = false;
     session = TutorialSession.session1;
     s1 = S1Phase.highlightSelect;
     s2 = S2Phase.spearGlow;
@@ -269,6 +326,7 @@ class TutorialController extends ChangeNotifier {
   }
 
   void resetToSession2() {
+    chapterSelectOpen = false;
     session = TutorialSession.session2;
     s2 = S2Phase.spearGlow;
     phaseC = 0;
@@ -286,6 +344,16 @@ class TutorialController extends ChangeNotifier {
 
   void skipTip() {
     if (!tipSkippable || tipText == null) return;
+    if (chapterSelectOpen) return;
+    if (chapterSelectShell &&
+        !shotPassMode &&
+        ((session == TutorialSession.ichigeki && s0 == IchigekiPhase.tipNext) ||
+            (session == TutorialSession.session1 && s1 == S1Phase.tipNext))) {
+      // Victory goes back to 章節選擇. Its button opens the next stage.
+      _openChapterSelect();
+      notifyListeners();
+      return;
+    }
     if (session == TutorialSession.ichigeki) {
       // Only the routed-enemy Pass skips. 亂戰 itself cannot be tipped past.
       if (s0 != IchigekiPhase.tipNext) return;
@@ -643,6 +711,7 @@ class TutorialController extends ChangeNotifier {
       s2 = S2Phase.bowTeach;
       tipText = '槍過關！下一招弓教學：點己方弓兵，停穩蓄勢自動射（唔好拖走）';
       tipSkippable = false;
+      _openChapterSelect();
       notifyListeners();
     } else {
       _failS2('槍尖未對敵 — 拖槍對住敵先');
@@ -664,6 +733,7 @@ class TutorialController extends ChangeNotifier {
 
   void onSelectBow() {
     if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
+    if (chapterSelectOpen) return;
     tipText = '停穩 — 蓄勢亮咗就自動射（郁就取消）';
     tipSkippable = false;
     notifyListeners();
@@ -672,6 +742,7 @@ class TutorialController extends ChangeNotifier {
   /// Soft Lock Field1: standing bow auto-shot completed.
   void onBowShot() {
     if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
+    if (chapterSelectOpen) return;
     if (!interceptDone) return;
     s2 = S2Phase.returnCity;
     tipText = '弓過關！最後回城：拖任一己方入底「歸城區」';
@@ -682,6 +753,7 @@ class TutorialController extends ChangeNotifier {
   /// A 計略 cast that spent 士氣. Clears 用計得宜. On 回城 it is flavour only.
   void onStrategy() {
     if (session != TutorialSession.session2) return;
+    if (chapterSelectOpen) return;
     if (s2 == S2Phase.strategyOrReturn) {
       // Shot stills: stratagem counts as the old either/or gate.
       if (!interceptDone) return;
@@ -715,6 +787,7 @@ class TutorialController extends ChangeNotifier {
     s2 = S2Phase.strategyTeach;
     tipText = '回城過關！最後用計得宜：點武將睇計略範圍，消耗士氣放計略';
     tipSkippable = false;
+    _openChapterSelect();
     notifyListeners();
   }
 
