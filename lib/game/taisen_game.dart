@@ -351,8 +351,13 @@ class TaisenGame extends FlameGame {
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
   /// Match 士氣 pool. A cast spends the caster's printed [CardFace.strategyMorale].
-  /// Retreat still subtracts only [kRetreatMoraleCost]. No regen (Unverified).
+  /// Retreat still subtracts only [kRetreatMoraleCost]. Recovers over time up to
+  /// [matchMoraleCap] (英傑 tip). The rate is [kMoraleRegenCPerPoint] (Adapted).
   int matchMorale = 0;
+  /// Ceiling for regen: the last printed-cost seed. 0 = no seed, no regen.
+  int _matchMoraleCap = 0;
+  /// Partial point carried between frames. Dropped while the pool is full.
+  double _moraleRegenCarry = 0;
   /// Player changed this spear's facing. Gold read until a tip hit.
   /// Arcade extension ([spearTipExtendedAt]) stays on without this flag.
   /// Does not change the 迎撃 gate or any damage figure.
@@ -374,6 +379,9 @@ class TaisenGame extends FlameGame {
   static const double kReviveSkillMul = 2 / 3;
   /// Retreat does not spend morale.
   static const int kRetreatMoraleCost = 0;
+  /// 英傑: 「士氣值會隨時間回復」. That tip gives no rate, and the ~6→~2 still is
+  /// one cast readout. Adapted / Unverified: one point per this many C.
+  static const double kMoraleRegenCPerPoint = 3.0;
 
   /// Playtest bursts, counted in seconds of [kRansenTickPerSec]. Not wiki DPS.
   /// 突撃 is a sharp drop and still leaves a full bar in 亂戰.
@@ -1868,6 +1876,7 @@ class TaisenGame extends FlameGame {
     _tickSpearTips();
     _tickSiegePrep(dt);
     _tickUnitLife(dt);
+    _tickMoraleRegen(dt);
     _decayChargeAfterStop(dt);
 
     // Every frame: Watch telegraph follows live field charge facing + aura (not demo cycle alone).
@@ -6544,6 +6553,7 @@ class TaisenGame extends FlameGame {
   }
 
   /// One cast of each own card, from that card's printed 士氣. Not a regen rate.
+  /// The same sum is the regen ceiling.
   void _seedMatchMoraleFromPrintedCosts() {
     var sum = 0;
     for (var i = 0; i < field.length; i++) {
@@ -6552,7 +6562,31 @@ class TaisenGame extends FlameGame {
       if (cost > 0) sum += cost;
     }
     matchMorale = sum;
+    _matchMoraleCap = sum;
+    _moraleRegenCarry = 0;
   }
+
+  /// Regen ceiling. Equals the printed-cost seed; regen never passes it.
+  int get matchMoraleCap => _matchMoraleCap;
+
+  /// 士氣 recovers while the C clock runs. Stops at [matchMoraleCap].
+  /// Shot modes hold it so Simulator captures stay readable.
+  void _tickMoraleRegen(double dt) {
+    if (tutorial?.shotPassMode ?? false) return;
+    if (!clock.running || clock.finished) return;
+    if (matchMorale >= _matchMoraleCap) {
+      _moraleRegenCarry = 0;
+      return;
+    }
+    _moraleRegenCarry += dt / (kMoraleRegenCPerPoint * CClock.secondsPerC);
+    final whole = _moraleRegenCarry.floor();
+    if (whole <= 0) return;
+    _moraleRegenCarry -= whole;
+    matchMorale = math.min(_matchMoraleCap, matchMorale + whole);
+    if (matchMorale >= _matchMoraleCap) _moraleRegenCarry = 0;
+  }
+
+  void debugAdvanceMoraleRegen(double dt) => _tickMoraleRegen(dt);
 
   /// Seal or upward flick. Lands on the caster. Spends printed 士氣 or does nothing.
   bool castStrategyAtSelected({bool notifyTutorial = true}) {
