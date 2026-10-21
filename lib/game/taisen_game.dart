@@ -358,6 +358,11 @@ class TaisenGame extends FlameGame {
   int _matchMoraleCap = 0;
   /// Partial point carried between frames. Dropped while the pool is full.
   double _moraleRegenCarry = 0;
+  /// Enemy-side 士氣 pool. Seeded like [matchMorale] from the enemy cards'
+  /// printed costs. Only 軍心大亂 moves it; no enemy cast and no regen yet.
+  int enemyMatchMorale = 0;
+  /// Seconds left on the 軍心大亂 result. Runs with the 計略 FX window.
+  double _moraleChaosLeft = 0;
   /// Player changed this spear's facing. Gold read until a tip hit.
   /// Arcade extension ([spearTipExtendedAt]) stays on without this flag.
   /// Does not change the 迎撃 gate or any damage figure.
@@ -388,6 +393,11 @@ class TaisenGame extends FlameGame {
   /// Adapted / Unverified: extra HP per point of caster-minus-target 智力.
   /// Linear in the gap. Not keyed on the teaching cards' 6 vs 2.
   static const double kIntelGapStrikeHpPerIntel = 8.0;
+  /// 英傑 result line 「敵軍大破，軍心大亂。」 after the 雷擊 cast. Game copy.
+  static const String kMoraleChaosLine = '敵軍大破，軍心大亂';
+  /// Adapted / Unverified: enemy 士氣 lost to one 軍心大亂. The research names
+  /// the result, not a size. Not the caster's ~6→~2 spend readout.
+  static const int kMoraleChaosEnemyLoss = 3;
 
   /// Playtest bursts, counted in seconds of [kRansenTickPerSec]. Not wiki DPS.
   /// 突撃 is a sharp drop and still leaves a full bar in 亂戰.
@@ -1930,6 +1940,9 @@ class TaisenGame extends FlameGame {
         _strategyBeamFrom = null;
         _strategyBeamTo = null;
       }
+    }
+    if (_moraleChaosLeft > 0 && !holdFx) {
+      _moraleChaosLeft = math.max(0, _moraleChaosLeft - dt);
     }
     if (!holdFx) {
       _decayHitFlash(dt);
@@ -6469,6 +6482,7 @@ class TaisenGame extends FlameGame {
 
   /// Decay only the ≤1C cast strip. Does not march, spend, or open a cut-in.
   void debugAdvanceStrategyFx(double dt) {
+    _moraleChaosLeft = math.max(0, _moraleChaosLeft - dt);
     if (_stratLeft <= 0) return;
     _stratLeft = math.max(0, _stratLeft - dt);
   }
@@ -6571,6 +6585,14 @@ class TaisenGame extends FlameGame {
     matchMorale = sum;
     _matchMoraleCap = sum;
     _moraleRegenCarry = 0;
+    var enemySum = 0;
+    for (var i = 0; i < field.length; i++) {
+      if (!isEnemyAt(i)) continue;
+      final cost = field[i].strategyMorale;
+      if (cost > 0) enemySum += cost;
+    }
+    enemyMatchMorale = enemySum;
+    _moraleChaosLeft = 0;
   }
 
   /// Regen ceiling. Equals the printed-cost seed; regen never passes it.
@@ -6608,7 +6630,8 @@ class TaisenGame extends FlameGame {
 
   /// Card → map. [fieldPoint] must sit in the preview on the lower field.
   /// Refuses when 士氣 is short. A 智力差 計略 also strikes the enemies in the
-  /// ring ([intelGapStrikeHp]). No 軍心大亂, no fullscreen cut-in.
+  /// ring ([intelGapStrikeHp]) and, when it lands, throws them into 軍心大亂
+  /// ([moraleChaosActive]). No fullscreen cut-in.
   bool castStrategyOnMap(Offset fieldPoint, {bool notifyTutorial = true}) {
     final caster = _strategyCaster;
     final preview = _strategyPreviewCaster;
@@ -6646,15 +6669,38 @@ class TaisenGame extends FlameGame {
   }
 
   /// Living enemies inside the caster's ring. Same ring as the preview.
+  /// Any landed hit sets off [_enterMoraleChaos] once for the cast.
   void _strikeIntelGapTargets(int caster) {
     if (!field[caster].strategyScalesWithIntelGap) return;
     final center = tokenCenter(caster);
+    var landed = false;
     for (var i = 0; i < field.length; i++) {
       if (!isEnemyAt(i) || _lifeAt(i) != UnitLife.alive) continue;
       if ((tokenCenter(i) - center).distance > strategyPreviewRadius + 0.01) continue;
-      _applyHpLoss(i, intelGapStrikeHp(caster, i), cause: '計');
+      final hp = intelGapStrikeHp(caster, i);
+      if (hp <= 0) continue;
+      _applyHpLoss(i, hp, cause: '計');
+      landed = true;
     }
+    if (landed) _enterMoraleChaos();
   }
+
+  /// 英傑 雷擊 result: 「敵軍大破，軍心大亂。」 Enemy 士氣 drops by
+  /// [kMoraleChaosEnemyLoss] and the result holds for the 計略 FX window.
+  /// Separate from the caster's spend and from the HP strike.
+  void _enterMoraleChaos() {
+    enemyMatchMorale = math.max(0, enemyMatchMorale - kMoraleChaosEnemyLoss);
+    _moraleChaosLeft = FxWindows.toSeconds(FxWindows.strategyFxMaxC);
+  }
+
+  /// True while the last 智力差 cast's 軍心大亂 result is up.
+  bool get moraleChaosActive => _moraleChaosLeft > 0;
+
+  /// [kMoraleChaosLine] while [moraleChaosActive], else null. Read-only text
+  /// for the lesson layer; no new chrome is drawn here.
+  String? get moraleChaosLine => moraleChaosActive ? kMoraleChaosLine : null;
+
+  double get debugMoraleChaosLeft => _moraleChaosLeft;
 
   /// Cast through the spend path. No card, no preview, or a short pool: no FX.
   /// [notifyTutorial] false = visual-only (shot modes / preview without advancing).
