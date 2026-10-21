@@ -371,7 +371,7 @@ void main() {
     expect(g.strategyCastBlocksField, isFalse);
   });
 
-  test('M-02 智力 stays a display field; 赤壁 does not apply a 6vs2 formula', () {
+  test('M-02 智力 reads on the caption; 赤壁 strikes by 智力差, not a 6vs2 formula', () {
     final g = readyGame();
     final at = _fieldAt(g, 0.40, 0.60);
     final zhou = Cost6Roster.all.firstWhere((c) => c.id == 'zhouyu');
@@ -394,7 +394,8 @@ void main() {
     final hp = g.debugUnitHp(1);
     expect(g.strategyPreviewCaption, contains('智力${zhou.intel}'));
     expect(g.castStrategyAtSelected(), isTrue);
-    expect(g.debugUnitHp(1), hp);
+    // 周瑜 10 vs 曹操 10: an even match takes only the Adapted base.
+    expect(hp - g.debugUnitHp(1), TaisenGame.kIntelGapStrikeBaseHp);
     expect(g.debugHitLabel, isNot('雷擊'));
     expect(g.matchMorale, 0);
   });
