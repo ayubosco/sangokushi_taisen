@@ -42,6 +42,9 @@ class TaisenGame extends FlameGame {
   final List<bool> fieldIsEnemy = [];
   /// Parallel to [field]: own token parked in bottom 己城 band (返城 / heal-redeploy).
   final List<bool> fieldInCastle = [];
+  /// Own cards not yet on the field. A hand card enters only on 自陣城門
+  /// ([deployHandCardToGate]), never by a field drag. No tray is drawn yet.
+  final List<CardFace> hand = [];
   int? selectedIndex;
 
   /// Drag hover: pointer currently inside own-castle band (highlight).
@@ -997,15 +1000,20 @@ class TaisenGame extends FlameGame {
     if (park) _parkInCastle(i, rest);
   }
 
-  /// Intentional 歸城. Clears the march so the parked body does not walk back out.
-  void _parkInCastle(int i, Offset at) {
-    if (isEnemyAt(i)) return;
+  /// Rest point inside 己城 for a body dropped at [at]. Shared by 歸城 and gate deploy.
+  Offset _castleParkPos(Offset at) {
     final band = castleBandRect;
     final maxX = size.x > 48 ? size.x - 48 : 48.0;
-    fieldPos[i] = Offset(
+    return Offset(
       at.dx.clamp(48.0, maxX),
       band.top + band.height * 0.72,
     );
+  }
+
+  /// Intentional 歸城. Clears the march so the parked body does not walk back out.
+  void _parkInCastle(int i, Offset at) {
+    if (isEnemyAt(i)) return;
+    fieldPos[i] = _castleParkPos(at);
     while (fieldInCastle.length <= i) {
       fieldInCastle.add(false);
     }
@@ -4748,6 +4756,27 @@ class TaisenGame extends FlameGame {
     fieldIsEnemy.add(enemy);
     fieldInCastle.add(false);
     fieldPos.add(clampPlayableCenter(Offset(x, y)));
+    return true;
+  }
+
+  /// Hand card → 自陣城門. Observed-from-英傑 (foil yellow path「刀兵 card → 城門」):
+  /// deploying from hand is its own order, separate from dragging a field body.
+  /// The card parks in 己城 like a 歸城 body and leaves through the existing
+  /// ~4成 exit line and 出城·出征 prep. No deploy timer, cost, or cap beyond
+  /// [fieldMax]. Does not select, drag, or arm 突撃. A drop off the gate keeps
+  /// the card in [hand]. Free match only; the lesson rail is not rewired.
+  bool deployHandCardToGate(int handIndex, Offset drop) {
+    if (tutorial != null) return false;
+    if (handIndex < 0 || handIndex >= hand.length) return false;
+    if (field.length >= fieldMax) return false;
+    if (!castleGateContains(drop, currentlyIn: false)) return false;
+    final card = hand.removeAt(handIndex);
+    field.add(card);
+    fieldIsEnemy.add(false);
+    fieldInCastle.add(true);
+    fieldPos.add(_castleParkPos(drop));
+    _ensureLifeSlots();
+    _ensureHpSlots();
     return true;
   }
 
