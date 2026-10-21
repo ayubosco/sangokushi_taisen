@@ -45,6 +45,11 @@ class TaisenGame extends FlameGame {
   /// Own cards not yet on the field. A hand card enters only on 自陣城門
   /// ([deployHandCardToGate]), never by a field drag. No tray is drawn yet.
   final List<CardFace> hand = [];
+  /// Parallel to [field], padded lazily: bodies on one token. Observed-from-英傑
+  /// foil readouts show one token carrying a count (4 輕騎兵, 3 長槍兵). A slot
+  /// with no entry is a single body, as before. Recorded only: the count is not
+  /// drawn (no badge layout from the foil) and no combat path reads it.
+  final List<int> _stackCount = [];
   int? selectedIndex;
 
   /// Drag hover: pointer currently inside own-castle band (highlight).
@@ -4780,6 +4785,23 @@ class TaisenGame extends FlameGame {
     return true;
   }
 
+  /// Bodies stacked on token [i]. A single body (1) unless [setStackCount] says
+  /// otherwise; an out-of-range slot reads as 1 too.
+  int stackCountAt(int i) =>
+      i >= 0 && i < _stackCount.length && i < field.length ? _stackCount[i] : 1;
+
+  /// Records how many bodies token [i] carries (foil: 4 輕騎兵, 3 長槍兵).
+  /// Refuses a count below one or a slot off the field. It is a readout only:
+  /// HP, 亂戰, 突撃, 迎擊, siege, and speed do not scale with it.
+  bool setStackCount(int i, int count) {
+    if (i < 0 || i >= field.length || count < 1) return false;
+    while (_stackCount.length < field.length) {
+      _stackCount.add(1);
+    }
+    _stackCount[i] = count;
+    return true;
+  }
+
   bool isEnemyAt(int i) => i >= 0 && i < fieldIsEnemy.length && fieldIsEnemy[i];
 
   int? hitTokenAt(Offset local) {
@@ -5972,6 +5994,7 @@ class TaisenGame extends FlameGame {
     _sortiePrepLeft.clear();
     _tipTickResolved.clear();
     _qiangjiArmed.clear();
+    _stackCount.clear();
     _strategyPreviewIndex = null;
   }
 
