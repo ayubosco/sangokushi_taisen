@@ -142,23 +142,63 @@ void main() {
     expect(plain.spearTipExtendedAt(0), isTrue);
   });
 
-  test('M-01 an armed slow scrape is still one 槍尖 tick, not a new multiplier', () {
+  test('AUTH-GAP §1 槍擊: a slow cavalry into the armed tip takes the 迎擊, no new figure', () {
     final g = readyGame();
     final at = _fieldAt(g, 0.42, 0.50);
     _placeOwn(g, at, TroopType.spear);
     g.ownFacing = 0;
     _turnSpear(g, at, const Offset(0, 72));
+    expect(g.spearQiangjiGoldAt(0), isTrue);
     _addEnemy(g, g.spearTipAt(0));
     g.enemyFacing = 0;
     g.debugSetMoveSpeed(1, 1.1);
+    expect(g.debugInterceptMoveSpeedForTest(1), lessThanOrEqualTo(TaisenGame.kInterceptSpeedMin));
     g.debugStepPursuit(1 / 60);
-    expect(g.debugHitLabel, isNot('迎擊'));
-    expect(g.spearQiangjiGoldAt(0), isFalse, reason: 'a tip hit clears the gold');
+    expect(g.debugHitLabel, '迎擊', reason: 'the armed 槍擊 is the hit, not the cavalry speed');
+    expect(g.debugGaritsuArmed, isTrue);
+    expect(g.debugInterceptDouble, isFalse);
+    expect(g.spearQiangjiGoldAt(0), isFalse, reason: 'gold until hit');
+    // Existing playtest stub: a cavalry victim loses the full bar. No 3450.
+    expect(g.debugUnitHp(1), closeTo(0, 0.01));
+    expect(g.debugUnitHp(1), isNot(3450));
+    expect(g.spearTipExtendedAt(0), isTrue);
+    expect(g.debugInRansen(0), isFalse);
+  });
+
+  test('AUTH-GAP §1 槍擊: unarmed slow and armed rear contacts stay one 槍尖 tick', () {
+    final plain = readyGame();
+    final at = _fieldAt(plain, 0.42, 0.50);
+    _placeOwn(plain, at, TroopType.spear);
+    plain.ownFacing = math.pi;
+    _addEnemy(plain, plain.spearTipAt(0));
+    plain.enemyFacing = 0;
+    plain.debugSetMoveSpeed(1, 1.1);
+    expect(plain.spearQiangjiGoldAt(0), isFalse);
+    plain.debugStepPursuit(1 / 60);
+    expect(plain.debugHitLabel, isNot('迎擊'));
     expect(
-      g.debugUnitHp(1),
+      plain.debugUnitHp(1),
       closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
     );
-    expect(g.spearTipExtendedAt(0), isTrue);
+
+    final rear = readyGame();
+    _placeOwn(rear, at, TroopType.spear);
+    rear.ownFacing = 0;
+    _turnSpear(rear, at, const Offset(0, 72));
+    expect(rear.spearQiangjiGoldAt(0), isTrue);
+    // Tip now points down (facing π). Cavalry just past it, heading away:
+    // the tip is on its back (chase ≠ 迎擊), armed or not.
+    _addEnemy(rear, rear.spearTipAt(0) + const Offset(0, 12));
+    rear.enemyFacing = math.pi;
+    rear.debugArmEnemyChargeAura();
+    rear.debugStepPursuit(1 / 60);
+    expect(rear.debugHitLabel, isNot('迎擊'));
+    expect(rear.debugGaritsuArmed, isFalse);
+    expect(rear.spearQiangjiGoldAt(0), isFalse, reason: 'a tip touch still spends the gold');
+    expect(
+      rear.debugUnitHp(1),
+      closeTo(TaisenGame.kRansenMaxHp - TaisenGame.kRansenTickPerSec, 0.01),
+    );
   });
 
   test('M-01 card lock and a same-direction drag do not arm; a second spear stays dark', () {
