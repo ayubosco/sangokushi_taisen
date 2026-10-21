@@ -5777,8 +5777,9 @@ class TaisenGame extends FlameGame {
   /// tipTick = any tip overlap, one existing stub quantum, no「迎撃」and no 亂戰 stamp.
   /// interceptHit = tip reached × (cav aura | speed>1.3) × target front 180°
   /// +「迎撃」+ガリッ. Tip length stays [kSpearTipReach] (Unverified — not retuned).
-  /// 槍擊 gold is a readability flag on a player facing change. It does not
-  /// open the gate and it does not add a damage figure.
+  /// 槍擊 (AUTH-GAP §1): a player facing change arms the tip gold until a hit.
+  /// An armed tip opens the same gate without the speed / aura need —
+  /// 英傑 「回頭，讓他撞上槍擊自滅吧」. Same stub damage and「迎擊」fly; no new figure.
   void _tickSpearTips() {
     _ensureLifeSlots();
     _ensureQiangjiSlots();
@@ -5799,7 +5800,10 @@ class TaisenGame extends FlameGame {
         final aura = _hasChargeAura(o);
         // 迎撃 still needs the tip point, not the approach fringe inside the radius.
         final reached = _tipReached(s, o, tip);
-        final gated = reached && (aura || speed > kInterceptSpeedMin) && _tipInTargetFront180(s, o, tip);
+        final armed = spearQiangjiGoldAt(s);
+        final gated = reached &&
+            (armed || aura || speed > kInterceptSpeedMin) &&
+            _tipInTargetFront180(s, o, tip);
         // Lesson cavalry must survive an early / mis-aimed touch so the real
         // 迎撃 can still unlock 弓. A light tick is not that pass.
         final teachHold = gated && _holdTeachIntercept(s, o);
