@@ -347,6 +347,9 @@ class TaisenGame extends FlameGame {
   final List<String> _siegePrepPause = [];
   /// Opposing bow inside the existing half-field range slowed this tick's fill.
   final List<bool> _siegePrepSlowed = [];
+  /// Body point at the last in-zone tick. Null outside the zone. Any body that
+  /// shifts between ticks is moving (SGE-02), whoever drives it.
+  final List<Offset?> _siegeLastPos = [];
   final List<UnitLife> _unitLife = [];
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
@@ -429,6 +432,10 @@ class TaisenGame extends FlameGame {
   static const double kSiegeWallNick = 0.03;
   static const double kSiegeGateNick = 0.05;
 
+  /// Sub-pixel jitter that still counts as standing still for SGE-02.
+  /// A render tolerance, not a gameplay number.
+  static const double kSiegeStillEpsilonPx = 0.5;
+
   /// Center opening of the castle face, as a fraction of field width.
   /// Layout stand-in so gate and wall are different contacts. Not a measured px.
   static const double kSiegeGateSpanFrac = 1 / 3;
@@ -477,6 +484,10 @@ class TaisenGame extends FlameGame {
   bool debugRecordStrategyPaint = false;
   final List<String> _strategyPaint = [];
   List<String> get debugStrategyPaintLog => List.unmodifiable(_strategyPaint);
+  /// Set by tests that need the field siege-prep gauge tags for one frame.
+  bool debugRecordSiegePaint = false;
+  final List<String> _siegePaint = [];
+  List<String> get debugSiegePaintLog => List.unmodifiable(_siegePaint);
   double _watchPhaseLeft = FxWindows.toSeconds(FxWindows.chargeAuraVisibleC);
   double _pulse = 0;
 
@@ -1137,6 +1148,7 @@ class TaisenGame extends FlameGame {
     _siegePrepsLanded.clear();
     _siegePrepPause.clear();
     _siegePrepSlowed.clear();
+    _siegeLastPos.clear();
     _unitLife
       ..clear()
       ..add(UnitLife.alive)
@@ -2061,6 +2073,7 @@ class TaisenGame extends FlameGame {
   void render(Canvas canvas) {
     super.render(canvas);
     _maybeLogH0Metrics();
+    if (debugRecordSiegePaint) _siegePaint.clear();
     final w = size.x;
     final h = size.y;
     final wh = watchH;
@@ -2264,20 +2277,24 @@ class TaisenGame extends FlameGame {
       _drawUnitHpBar(canvas, center, tokenSize, i);
       if (debugSiegePrepVisible(i)) {
         final anchor = tokenCenter(i);
-        _drawSiegePrepGauge(
-          canvas,
-          Rect.fromCenter(
-            center: Offset(anchor.dx, anchor.dy - tokenSize.height / 2 - 22),
-            width: tokenSize.width,
-            height: 5,
-          ),
-          debugSiegePrep01(i),
+        final pause = debugSiegePrepPause(i);
+        final bar = Rect.fromCenter(
+          center: Offset(anchor.dx, anchor.dy - tokenSize.height / 2 - 22),
+          width: tokenSize.width,
+          height: 5,
         );
+        _drawSiegePrepGauge(canvas, bar, debugSiegePrep01(i), paused: pause.isNotEmpty);
+        _noteSiegePaint('field-prep:$i:${debugSiegePrep01(i).toStringAsFixed(4)}');
+        // SGE-04: a held gauge reads as held on the field, not only in the Watch.
+        if (pause.isNotEmpty) {
+          _drawSiegePauseTicks(canvas, bar);
+          _noteSiegePaint('field-pause:$i:$pause');
+        }
         _drawText(
           canvas,
           '${debugSiegeCaption(i)} ${debugSiegeCountdownSec(i)}',
           Offset(anchor.dx - tokenSize.width / 2, anchor.dy - tokenSize.height / 2 - 38),
-          const Color(0xFFFFD54F),
+          pause.isNotEmpty ? kSiegePrepHeldYellow : kSiegePrepYellow,
           10,
         );
       }
@@ -2965,6 +2982,10 @@ class TaisenGame extends FlameGame {
     if (debugRecordStrategyPaint) _strategyPaint.add(tag);
   }
 
+  void _noteSiegePaint(String tag) {
+    if (debugRecordSiegePaint) _siegePaint.add(tag);
+  }
+
   /// Siege troop, or a bow while it is sieging (its gauge is up).
   bool _watchOwnIsSiege(int? own) =>
       own != null &&
@@ -3036,19 +3057,7 @@ class TaisenGame extends FlameGame {
 
   /// Pause ticks, bow-slow cap, and gate/wall hairline. The yellow fill is the field gauge.
   void _drawWatchSiegePrepMarks(Canvas canvas, Rect bar, WatchSiegePrepMirror m) {
-    if (m.paused) {
-      final tick = Paint()..color = const Color(0xFF3E2723);
-      final y = bar.center.dy;
-      final h = bar.height + 3;
-      canvas.drawRect(
-        Rect.fromCenter(center: Offset(bar.center.dx - 2.2, y), width: 1.4, height: h),
-        tick,
-      );
-      canvas.drawRect(
-        Rect.fromCenter(center: Offset(bar.center.dx + 2.2, y), width: 1.4, height: h),
-        tick,
-      );
-    }
+    if (m.paused) _drawSiegePauseTicks(canvas, bar);
     if (m.slowed) {
       canvas.drawRect(
         Rect.fromLTWH(bar.right - 2.5, bar.top, 2.5, bar.height),
@@ -3062,6 +3071,21 @@ class TaisenGame extends FlameGame {
         Paint()..color = gate ? const Color(0xFFFFF59D) : const Color(0xFF8D6E63),
       );
     }
+  }
+
+  /// Two dark ticks over the bar center: the prep is held, not filling.
+  void _drawSiegePauseTicks(Canvas canvas, Rect bar) {
+    final tick = Paint()..color = const Color(0xFF3E2723);
+    final y = bar.center.dy;
+    final h = bar.height + 3;
+    canvas.drawRect(
+      Rect.fromCenter(center: Offset(bar.center.dx - 2.2, y), width: 1.4, height: h),
+      tick,
+    );
+    canvas.drawRect(
+      Rect.fromCenter(center: Offset(bar.center.dx + 2.2, y), width: 1.4, height: h),
+      tick,
+    );
   }
 
   /// Field tip state the Watch copies. Gold is the armed flag. Scrape is the
@@ -4655,8 +4679,8 @@ class TaisenGame extends FlameGame {
     // B4 card→map. A shaft plus a point on the lower field. Not a cut-in.
     if (beamLive) {
       _noteStrategyPaint('strategy-beam');
-      final beamFrom = from!;
-      final beamTo = to!;
+      final beamFrom = from;
+      final beamTo = to;
       canvas.drawLine(
         beamFrom,
         beamTo,
@@ -5766,8 +5790,15 @@ class TaisenGame extends FlameGame {
     );
   }
 
+  /// Prep fill and caption yellow (SGE-01).
+  static const Color kSiegePrepYellow = Color(0xFFFFD54F);
+
+  /// Same yellow, dimmed while a pause holds the fill (SGE-04).
+  static const Color kSiegePrepHeldYellow = Color(0x99FFD54F);
+
   /// Yellow prep track. Empty at 0 so entering the zone is visible before fill.
-  void _drawSiegePrepGauge(Canvas canvas, Rect bar, double prep01) {
+  /// [paused] dims the fill so a held gauge does not read as filling.
+  void _drawSiegePrepGauge(Canvas canvas, Rect bar, double prep01, {bool paused = false}) {
     canvas.drawRRect(
       RRect.fromRectAndRadius(bar, const Radius.circular(2)),
       Paint()..color = const Color(0xFF4E342E),
@@ -5779,7 +5810,7 @@ class TaisenGame extends FlameGame {
         Rect.fromLTWH(bar.left, bar.top, fillW, bar.height),
         const Radius.circular(2),
       ),
-      Paint()..color = const Color(0xFFFFD54F),
+      Paint()..color = paused ? kSiegePrepHeldYellow : kSiegePrepYellow,
     );
   }
 
@@ -6156,6 +6187,7 @@ class TaisenGame extends FlameGame {
       _siegePrepsLanded.add(0);
       _siegePrepPause.add('');
       _siegePrepSlowed.add(false);
+      _siegeLastPos.add(null);
     }
     if (_siegePrep.length > field.length) {
       final n = field.length;
@@ -6163,6 +6195,7 @@ class TaisenGame extends FlameGame {
       _siegePrepsLanded.removeRange(n, _siegePrepsLanded.length);
       _siegePrepPause.removeRange(n, _siegePrepPause.length);
       _siegePrepSlowed.removeRange(n, _siegePrepSlowed.length);
+      _siegeLastPos.removeRange(n, _siegeLastPos.length);
     }
   }
 
@@ -6182,8 +6215,13 @@ class TaisenGame extends FlameGame {
           inEnemyCastleZone(i);
       if (!sieging) {
         _siegePrep[i] = 0;
+        _siegeLastPos[i] = null;
         continue;
       }
+      final last = _siegeLastPos[i];
+      final at = fieldPos[i];
+      _siegeLastPos[i] = at;
+      final shifted = last != null && (at - last).distance > kSiegeStillEpsilonPx;
       if (_ransenUnits.contains(i)) {
         _siegePrepPause[i] = 'ransen';
         continue;
@@ -6192,7 +6230,7 @@ class TaisenGame extends FlameGame {
         _siegePrepPause[i] = 'ally';
         continue;
       }
-      if (!_siegeStationary(i)) {
+      if (shifted || !_siegeStationary(i)) {
         _siegePrepPause[i] = 'move';
         continue;
       }
@@ -6213,6 +6251,8 @@ class TaisenGame extends FlameGame {
     }
   }
 
+  /// Finger-driven march. Bodies moved any other way are caught by the
+  /// between-tick shift in [_tickSiegePrep].
   bool _siegeStationary(int i) {
     if (dragging && selectedIndex == i) return false;
     if (pinnedMarchAt(i)) return false;
