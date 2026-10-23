@@ -115,7 +115,9 @@ void main() {
     final c = shellOn()..resetToSession2();
     c.interceptDone = true;
     c.s2 = S2Phase.returnCity;
-    c.onReturnCity();
+    c.onReturnCity(0);
+    c.onReturnHealed(0);
+    c.onReturnSortied(0);
     expect(c.s2, S2Phase.strategyTeach);
     expect(c.chapterSelectOpen, isTrue);
     expect(c.chapterSelectNext!.id, 'strategy');
@@ -162,7 +164,9 @@ void main() {
     final c = shellOn()..resetToSession2();
     c.interceptDone = true;
     c.s2 = S2Phase.returnCity;
-    c.onReturnCity();
+    c.onReturnCity(0);
+    c.onReturnHealed(0);
+    c.onReturnSortied(0);
     var started = 0;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(

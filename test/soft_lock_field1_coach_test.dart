@@ -56,7 +56,9 @@ void main() {
     expect(c.s2, S2Phase.returnCity);
     expect(c.strategyOrReturnDone, isFalse);
 
-    c.onReturnCity();
+    c.onReturnCity(0);
+    c.onReturnHealed(0);
+    c.onReturnSortied(0);
     expect(c.s2, S2Phase.strategyTeach);
     expect(c.strategyOrReturnDone, isTrue);
     expect(c.strategyLessonLive, isTrue);

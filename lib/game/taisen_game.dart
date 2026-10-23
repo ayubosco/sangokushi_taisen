@@ -1074,7 +1074,7 @@ class TaisenGame extends FlameGame {
     fieldInCastle[i] = true;
     // Alive 歸城 is the heal path. A retreated body only starts the countdown.
     if (_lifeAt(i) == UnitLife.alive) {
-      triggerReturnCityFx();
+      triggerReturnCityFx(body: i);
     }
     _cancelBowWindup();
     _clearTravelMeterOnStop();
@@ -5501,6 +5501,7 @@ class TaisenGame extends FlameGame {
       _matchChargeIndex = null;
       _matchChargeC = 0;
     }
+    _stepReturnRail((t) => t.onReturnLeftCastle(i));
   }
 
   void _finishSortiePrep(int i) {
@@ -5510,6 +5511,8 @@ class TaisenGame extends FlameGame {
       _unitLife[i] = UnitLife.alive;
     }
     // No auto-charge and no auto-walk. The committed pin, if any, marches next.
+    // 回城 rail: a healed body back out of 出城準備 is the 出陣 beat.
+    _stepReturnRail((t) => t.onReturnSortied(i));
   }
 
   void _tickSortiePrep(double dt) {
@@ -5550,6 +5553,10 @@ class TaisenGame extends FlameGame {
           }
           if (parked && dt > 0 && _unitHp[i] < kRansenMaxHp) {
             _unitHp[i] = math.min(kRansenMaxHp, _unitHp[i] + kRansenTickPerSec * dt);
+          }
+          // 回城 rail: the parked body is full again. Same heal, no new rate.
+          if (parked && _unitHp[i] >= kRansenMaxHp) {
+            _stepReturnRail((t) => t.onReturnHealed(i));
           }
           break;
         case UnitLife.retreating:
@@ -6829,21 +6836,31 @@ class TaisenGame extends FlameGame {
     castStrategyAtSelected(notifyTutorial: notifyTutorial);
   }
 
-  void triggerReturnCityFx() {
+  /// 歸城 flash for an own body parked in 己城. On the 回城 rail this is the
+  /// first beat; 回血 and 出陣 follow through [_stepReturnRail].
+  void triggerReturnCityFx({int body = 0}) {
     _returnFlashLeft = 0.6;
-    final t = tutorial;
-    if (t != null && t.session == TutorialSession.session2) {
-      final wasReturn = t.s2 == S2Phase.returnCity;
-      t.onReturnCity();
-      // 用計得宜 opens on a lesson pool: one printed cast per own card,
-      // the same seed every lesson field uses. Not a regen rate.
-      if (wasReturn && t.s2 == S2Phase.strategyTeach) {
-        _seedMatchMoraleFromPrintedCosts();
-      }
-      onTutorialChanged?.call();
-    }
+    _stepReturnRail((t) => t.onReturnCity(body));
     selectedIndex = null;
     cancelStrategyPreview();
+  }
+
+  /// Runs one 回城 rail step on the 場2 coach. When it clears 回城,
+  /// 用計得宜 opens on a lesson pool: one printed cast per own card, the
+  /// same seed every lesson field uses. Not a regen rate.
+  void _stepReturnRail(void Function(TutorialController t) step) {
+    final t = tutorial;
+    if (t == null || t.session != TutorialSession.session2) return;
+    final wasS2 = t.s2;
+    final wasTip = t.tipText;
+    step(t);
+    if (wasS2 == S2Phase.returnCity && t.s2 == S2Phase.strategyTeach) {
+      _seedMatchMoraleFromPrintedCosts();
+      // The 出陣 drag opened a range. 用計得宜 starts from a fresh tap.
+      cancelStrategyPreview();
+    }
+    // The heal tick calls this every frame; only a real step repaints.
+    if (t.s2 != wasS2 || t.tipText != wasTip) onTutorialChanged?.call();
   }
 
   /// Brighter field fill so Shu green reads on lacquer (lock RGB kept for chrome).
