@@ -8,11 +8,12 @@ import 'feel_gates_test.dart' show readyGame;
 /// 英傑 stage 4 遠攻削敵 lesson flow. Observed-from-英傑 (AUTH-GAP §3): the
 /// stage cues are「速派單一弓兵攻城」— one archer on the enemy gate shows
 /// 「攻城中」+ countdown — and「另一弓兵從後支援」— a second archer shoots from
-/// the back rank while the first holds the gate. The lesson clears on a
-/// standing shot, that siege beat, and the support shot, in any order. The
-/// siege reuses the existing gauge, fill rate, and gate nick; the support shot
-/// reuses the existing standing shot and range. No bow number is invented.
-/// Not a Feel Pass.
+/// the back rank while the first holds the gate — and「輪流走位牽制」— the two
+/// archers take turns on the move while the other keeps shooting. The lesson
+/// clears on a standing shot, that siege beat, the support shot, and both 走位
+/// turns, in any order. The siege reuses the existing gauge, fill rate, and
+/// gate nick; the support and kite shots reuse the existing standing shot and
+/// range. No bow number is invented. Not a Feel Pass.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -21,6 +22,12 @@ void main() {
     c.interceptDone = true;
     c.s2 = S2Phase.bowTeach;
     return c;
+  }
+
+  /// Both own bows take their 走位 turn (場2 slots 1 and 4).
+  void kite(TutorialController c) {
+    c.onBowKiteShot(mover: 1);
+    c.onBowKiteShot(mover: 4);
   }
 
   group('controller', () {
@@ -47,13 +54,16 @@ void main() {
       expect(c.s2, S2Phase.bowTeach);
     });
 
-    test('shot then siege waits for 另一弓兵從後支援, then clears to 回城', () {
+    test('shot, siege, support wait for 輪流走位牽制, then clear to 回城', () {
       final c = bowCoach()
         ..onBowShot()
         ..onBowSiegeLanded();
       expect(c.s2, S2Phase.bowTeach);
       expect(c.tipText, contains('另一弓兵從後支援'));
       c.onBowSupportShot();
+      expect(c.s2, S2Phase.bowTeach);
+      expect(c.tipText, contains('輪流走位牽制'));
+      kite(c);
       expect(c.s2, S2Phase.returnCity);
       expect(c.lessons.firstWhere((l) => l.id == 'bow').gate,
           TutorialLessonGate.done);
@@ -66,6 +76,8 @@ void main() {
       c.onBowShot();
       expect(c.s2, S2Phase.bowTeach);
       c.onBowSupportShot();
+      expect(c.s2, S2Phase.bowTeach);
+      kite(c);
       expect(c.s2, S2Phase.returnCity);
     });
 
@@ -75,6 +87,38 @@ void main() {
       expect(c.bowSupportLanded, isTrue);
       expect(c.s2, S2Phase.bowTeach);
       expect(c.tipText, contains('攻城中'));
+      c.onBowSiegeLanded();
+      expect(c.s2, S2Phase.bowTeach);
+      kite(c);
+      expect(c.s2, S2Phase.returnCity);
+    });
+
+    test('one 走位 turn is not the beat; the other bow must take its turn', () {
+      final c = bowCoach();
+      c.onBowKiteShot(mover: 1);
+      expect(c.bowKiteTurns, 1);
+      expect(c.bowKiteLanded, isFalse);
+      expect(c.bowShotLanded, isTrue, reason: 'a kite shot is a landed shot');
+      expect(c.tipText, contains('換另一弓兵走位'));
+      var notes = 0;
+      c.addListener(() => notes++);
+      c.onBowKiteShot(mover: 1);
+      expect(c.bowKiteTurns, 1, reason: 'the same bow moving again is no rotation');
+      expect(c.bowKiteLanded, isFalse);
+      expect(notes, 0);
+      c.onBowKiteShot(mover: 4);
+      expect(c.bowKiteTurns, 2);
+      expect(c.bowKiteLanded, isTrue);
+      expect(c.s2, S2Phase.bowTeach);
+    });
+
+    test('kite first, then siege and support clear in any order', () {
+      final c = bowCoach();
+      kite(c);
+      expect(c.bowKiteLanded, isTrue);
+      expect(c.tipText, contains('速派單一弓兵攻城'));
+      c.onBowSupportShot();
+      expect(c.s2, S2Phase.bowTeach);
       c.onBowSiegeLanded();
       expect(c.s2, S2Phase.returnCity);
     });
@@ -89,7 +133,7 @@ void main() {
       expect(c.tipText, contains('攻城中'));
     });
 
-    test('the stage intro names all three 遠攻削敵 cues', () {
+    test('the stage intro names all four 遠攻削敵 cues', () {
       final c = TutorialController()..resetToSession2();
       c.s2 = S2Phase.interceptHit;
       c.turnWindowOpen = true;
@@ -99,6 +143,7 @@ void main() {
       expect(c.tipText, contains('停穩自動射'));
       expect(c.tipText, contains('速派單一弓兵攻城'));
       expect(c.tipText, contains('另一弓兵從後支援'));
+      expect(c.tipText, contains('輪流走位牽制'));
     });
 
     test('selecting the bow after the shot keeps the siege tip', () {
@@ -113,20 +158,26 @@ void main() {
       c.onBowShot();
       c.onBowSiegeLanded();
       c.onBowSupportShot();
+      kite(c);
       expect(c.bowShotLanded, isFalse);
       expect(c.bowSiegeLanded, isFalse);
       expect(c.bowSupportLanded, isFalse);
+      expect(c.bowKiteTurns, 0);
+      expect(c.bowKiteLanded, isFalse);
       expect(c.s2, S2Phase.bowTeach);
     });
 
-    test('a stage reset clears both beats', () {
+    test('a stage reset clears every beat', () {
       final c = bowCoach()
         ..onBowSupportShot()
-        ..onBowSiegeLanded();
+        ..onBowSiegeLanded()
+        ..onBowKiteShot(mover: 1);
       c.resetToSession2();
       expect(c.bowShotLanded, isFalse);
       expect(c.bowSiegeLanded, isFalse);
       expect(c.bowSupportLanded, isFalse);
+      expect(c.bowKiteTurns, 0);
+      expect(c.bowKiteLanded, isFalse);
     });
   });
 
@@ -187,7 +238,7 @@ void main() {
       expect(shooters, {1, 3}, reason: 'both own bows loose arrows');
     });
 
-    test('one bow on the gate, the back-rank bow shoots: 遠攻削敵 clears', () {
+    test('one bow on the gate, the back-rank bow shoots: siege and support land', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
       g.setupSession2Field();
@@ -202,9 +253,84 @@ void main() {
       expect(coach.bowShotLanded, isTrue);
       expect(g.inEnemyCastleZone(supportBow), isFalse);
 
-      _stepUntil(g, () => coach.s2 != S2Phase.bowTeach);
+      _stepUntil(g, () => coach.bowSiegeLanded);
+      expect(coach.bowSiegeLanded, isTrue);
+      expect(coach.s2, S2Phase.bowTeach, reason: 'no 走位 turn yet');
+      expect(coach.tipText, contains('輪流走位牽制'));
+    });
+
+    test('a shot while the other bow is on the move is a 走位 turn for the mover', () {
+      final coach = bowCoach();
+      final g = readyGame(tutorial: coach);
+      g.setupSession2Field();
+      _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
+      const front = 1;
+      final back = g.field.length - 1;
+      _moveBow(g, front);
+
+      _stepUntil(g, () => coach.bowKiteTurns > 0, max: 600);
+      expect(coach.bowKiteTurns, 1);
+      expect(g.debugBowAttackIndex, back, reason: 'the standing bow looses');
+      expect(coach.bowKiteLanded, isFalse);
+      expect(coach.tipText, contains('換另一弓兵走位'));
+    });
+
+    test('輪流走位牽制: each bow moves while the other shoots, then 遠攻削敵 clears', () {
+      final coach = bowCoach();
+      final g = readyGame(tutorial: coach);
+      g.setupSession2Field();
+      _dropEnemy(g, 2);
+      const front = 1;
+      final back = g.field.length - 1;
+
+      // Turn one: the front bow repositions; the back-rank bow keeps shooting.
+      _moveBow(g, front);
+      _stepUntil(g, () => coach.bowKiteTurns == 1, max: 600);
+      expect(coach.bowKiteTurns, 1);
+
+      // Turn two: swap. The back-rank bow moves; the front bow shoots.
+      _moveBow(g, back);
+      _stepUntil(g, () => coach.bowKiteLanded, max: 600);
+      expect(coach.bowKiteLanded, isTrue);
+      expect(g.debugBowAttackIndex, front);
+      expect(coach.s2, S2Phase.bowTeach, reason: 'siege and support still open');
+
+      // The gate and support beats finish the stage.
+      _parkAt(g, front, _enemyGate(g));
+      g.selectedIndex = null;
+      _stepUntil(g, () => coach.s2 != S2Phase.bowTeach, max: 900);
+      expect(coach.bowSupportLanded, isTrue);
       expect(coach.bowSiegeLanded, isTrue);
       expect(coach.s2, S2Phase.returnCity);
+    });
+
+    test('a moving bow does not shoot, and a moving spear is no 走位 turn', () {
+      final coach = bowCoach();
+      final g = readyGame(tutorial: coach);
+      g.setupSession2Field();
+      _dropEnemy(g, 2);
+      final spear = g.tutorialOwnIndex!;
+      expect(g.field[spear].troop, TroopType.spear);
+      g.selectedIndex = spear;
+      g.dragging = true;
+      _stepUntil(g, () => false, max: 900);
+      expect(coach.bowShotLanded, isTrue);
+      expect(coach.bowKiteTurns, 0);
+
+      // A bow held on the move never looses while it moves.
+      final coach2 = bowCoach();
+      final g2 = readyGame(tutorial: coach2);
+      g2.setupSession2Field();
+      _dropEnemy(g2, 2);
+      final back = g2.field.length - 1;
+      _moveBow(g2, 1);
+      final moverShots = <int>{};
+      _stepUntil(g2, () {
+        final a = g2.debugBowAttackIndex;
+        if (a != null) moverShots.add(a);
+        return false;
+      }, max: 900);
+      expect(moverShots, {back});
     });
 
     test('a shot with no own bow in the enemy castle is not the support beat', () {
@@ -293,6 +419,13 @@ void _parkAt(TaisenGame g, int i, Offset at) {
   g.fieldPos[i] = at;
   g.selectedIndex = i;
   g.dragging = false;
+  g.dragTo = null;
+}
+
+/// Hold bow [i] on the move: selected and mid-drag, so it cannot 蓄勢.
+void _moveBow(TaisenGame g, int i) {
+  g.selectedIndex = i;
+  g.dragging = true;
   g.dragTo = null;
 }
 

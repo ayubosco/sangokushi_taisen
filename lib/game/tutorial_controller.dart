@@ -107,6 +107,17 @@ class TutorialController extends ChangeNotifier {
   /// landed a shot while another own bow stood in it. Also counts as the shot.
   bool bowSupportLanded = false;
 
+  /// 遠攻削敵 beat four (「輪流走位牽制」): each own bow has taken a turn on
+  /// the move while another own bow landed a standing shot. Also counts as
+  /// the shot. Turn-taking only; no new range, speed, or number.
+  bool bowKiteLanded = false;
+
+  /// Own bows that were on the move when another own bow's shot landed.
+  final Set<int> _bowKiteMovers = {};
+
+  /// How many own bows have taken their 走位 turn so far.
+  int get bowKiteTurns => _bowKiteMovers.length;
+
   /// Screenshot / debug: jump to clear-pass visuals.
   bool shotPassMode = false;
 
@@ -316,6 +327,8 @@ class TutorialController extends ChangeNotifier {
     bowShotLanded = false;
     bowSiegeLanded = false;
     bowSupportLanded = false;
+    bowKiteLanded = false;
+    _bowKiteMovers.clear();
     notifyListeners();
   }
 
@@ -339,6 +352,8 @@ class TutorialController extends ChangeNotifier {
     bowShotLanded = false;
     bowSiegeLanded = false;
     bowSupportLanded = false;
+    bowKiteLanded = false;
+    _bowKiteMovers.clear();
     notifyListeners();
   }
 
@@ -359,6 +374,8 @@ class TutorialController extends ChangeNotifier {
     bowShotLanded = false;
     bowSiegeLanded = false;
     bowSupportLanded = false;
+    bowKiteLanded = false;
+    _bowKiteMovers.clear();
     notifyListeners();
   }
 
@@ -729,7 +746,7 @@ class TutorialController extends ChangeNotifier {
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.bowTeach;
-      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城，另一弓兵從後支援';
+      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城，另一弓兵從後支援，輪流走位牽制';
       tipSkippable = false;
       _openChapterSelect();
       notifyListeners();
@@ -763,8 +780,8 @@ class TutorialController extends ChangeNotifier {
   }
 
   /// Soft Lock Field1: standing bow auto-shot completed. 遠攻削敵 also wants
-  /// the 「速派單一弓兵攻城」 and 「另一弓兵從後支援」 beats, so a shot alone
-  /// does not clear it.
+  /// the 「速派單一弓兵攻城」, 「另一弓兵從後支援」, and 「輪流走位牽制」 beats,
+  /// so a shot alone does not clear it.
   void onBowShot() {
     if (!_bowBeatLive) return;
     if (bowShotLanded) return;
@@ -780,6 +797,24 @@ class TutorialController extends ChangeNotifier {
     bowSupportLanded = true;
     bowShotLanded = true;
     _afterBowBeat();
+  }
+
+  /// A standing bow's shot landed while own bow [mover] was on the move. The
+  /// beat lands once two different bows have each taken that turn.
+  void onBowKiteShot({required int mover}) {
+    if (!_bowBeatLive) return;
+    if (bowKiteLanded) return;
+    final firstTurn = _bowKiteMovers.add(mover);
+    bowShotLanded = true;
+    if (_bowKiteMovers.length >= 2) {
+      bowKiteLanded = true;
+      _afterBowBeat();
+      return;
+    }
+    if (!firstTurn) return;
+    tipText = '牽制到！輪流走位：換另一弓兵走位，停低嗰隻照射';
+    tipSkippable = false;
+    notifyListeners();
   }
 
   /// An own bow's 攻城中 gauge is up on the enemy castle and filling.
@@ -802,9 +837,9 @@ class TutorialController extends ChangeNotifier {
     _afterBowBeat();
   }
 
-  /// Clear on all three beats; otherwise point at the next missing one.
+  /// Clear on all four beats; otherwise point at the next missing one.
   void _afterBowBeat() {
-    if (bowShotLanded && bowSiegeLanded && bowSupportLanded) {
+    if (bowShotLanded && bowSiegeLanded && bowSupportLanded && bowKiteLanded) {
       _passBow();
       return;
     }
@@ -812,8 +847,10 @@ class TutorialController extends ChangeNotifier {
       tipText = bowSupportLanded
           ? '支援到！攻城中 — 停穩等倒數完（郁就停）'
           : '射中！速派單一弓兵攻城：拖弓兵入敵城門，停穩等「攻城中」倒數';
-    } else {
+    } else if (!bowSupportLanded) {
       tipText = '攻城得手！留喺城門再攻城，另一弓兵從後支援射敵';
+    } else {
+      tipText = '支援到！輪流走位牽制：拖一隻弓兵走位，另一隻停穩照射，再交換';
     }
     tipSkippable = false;
     notifyListeners();
