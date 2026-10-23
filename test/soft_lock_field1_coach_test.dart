@@ -39,6 +39,8 @@ void main() {
     expect(c.s2, S2Phase.bowTeach);
 
     c.onBowShot();
+    expect(c.s2, S2Phase.bowTeach, reason: '遠攻削敵 still wants 單一弓兵攻城');
+    c.onBowSiegeLanded();
     expect(c.s2, S2Phase.returnCity);
 
     c.skipTip();
@@ -121,11 +123,12 @@ void main() {
     g.dragTo = null;
 
     var guard = 0;
-    while (coach.s2 == S2Phase.bowTeach && guard < 500) {
+    while (!coach.bowShotLanded && guard < 500) {
       g.debugStepPursuit(1 / 60);
       guard++;
     }
-    expect(coach.s2, S2Phase.returnCity, reason: 'standing bow must advance Field1 coach');
+    expect(coach.bowShotLanded, isTrue, reason: 'standing bow must land the shot beat');
     expect(g.debugHitLabel, '射');
+    expect(coach.s2, S2Phase.bowTeach, reason: 'a shot alone does not clear 遠攻削敵');
   });
 }

@@ -96,6 +96,13 @@ class TutorialController extends ChangeNotifier {
   bool interceptDone = false;
   bool strategyOrReturnDone = false;
 
+  /// 遠攻削敵 beat one: a standing bow loosed on an enemy.
+  bool bowShotLanded = false;
+
+  /// 遠攻削敵 beat two (「速派單一弓兵攻城」): an own bow's 攻城中 countdown ran
+  /// out on the enemy castle. Reuses the siege gauge; no bow siege number.
+  bool bowSiegeLanded = false;
+
   /// Screenshot / debug: jump to clear-pass visuals.
   bool shotPassMode = false;
 
@@ -302,6 +309,8 @@ class TutorialController extends ChangeNotifier {
     facingCorrect = false;
     interceptDone = false;
     strategyOrReturnDone = false;
+    bowShotLanded = false;
+    bowSiegeLanded = false;
     notifyListeners();
   }
 
@@ -322,6 +331,8 @@ class TutorialController extends ChangeNotifier {
     facingCorrect = false;
     interceptDone = false;
     strategyOrReturnDone = false;
+    bowShotLanded = false;
+    bowSiegeLanded = false;
     notifyListeners();
   }
 
@@ -339,6 +350,8 @@ class TutorialController extends ChangeNotifier {
     facingCorrect = false;
     interceptDone = false;
     strategyOrReturnDone = false;
+    bowShotLanded = false;
+    bowSiegeLanded = false;
     notifyListeners();
   }
 
@@ -709,7 +722,7 @@ class TutorialController extends ChangeNotifier {
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.bowTeach;
-      tipText = '槍過關！下一招弓教學：點己方弓兵，停穩蓄勢自動射（唔好拖走）';
+      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城';
       tipSkippable = false;
       _openChapterSelect();
       notifyListeners();
@@ -734,16 +747,59 @@ class TutorialController extends ChangeNotifier {
   void onSelectBow() {
     if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
     if (chapterSelectOpen) return;
+    // After the shot, selecting the bow is the march to the enemy gate.
+    if (bowShotLanded && !bowSiegeLanded) return;
     tipText = '停穩 — 蓄勢亮咗就自動射（郁就取消）';
     tipSkippable = false;
     notifyListeners();
   }
 
-  /// Soft Lock Field1: standing bow auto-shot completed.
+  /// Soft Lock Field1: standing bow auto-shot completed. 遠攻削敵 also wants
+  /// the 「速派單一弓兵攻城」 beat, so a shot alone does not clear it.
   void onBowShot() {
-    if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
-    if (chapterSelectOpen) return;
-    if (!interceptDone) return;
+    if (!_bowBeatLive) return;
+    if (bowShotLanded) return;
+    bowShotLanded = true;
+    if (bowSiegeLanded) {
+      _passBow();
+      return;
+    }
+    tipText = '射中！速派單一弓兵攻城：拖弓兵入敵城門，停穩等「攻城中」倒數';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// An own bow's 攻城中 gauge is up on the enemy castle and filling.
+  void onBowSieging() {
+    if (!_bowBeatLive || bowSiegeLanded) return;
+    const tip = '攻城中 — 停穩等倒數完（郁就停）';
+    if (tipText == tip) return;
+    tipText = tip;
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// An own bow's 攻城中 countdown ran out and nicked the enemy castle.
+  void onBowSiegeLanded() {
+    if (!_bowBeatLive) return;
+    if (bowSiegeLanded) return;
+    bowSiegeLanded = true;
+    if (bowShotLanded) {
+      _passBow();
+      return;
+    }
+    tipText = '攻城得手！再停穩等弓自動射敵';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  bool get _bowBeatLive =>
+      session == TutorialSession.session2 &&
+      s2 == S2Phase.bowTeach &&
+      !chapterSelectOpen &&
+      interceptDone;
+
+  void _passBow() {
     s2 = S2Phase.returnCity;
     tipText = '弓過關！最後回城：拖任一己方入底「歸城區」';
     tipSkippable = false;
