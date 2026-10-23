@@ -16,6 +16,7 @@ import 'game/taisen_game.dart';
 import 'game/tutorial_controller.dart';
 import 'data/card_models.dart';
 import 'ui/card_detail_sheet.dart';
+import 'ui/morale_bar.dart';
 import 'ui/tutorial_lesson_rail.dart';
 
 /// dart-define: TUTORIAL_SHOT=s1pass|s2pass|s1aura|s2coach for Simulator captures.
@@ -1435,40 +1436,6 @@ class _MatchShellState extends State<MatchShell> {
   }
 }
 
-/// One printed 士氣 point. The count is [TaisenGame.matchMorale], not a 6/2 table.
-class _MoraleHex extends StatelessWidget {
-  const _MoraleHex();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      key: const Key('match-morale-pip'),
-      size: const Size(9, 10),
-      painter: _MoraleHexPainter(),
-    );
-  }
-}
-
-class _MoraleHexPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final path = Path()
-      ..moveTo(w * 0.5, 0)
-      ..lineTo(w, h * 0.25)
-      ..lineTo(w, h * 0.75)
-      ..lineTo(w * 0.5, h)
-      ..lineTo(0, h * 0.75)
-      ..lineTo(0, h * 0.25)
-      ..close();
-    canvas.drawPath(path, Paint()..color = FactionColors.gold);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 class _Hud extends StatelessWidget {
   const _Hud({required this.game, this.subtitle, this.bingfaLabel});
   final TaisenGame game;
@@ -1545,15 +1512,9 @@ class _Hud extends StatelessWidget {
                 child: ClipRect(
                   child: Align(
                     alignment: Alignment.centerRight,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var i = 0; i < game.matchMorale; i++)
-                          const Padding(
-                            padding: EdgeInsets.only(right: 2),
-                            child: _MoraleHex(),
-                          ),
-                      ],
+                    child: MoraleBar(
+                      morale: game.matchMorale,
+                      need: game.strategyMoraleNeed,
                     ),
                   ),
                 ),

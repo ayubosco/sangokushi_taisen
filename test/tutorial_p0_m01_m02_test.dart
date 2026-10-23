@@ -476,6 +476,9 @@ void main() {
     expect(find.byKey(const Key('match-morale')), findsOneWidget);
     expect(find.text('士氣 4'), findsOneWidget);
     expect(find.byKey(const Key('match-morale-pip')), findsNWidgets(4));
+    // 「士氣欄高亮提示計略所需士氣值」: the HUD bar lights the printed cost.
+    expect(find.byKey(const Key('match-morale-need')),
+        findsNWidgets(game.strategyMoraleNeed!));
     final seal = tester.widget<Material>(find.byKey(const Key('soft-pass-strategy-seal')));
     expect(seal.color, FactionColors.lacquer);
     expect(find.text('快馬突擊'), findsOneWidget);

@@ -907,6 +907,20 @@ class TutorialController extends ChangeNotifier {
     }
   }
 
+  /// 用計得宜: a caster's 計略範圍 is up and the HUD 士氣 bar lights its
+  /// printed cost (英傑「士氣欄高亮提示計略所需士氣值」). [ready] is false
+  /// while the pool is short of that cost. Tip only; the cast still clears.
+  void onStrategyPreview({required bool ready}) {
+    if (!strategyLessonLive) return;
+    final tip = ready
+        ? '士氣欄高亮 = 計略所需士氣 — 夠喇，撳計略放'
+        : '士氣唔夠 — 士氣欄高亮未滿，等士氣回復先放計略';
+    if (tipText == tip) return;
+    tipText = tip;
+    tipSkippable = false;
+    notifyListeners();
+  }
+
   /// 歸城: an own living body parked in 歸城區. On 回城 this starts the
   /// 回城回血再出 loop; it does not clear the step by itself.
   void onReturnCity([int body = 0]) {
