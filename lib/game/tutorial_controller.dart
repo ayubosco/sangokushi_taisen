@@ -37,7 +37,8 @@ enum S2Phase {
   failRetry,
   /// Soft Lock Field1: stand bow → 蓄勢 → 射 (after a geometry 槍 Pass).
   bowTeach,
-  /// Soft Lock Field1: drag own into 歸城區 (after 弓). Was strategyOrReturn either/or.
+  /// Soft Lock Field1 回城 (after 弓): 歸城 → 回血 → 出陣 on one own body.
+  /// Was strategyOrReturn either/or, then a bare 歸城區 touch.
   returnCity,
   /// 英傑 stage 5 用計得宜: preview the caster's range, then cast and spend
   /// the printed 士氣. The cast clears the tutorial (after 回城).
@@ -117,6 +118,16 @@ class TutorialController extends ChangeNotifier {
 
   /// How many own bows have taken their 走位 turn so far.
   int get bowKiteTurns => _bowKiteMovers.length;
+
+  /// 回城 beat one (歸城): an own living body parked in 歸城區.
+  bool returnParked = false;
+
+  /// 回城 beat two (回血): the parked body is back to full HP. Reuses the
+  /// existing in-castle heal; a full body lands this on the park.
+  bool returnHealed = false;
+
+  /// The body that owns the 回城 loop. The latest park takes it over.
+  int? returnBody;
 
   /// Screenshot / debug: jump to clear-pass visuals.
   bool shotPassMode = false;
@@ -329,6 +340,7 @@ class TutorialController extends ChangeNotifier {
     bowSupportLanded = false;
     bowKiteLanded = false;
     _bowKiteMovers.clear();
+    _clearReturnLoop();
     notifyListeners();
   }
 
@@ -354,6 +366,7 @@ class TutorialController extends ChangeNotifier {
     bowSupportLanded = false;
     bowKiteLanded = false;
     _bowKiteMovers.clear();
+    _clearReturnLoop();
     notifyListeners();
   }
 
@@ -376,6 +389,7 @@ class TutorialController extends ChangeNotifier {
     bowSupportLanded = false;
     bowKiteLanded = false;
     _bowKiteMovers.clear();
+    _clearReturnLoop();
     notifyListeners();
   }
 
@@ -864,7 +878,7 @@ class TutorialController extends ChangeNotifier {
 
   void _passBow() {
     s2 = S2Phase.returnCity;
-    tipText = '弓過關！最後回城：拖任一己方入底「歸城區」';
+    tipText = '弓過關！最後回城：拖任一己方入底「歸城區」回血，再拖出出陣';
     tipSkippable = false;
     notifyListeners();
   }
@@ -893,21 +907,71 @@ class TutorialController extends ChangeNotifier {
     }
   }
 
-  void onReturnCity() {
+  /// 歸城: an own living body parked in 歸城區. On 回城 this starts the
+  /// 回城回血再出 loop; it does not clear the step by itself.
+  void onReturnCity([int body = 0]) {
     if (session != TutorialSession.session2) return;
     if (s2 != S2Phase.returnCity && s2 != S2Phase.strategyOrReturn) return;
     if (!interceptDone) return;
-    strategyOrReturnDone = true;
     if (s2 == S2Phase.strategyOrReturn) {
       // Shot stills keep the old either/or close.
+      strategyOrReturnDone = true;
       _passS2();
       return;
     }
+    if (chapterSelectOpen) return;
+    if (returnParked && returnBody == body) return;
+    returnParked = true;
+    returnHealed = false;
+    returnBody = body;
+    tipText = '歸城！停喺城內回血，睇血條回滿';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// 回血: the parked 回城 body is back to full HP.
+  void onReturnHealed(int body) {
+    if (!_returnLoopLive || !returnParked || returnHealed) return;
+    if (body != returnBody) return;
+    returnHealed = true;
+    tipText = '回血滿！拖出歸城區出陣，等「出城」準備完';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// The 回城 body crossed the exit line into 出城準備. Leaving before the
+  /// heal is full drops the loop back to 歸城.
+  void onReturnLeftCastle(int body) {
+    if (!_returnLoopLive || !returnParked || body != returnBody) return;
+    if (returnHealed) return;
+    _clearReturnLoop();
+    tipText = '未回滿血就出城 — 再拖返歸城區回血';
+    tipSkippable = false;
+    notifyListeners();
+  }
+
+  /// 出陣: the healed 回城 body finished 出城準備 and is back on the field.
+  /// Clears 回城 and opens 用計得宜.
+  void onReturnSortied(int body) {
+    if (!_returnLoopLive || !returnHealed || body != returnBody) return;
+    strategyOrReturnDone = true;
     s2 = S2Phase.strategyTeach;
     tipText = '回城過關！最後用計得宜：點武將睇計略範圍，消耗士氣放計略';
     tipSkippable = false;
     _openChapterSelect();
     notifyListeners();
+  }
+
+  bool get _returnLoopLive =>
+      session == TutorialSession.session2 &&
+      s2 == S2Phase.returnCity &&
+      !chapterSelectOpen &&
+      interceptDone;
+
+  void _clearReturnLoop() {
+    returnParked = false;
+    returnHealed = false;
+    returnBody = null;
   }
 
   void _passS2() {

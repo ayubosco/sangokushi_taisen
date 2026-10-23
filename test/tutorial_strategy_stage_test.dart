@@ -4,6 +4,7 @@ import 'package:sangokushi_taisen/game/tutorial_controller.dart';
 import 'package:sangokushi_taisen/ui/tutorial_lesson_rail.dart';
 
 import 'feel_gates_test.dart' show readyGame;
+import 'tutorial_return_rail_test.dart' show walkReturnLoop;
 
 /// 英傑 戰鬥教學 stage 5 用計得宜: select a general to see its 計略範圍,
 /// then cast and spend the printed 士氣. Soft Lock runs it after 回城.
@@ -22,7 +23,11 @@ void main() {
     expect(c.lessons.last.gate, TutorialLessonGate.locked,
         reason: '用計得宜 stays locked until 回城 clears');
 
-    c.onReturnCity();
+    c.onReturnCity(0);
+    expect(c.s2, S2Phase.returnCity, reason: '歸城 alone is not 回城');
+    c.onReturnHealed(0);
+    expect(c.s2, S2Phase.returnCity, reason: '回血 still owes 出陣');
+    c.onReturnSortied(0);
     expect(c.s2, S2Phase.strategyTeach);
     expect(c.lessons.firstWhere((l) => l.id == 'return').gate, TutorialLessonGate.done);
     expect(c.lessons.last.gate, TutorialLessonGate.current);
@@ -39,7 +44,7 @@ void main() {
     expect(c.s2, S2Phase.tipDone);
   });
 
-  test('回城 park opens 用計得宜 on a fresh lesson pool; the cast clears it', () {
+  test('回城 loop opens 用計得宜 on a fresh lesson pool; the cast clears it', () {
     final coach = TutorialController()..resetToSession2();
     final g = readyGame(tutorial: coach);
     g.setupSession2Field();
@@ -54,7 +59,8 @@ void main() {
     expect(coach.s2, S2Phase.returnCity);
     expect(g.matchMorale, lessThan(seeded));
 
-    g.triggerReturnCityFx();
+    // 回城 clears on the full 歸城 → 回血 → 出陣 loop, not a touch.
+    walkReturnLoop(g, 1);
     expect(coach.s2, S2Phase.strategyTeach);
     expect(g.matchMorale, seeded, reason: 'lesson pool, not a regen rate');
     expect(g.strategyPreviewVisible, isFalse);
@@ -100,7 +106,9 @@ void main() {
     ));
     expect(find.byKey(const Key('tutorial-lesson-lock-strategy')), findsOneWidget);
 
-    c.onReturnCity();
+    c.onReturnCity(0);
+    c.onReturnHealed(0);
+    c.onReturnSortied(0);
     await tester.pump();
     expect(find.byKey(const Key('tutorial-lesson-lock-strategy')), findsNothing);
     expect(
