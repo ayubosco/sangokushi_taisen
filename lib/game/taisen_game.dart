@@ -4971,6 +4971,7 @@ class TaisenGame extends FlameGame {
         if (_lifeAt(i) != UnitLife.alive) return;
         selectedIndex = i;
         _openStrategyPreview(i);
+        _syncStrategyMoraleTip();
         onTutorialChanged?.call();
         return;
       }
@@ -6684,6 +6685,20 @@ class TaisenGame extends FlameGame {
     return '${card.strategyName} 士氣${card.strategyMorale} 智力${card.intel}';
   }
 
+  /// 英傑 「士氣欄高亮提示計略所需士氣值」: the printed 士氣 the previewed
+  /// caster's 計略 needs, which the HUD bar lights. Null with no range up.
+  int? get strategyMoraleNeed {
+    final caster = _strategyPreviewCaster;
+    if (caster == null) return null;
+    return strategyMoraleCostAt(caster);
+  }
+
+  /// The previewed 計略 is affordable from the current pool.
+  bool get strategyMoraleReady {
+    final need = strategyMoraleNeed;
+    return need != null && matchMorale >= need;
+  }
+
   bool strategyPreviewContains(Offset fieldPoint) {
     final caster = _strategyPreviewCaster;
     if (caster == null) return false;
@@ -6741,6 +6756,15 @@ class TaisenGame extends FlameGame {
     _moraleRegenCarry -= whole;
     matchMorale = math.min(_matchMoraleCap, matchMorale + whole);
     if (matchMorale >= _matchMoraleCap) _moraleRegenCarry = 0;
+    _syncStrategyMoraleTip();
+  }
+
+  /// 用計得宜: tells the coach whether the lit 士氣 cost is covered yet.
+  /// Runs on the range tap and on each regen point. No-op off that step.
+  void _syncStrategyMoraleTip() {
+    final t = tutorial;
+    if (t == null || !t.strategyLessonLive || strategyMoraleNeed == null) return;
+    t.onStrategyPreview(ready: strategyMoraleReady);
   }
 
   void debugAdvanceMoraleRegen(double dt) => _tickMoraleRegen(dt);
