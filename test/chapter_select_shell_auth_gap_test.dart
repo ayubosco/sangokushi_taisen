@@ -104,6 +104,9 @@ void main() {
     c.onBowSiegeLanded();
     expect(c.s2, S2Phase.bowTeach);
     c.onBowSupportShot();
+    expect(c.s2, S2Phase.bowTeach);
+    c.onBowKiteShot(mover: 1);
+    c.onBowKiteShot(mover: 4);
     expect(c.s2, S2Phase.returnCity);
     expect(c.chapterSelectOpen, isFalse, reason: '回城 is not a 英傑 stage');
   });

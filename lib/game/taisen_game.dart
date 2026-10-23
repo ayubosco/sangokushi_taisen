@@ -6500,8 +6500,20 @@ class TaisenGame extends FlameGame {
       } else {
         coach.onBowShot();
       }
+      final mover = _bowKiteMover(i);
+      if (mover != null) coach.onBowKiteShot(mover: mover);
       onTutorialChanged?.call();
     }
+  }
+
+  /// 「輪流走位牽制」: another live own bow is on the move while bow [i]
+  /// looses. Reuses the standing-fire gate; no new range, speed, or number.
+  int? _bowKiteMover(int i) {
+    final o = selectedIndex;
+    if (o == null || o == i || o >= field.length) return null;
+    if (isEnemyAt(o) || field[o].troop != TroopType.bow) return null;
+    if (_lifeAt(o) != UnitLife.alive || !_bowIsMoving(o)) return null;
+    return o;
   }
 
   /// 「另一弓兵從後支援」: this bow shot from outside the enemy castle while
