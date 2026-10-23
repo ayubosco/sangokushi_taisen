@@ -359,6 +359,9 @@ class TaisenGame extends FlameGame {
   final List<UnitLife> _unitLife = [];
   /// Seconds left on the revive countdown. Frozen while the body is outside 己城.
   final List<double> _reviveLeft = [];
+  /// Retreated bodies inside 己城 on the last life tick. A new entry is the
+  /// revive-path 歸城 beat on the 回城 rail.
+  final Set<int> _reviveInCastle = {};
   /// Match 士氣 pool. A cast spends the caster's printed [CardFace.strategyMorale].
   /// Retreat still subtracts only [kRetreatMoraleCost]. Recovers over time up to
   /// [matchMoraleCap] (英傑 tip). The rate is [kMoraleRegenCPerPoint] (Adapted).
@@ -1395,6 +1398,7 @@ class TaisenGame extends FlameGame {
     _hpCause.clear();
     _unitLife.clear();
     _reviveLeft.clear();
+    _reviveInCastle.clear();
     _ransenUnits.clear();
     _meleeEnemyIndex = null;
     _chargeResolvedThisContact = false;
@@ -5456,6 +5460,21 @@ class TaisenGame extends FlameGame {
     _reviveLeft[i] = 0;
     _unitHp[i] = kRansenMaxHp;
     _unitLife[i] = UnitLife.readyRedeploy;
+    _reviveInCastle.remove(i);
+    // 回城 rail: the revive refills HP, so it is the 回血 beat.
+    _stepReturnRail((t) => t.onReturnHealed(i));
+  }
+
+  /// 回城 rail: a retreated body that enters 己城 is the 歸城 beat. Fires on
+  /// entry only, so a later park by another body keeps the loop.
+  void _noteReviveInCastle(int i, bool inCastle) {
+    if (!inCastle) {
+      _reviveInCastle.remove(i);
+      return;
+    }
+    if (_reviveInCastle.add(i)) {
+      _stepReturnRail((t) => t.onReturnReviving(i));
+    }
   }
 
   /// Adapted prep at 槍 speed, scaled by wiki open speed. Not Official seconds.
@@ -5561,12 +5580,14 @@ class TaisenGame extends FlameGame {
           }
           break;
         case UnitLife.retreating:
+          _noteReviveInCastle(i, inCastle);
           if (!inCastle) break;
           _unitLife[i] = UnitLife.inCastleReviving;
           _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
           if (_reviveLeft[i] <= 0) _finishRevive(i);
           break;
         case UnitLife.inCastleReviving:
+          _noteReviveInCastle(i, inCastle);
           if (!inCastle) break;
           _reviveLeft[i] = math.max(0, _reviveLeft[i] - dt);
           if (_reviveLeft[i] <= 0) _finishRevive(i);

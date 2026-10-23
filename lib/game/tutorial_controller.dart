@@ -119,11 +119,13 @@ class TutorialController extends ChangeNotifier {
   /// How many own bows have taken their 走位 turn so far.
   int get bowKiteTurns => _bowKiteMovers.length;
 
-  /// 回城 beat one (歸城): an own living body parked in 歸城區.
+  /// 回城 beat one (歸城): an own living body parked in 歸城區, or a
+  /// retreated body that entered 己城 (revive path).
   bool returnParked = false;
 
   /// 回城 beat two (回血): the parked body is back to full HP. Reuses the
-  /// existing in-castle heal; a full body lands this on the park.
+  /// existing in-castle heal, or the end of the revive countdown; a full body
+  /// lands this on the park.
   bool returnHealed = false;
 
   /// The body that owns the 回城 loop. The latest park takes it over.
@@ -933,12 +935,24 @@ class TutorialController extends ChangeNotifier {
       _passS2();
       return;
     }
+    _startReturnLoop(body, '歸城！停喺城內回血，睇血條回滿');
+  }
+
+  /// Revive-path 歸城: a retreated own body entered 己城. The revive
+  /// countdown refills HP, so its end is the 回血 beat; 出陣 follows as for a
+  /// living body.
+  void onReturnReviving(int body) {
+    if (!_returnLoopLive) return;
+    _startReturnLoop(body, '撤退歸城！停喺城內等復活倒數完');
+  }
+
+  void _startReturnLoop(int body, String tip) {
     if (chapterSelectOpen) return;
     if (returnParked && returnBody == body) return;
     returnParked = true;
     returnHealed = false;
     returnBody = body;
-    tipText = '歸城！停喺城內回血，睇血條回滿';
+    tipText = tip;
     tipSkippable = false;
     notifyListeners();
   }
