@@ -103,6 +103,10 @@ class TutorialController extends ChangeNotifier {
   /// out on the enemy castle. Reuses the siege gauge; no bow siege number.
   bool bowSiegeLanded = false;
 
+  /// 遠攻削敵 beat three (「另一弓兵從後支援」): a bow outside the enemy castle
+  /// landed a shot while another own bow stood in it. Also counts as the shot.
+  bool bowSupportLanded = false;
+
   /// Screenshot / debug: jump to clear-pass visuals.
   bool shotPassMode = false;
 
@@ -311,6 +315,7 @@ class TutorialController extends ChangeNotifier {
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
+    bowSupportLanded = false;
     notifyListeners();
   }
 
@@ -333,6 +338,7 @@ class TutorialController extends ChangeNotifier {
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
+    bowSupportLanded = false;
     notifyListeners();
   }
 
@@ -352,6 +358,7 @@ class TutorialController extends ChangeNotifier {
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
+    bowSupportLanded = false;
     notifyListeners();
   }
 
@@ -722,7 +729,7 @@ class TutorialController extends ChangeNotifier {
     if (facingWasCorrect && facingCorrect) {
       interceptDone = true;
       s2 = S2Phase.bowTeach;
-      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城';
+      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城，另一弓兵從後支援';
       tipSkippable = false;
       _openChapterSelect();
       notifyListeners();
@@ -747,32 +754,40 @@ class TutorialController extends ChangeNotifier {
   void onSelectBow() {
     if (session != TutorialSession.session2 || s2 != S2Phase.bowTeach) return;
     if (chapterSelectOpen) return;
-    // After the shot, selecting the bow is the march to the enemy gate.
-    if (bowShotLanded && !bowSiegeLanded) return;
+    // After any beat, selecting a bow is the march to the gate or the
+    // back-rank support. Keep the beat tip.
+    if (bowShotLanded || bowSiegeLanded) return;
     tipText = '停穩 — 蓄勢亮咗就自動射（郁就取消）';
     tipSkippable = false;
     notifyListeners();
   }
 
   /// Soft Lock Field1: standing bow auto-shot completed. 遠攻削敵 also wants
-  /// the 「速派單一弓兵攻城」 beat, so a shot alone does not clear it.
+  /// the 「速派單一弓兵攻城」 and 「另一弓兵從後支援」 beats, so a shot alone
+  /// does not clear it.
   void onBowShot() {
     if (!_bowBeatLive) return;
     if (bowShotLanded) return;
     bowShotLanded = true;
-    if (bowSiegeLanded) {
-      _passBow();
-      return;
-    }
-    tipText = '射中！速派單一弓兵攻城：拖弓兵入敵城門，停穩等「攻城中」倒數';
-    tipSkippable = false;
-    notifyListeners();
+    _afterBowBeat();
+  }
+
+  /// A back-rank bow's shot landed while another own bow was in the enemy
+  /// castle.
+  void onBowSupportShot() {
+    if (!_bowBeatLive) return;
+    if (bowSupportLanded) return;
+    bowSupportLanded = true;
+    bowShotLanded = true;
+    _afterBowBeat();
   }
 
   /// An own bow's 攻城中 gauge is up on the enemy castle and filling.
   void onBowSieging() {
     if (!_bowBeatLive || bowSiegeLanded) return;
-    const tip = '攻城中 — 停穩等倒數完（郁就停）';
+    final tip = bowSupportLanded
+        ? '攻城中 — 停穩等倒數完（郁就停）'
+        : '攻城中 — 另一弓兵從後支援：後排弓停穩自動射';
     if (tipText == tip) return;
     tipText = tip;
     tipSkippable = false;
@@ -784,11 +799,22 @@ class TutorialController extends ChangeNotifier {
     if (!_bowBeatLive) return;
     if (bowSiegeLanded) return;
     bowSiegeLanded = true;
-    if (bowShotLanded) {
+    _afterBowBeat();
+  }
+
+  /// Clear on all three beats; otherwise point at the next missing one.
+  void _afterBowBeat() {
+    if (bowShotLanded && bowSiegeLanded && bowSupportLanded) {
       _passBow();
       return;
     }
-    tipText = '攻城得手！再停穩等弓自動射敵';
+    if (!bowSiegeLanded) {
+      tipText = bowSupportLanded
+          ? '支援到！攻城中 — 停穩等倒數完（郁就停）'
+          : '射中！速派單一弓兵攻城：拖弓兵入敵城門，停穩等「攻城中」倒數';
+    } else {
+      tipText = '攻城得手！留喺城門再攻城，另一弓兵從後支援射敵';
+    }
     tipSkippable = false;
     notifyListeners();
   }

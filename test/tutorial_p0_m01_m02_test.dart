@@ -293,7 +293,11 @@ void main() {
     final bow = g.field[1];
     expect(spear.strategyMorale, greaterThan(0));
     expect(bow.strategyMorale, isNot(spear.strategyMorale));
-    expect(g.matchMorale, spear.strategyMorale + bow.strategyMorale);
+    // 場2 also seats the 「另一弓兵從後支援」 back-rank bow; its printed cost seeds too.
+    final support = g.field[4];
+    expect(support.troop, TroopType.bow);
+    expect(g.matchMorale,
+        spear.strategyMorale + bow.strategyMorale + support.strategyMorale);
     expect(g.strategyPreviewVisible, isTrue);
     expect(
       g.strategyPreviewCaption,
@@ -314,7 +318,7 @@ void main() {
     expect(g.castStrategyOnMap(inside), isTrue);
     expect(g.strategyPreviewVisible, isFalse, reason: 'cast clears the range ring');
     expect(g.debugStrategyBeamTo, inside);
-    expect(g.matchMorale, bow.strategyMorale);
+    expect(g.matchMorale, bow.strategyMorale + support.strategyMorale);
     expect(g.debugStrategyCastAt, inside);
     expect(g.debugStrategyBeamFrom, center);
     expect(g.debugHitLabel, isNot('雷擊'));
@@ -322,7 +326,7 @@ void main() {
     expect(g.debugUnitHp(2), enemyHp);
 
     expect(g.castStrategyFlick(), isFalse, reason: 'the ring stays down until another select');
-    expect(g.matchMorale, bow.strategyMorale);
+    expect(g.matchMorale, bow.strategyMorale + support.strategyMorale);
 
     g.selectOrDetailAt(g.tokenCenter(1));
     final bowCost = g.field[1].strategyMorale;
@@ -330,7 +334,7 @@ void main() {
     expect(g.strategyPreviewCaption, contains('士氣$bowCost'));
     expect(g.castStrategyFlick(), isTrue);
     expect(g.strategyPreviewVisible, isFalse);
-    expect(g.matchMorale, 0);
+    expect(g.matchMorale, support.strategyMorale);
     expect(g.debugStrategyCastAt, g.tokenCenter(1));
     expect(g.debugUnitHp(2), enemyHp);
 
@@ -339,7 +343,7 @@ void main() {
     g.cancelStrategyPreview();
     expect(g.strategyPreviewVisible, isFalse);
     expect(g.castStrategyAtSelected(), isFalse);
-    expect(g.matchMorale, 0);
+    expect(g.matchMorale, support.strategyMorale);
     g.selectOrDetailAt(g.tokenCenter(0));
     expect(g.strategyPreviewVisible, isTrue);
     g.selectOrDetailAt(Offset(4, g.watchH + 4));

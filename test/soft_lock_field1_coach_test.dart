@@ -41,6 +41,8 @@ void main() {
     c.onBowShot();
     expect(c.s2, S2Phase.bowTeach, reason: '遠攻削敵 still wants 單一弓兵攻城');
     c.onBowSiegeLanded();
+    expect(c.s2, S2Phase.bowTeach, reason: '遠攻削敵 still wants 另一弓兵從後支援');
+    c.onBowSupportShot();
     expect(c.s2, S2Phase.returnCity);
 
     c.skipTip();

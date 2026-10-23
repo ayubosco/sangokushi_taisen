@@ -6,10 +6,13 @@ import 'package:sangokushi_taisen/game/tutorial_controller.dart';
 import 'feel_gates_test.dart' show readyGame;
 
 /// 英傑 stage 4 遠攻削敵 lesson flow. Observed-from-英傑 (AUTH-GAP §3): the
-/// stage cue is「速派單一弓兵攻城」— one archer on the enemy gate shows
-/// 「攻城中」+ countdown. The lesson clears on a standing shot plus that siege
-/// beat, in either order. The siege reuses the existing gauge, fill rate, and
-/// gate nick. No bow siege number is invented. Not a Feel Pass.
+/// stage cues are「速派單一弓兵攻城」— one archer on the enemy gate shows
+/// 「攻城中」+ countdown — and「另一弓兵從後支援」— a second archer shoots from
+/// the back rank while the first holds the gate. The lesson clears on a
+/// standing shot, that siege beat, and the support shot, in any order. The
+/// siege reuses the existing gauge, fill rate, and gate nick; the support shot
+/// reuses the existing standing shot and range. No bow number is invented.
+/// Not a Feel Pass.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -44,21 +47,58 @@ void main() {
       expect(c.s2, S2Phase.bowTeach);
     });
 
-    test('shot then siege clears to 回城', () {
+    test('shot then siege waits for 另一弓兵從後支援, then clears to 回城', () {
       final c = bowCoach()
         ..onBowShot()
         ..onBowSiegeLanded();
+      expect(c.s2, S2Phase.bowTeach);
+      expect(c.tipText, contains('另一弓兵從後支援'));
+      c.onBowSupportShot();
       expect(c.s2, S2Phase.returnCity);
       expect(c.lessons.firstWhere((l) => l.id == 'bow').gate,
           TutorialLessonGate.done);
     });
 
-    test('siege then shot also clears; either beat alone does not', () {
+    test('siege then a plain shot does not clear; the support shot does', () {
       final c = bowCoach()..onBowSiegeLanded();
       expect(c.s2, S2Phase.bowTeach);
       expect(c.tipText, contains('射'));
       c.onBowShot();
+      expect(c.s2, S2Phase.bowTeach);
+      c.onBowSupportShot();
       expect(c.s2, S2Phase.returnCity);
+    });
+
+    test('support then siege clears; the support shot also counts as the shot', () {
+      final c = bowCoach()..onBowSupportShot();
+      expect(c.bowShotLanded, isTrue);
+      expect(c.bowSupportLanded, isTrue);
+      expect(c.s2, S2Phase.bowTeach);
+      expect(c.tipText, contains('攻城中'));
+      c.onBowSiegeLanded();
+      expect(c.s2, S2Phase.returnCity);
+    });
+
+    test('攻城中 asks for the support bow until it has shot', () {
+      final c = bowCoach()..onBowShot();
+      c.onBowSieging();
+      expect(c.tipText, contains('另一弓兵從後支援'));
+      c.onBowSupportShot();
+      c.onBowSieging();
+      expect(c.tipText, isNot(contains('另一弓兵從後支援')));
+      expect(c.tipText, contains('攻城中'));
+    });
+
+    test('the stage intro names all three 遠攻削敵 cues', () {
+      final c = TutorialController()..resetToSession2();
+      c.s2 = S2Phase.interceptHit;
+      c.turnWindowOpen = true;
+      c.facingCorrect = true;
+      c.onAutoIntercept(facingWasCorrect: true);
+      expect(c.s2, S2Phase.bowTeach);
+      expect(c.tipText, contains('停穩自動射'));
+      expect(c.tipText, contains('速派單一弓兵攻城'));
+      expect(c.tipText, contains('另一弓兵從後支援'));
     });
 
     test('selecting the bow after the shot keeps the siege tip', () {
@@ -72,23 +112,26 @@ void main() {
       final c = bowCoach()..chapterSelectOpen = true;
       c.onBowShot();
       c.onBowSiegeLanded();
+      c.onBowSupportShot();
       expect(c.bowShotLanded, isFalse);
       expect(c.bowSiegeLanded, isFalse);
+      expect(c.bowSupportLanded, isFalse);
       expect(c.s2, S2Phase.bowTeach);
     });
 
     test('a stage reset clears both beats', () {
       final c = bowCoach()
-        ..onBowShot()
+        ..onBowSupportShot()
         ..onBowSiegeLanded();
       c.resetToSession2();
       expect(c.bowShotLanded, isFalse);
       expect(c.bowSiegeLanded, isFalse);
+      expect(c.bowSupportLanded, isFalse);
     });
   });
 
   group('game loop', () {
-    test('own bow on the enemy gate runs 攻城中, then the countdown clears the stage', () {
+    test('own bow on the enemy gate runs 攻城中, then the countdown lands the siege beat', () {
       final coach = bowCoach()..onBowShot();
       final g = readyGame(tutorial: coach);
       g.setupSession2Field();
@@ -103,13 +146,76 @@ void main() {
       expect(coach.tipText, contains('攻城中'));
       expect(coach.s2, S2Phase.bowTeach);
 
-      final guard = _stepUntil(g, () => coach.s2 != S2Phase.bowTeach);
-      expect(coach.s2, S2Phase.returnCity);
+      final guard = _stepUntil(g, () => coach.bowSiegeLanded);
       expect(coach.bowSiegeLanded, isTrue);
+      expect(coach.s2, S2Phase.bowTeach, reason: 'no support shot yet');
+      expect(coach.tipText, contains('另一弓兵從後支援'));
       expect(g.enemyCastle, closeTo(castle - TaisenGame.kSiegeGateNick, 1e-6));
       // Same fill rate as 攻城. No bow-only siege time.
       expect(guard / 60.0,
           closeTo(1 / TaisenGame.kSiegePrepFillPerSec, 2 / 60.0));
+    });
+
+    test('場2 seats a second own bow behind the first; slots keep their indices', () {
+      final g = readyGame();
+      g.setupSession2Field();
+      expect(g.field[0].troop, TroopType.spear);
+      expect(g.field[1].troop, TroopType.bow);
+      expect(g.fieldIsEnemy.sublist(0, 4), [false, false, true, true]);
+      expect(g.tutorialEnemyIndex, 2);
+      final support = g.field.length - 1;
+      expect(support, 4);
+      expect(g.fieldIsEnemy[support], isFalse);
+      expect(g.field[support].troop, TroopType.bow);
+      expect(g.field[support].id, isNot(g.field[1].id));
+      // Back rank: nearer the own castle than the first bow, outside its band.
+      expect(g.fieldPos[support].dy, greaterThan(g.fieldPos[1].dy));
+      expect(g.inCastleBand(g.fieldPos[support]), isFalse);
+      expect(g.inEnemyCastleZone(support), isFalse);
+    });
+
+    test('two standing bows take turns instead of resetting each other', () {
+      final g = readyGame();
+      g.setupSession2Field();
+      _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
+      final shooters = <int>{};
+      _stepUntil(g, () {
+        final a = g.debugBowAttackIndex;
+        if (a != null) shooters.add(a);
+        return shooters.length >= 2;
+      }, max: 1200);
+      expect(shooters, {1, 3}, reason: 'both own bows loose arrows');
+    });
+
+    test('one bow on the gate, the back-rank bow shoots: 遠攻削敵 clears', () {
+      final coach = bowCoach();
+      final g = readyGame(tutorial: coach);
+      g.setupSession2Field();
+      _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
+      const gateBow = 1;
+      final supportBow = g.field.length - 1;
+      _parkAt(g, gateBow, _enemyGate(g));
+      g.selectedIndex = null;
+
+      _stepUntil(g, () => coach.bowSupportLanded, max: 600);
+      expect(coach.bowSupportLanded, isTrue);
+      expect(coach.bowShotLanded, isTrue);
+      expect(g.inEnemyCastleZone(supportBow), isFalse);
+
+      _stepUntil(g, () => coach.s2 != S2Phase.bowTeach);
+      expect(coach.bowSiegeLanded, isTrue);
+      expect(coach.s2, S2Phase.returnCity);
+    });
+
+    test('a shot with no own bow in the enemy castle is not the support beat', () {
+      final coach = bowCoach();
+      final g = readyGame(tutorial: coach);
+      g.setupSession2Field();
+      _dropEnemy(g, 2);
+      _stepUntil(g, () => coach.bowShotLanded, max: 600);
+      expect(coach.bowShotLanded, isTrue);
+      expect(coach.bowSupportLanded, isFalse);
+      expect(coach.s2, S2Phase.bowTeach);
     });
 
     test('a spear in the enemy zone is not the siege beat', () {
@@ -157,6 +263,14 @@ int _ownBow(TaisenGame g) {
     if (!g.fieldIsEnemy[i] && g.field[i].troop == TroopType.bow) return i;
   }
   throw StateError('no own bow on the 場2 field');
+}
+
+void _dropEnemy(TaisenGame g, int i) {
+  assert(g.fieldIsEnemy[i]);
+  g.field.removeAt(i);
+  g.fieldPos.removeAt(i);
+  g.fieldIsEnemy.removeAt(i);
+  g.fieldInCastle.removeAt(i);
 }
 
 /// Drop the enemy bodies so no shot, 亂戰, or opposing bow muddies the beat.
