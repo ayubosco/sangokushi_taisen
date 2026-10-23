@@ -6257,9 +6257,29 @@ class TaisenGame extends FlameGame {
         _siegePrep[i] = 0;
         _siegePrepsLanded[i] += 1;
         _nickCastleFromSiege(i);
+        _noteTutorialBowSiege(i, landed: true);
       } else {
         _siegePrep[i] = next;
+        _noteTutorialBowSiege(i, landed: false);
       }
+    }
+  }
+
+  /// 遠攻削敵「速派單一弓兵攻城」: an own bow filling or finishing 攻城中 on
+  /// the enemy castle is the lesson's siege beat. Same gauge, no new number.
+  void _noteTutorialBowSiege(int i, {required bool landed}) {
+    final coach = tutorial;
+    if (coach == null || !coach.bowLessonLive) return;
+    if (isEnemyAt(i) || field[i].troop != TroopType.bow) return;
+    final tipBefore = coach.tipText;
+    final phaseBefore = coach.s2;
+    if (landed) {
+      coach.onBowSiegeLanded();
+    } else {
+      coach.onBowSieging();
+    }
+    if (coach.tipText != tipBefore || coach.s2 != phaseBefore) {
+      onTutorialChanged?.call();
     }
   }
 

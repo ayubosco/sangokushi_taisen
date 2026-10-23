@@ -71,6 +71,8 @@ void main() {
     expect(c.s2, S2Phase.bowTeach);
 
     c.onBowShot();
+    expect(c.s2, S2Phase.bowTeach);
+    c.onBowSiegeLanded();
     expect(c.s2, S2Phase.returnCity);
     expect(c.bowLessonLive, isFalse);
     expect(c.bowLessonUnlocked, isTrue);
@@ -216,6 +218,7 @@ void main() {
     );
 
     s2.onBowShot();
+    s2.onBowSiegeLanded();
     await tester.pump();
     expect(s2.lessons.firstWhere((l) => l.id == 'return').current, isTrue);
     expect(

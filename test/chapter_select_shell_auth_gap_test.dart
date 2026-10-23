@@ -100,6 +100,8 @@ void main() {
     expect(c.chapterSelectOpen, isFalse);
     expect(c.bowLessonLive, isTrue);
     c.onBowShot();
+    expect(c.s2, S2Phase.bowTeach);
+    c.onBowSiegeLanded();
     expect(c.s2, S2Phase.returnCity);
     expect(c.chapterSelectOpen, isFalse, reason: '回城 is not a 英傑 stage');
   });
