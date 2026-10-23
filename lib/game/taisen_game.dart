@@ -21,6 +21,10 @@ enum AWindowKind { charge, intercept, bow, stratagem }
 /// Watch read of the live spear tip. Same flags as the field. Not a new hit.
 enum WatchTipMirror { idle, gold, scrape, clear }
 
+/// SGE-06. Which part of the enemy castle face a sieging body is on.
+/// The gate takes the bigger nick (AC1「2倍近い」as a qualitative bar only).
+enum SiegeFace { gate, wall }
+
 /// Offline 1v1 CPU stub — short watch (read-only) + large flat 2D field.
 /// H0 A: Watch 0.12–0.13 of the game band; draggable field ≥0.87. Ortho 1:1.
 /// 3D/perspective ONLY in watch; playfield = gold-border tokens / weapon corners / flat FX.
@@ -247,7 +251,7 @@ class TaisenGame extends FlameGame {
   /// gate / wall while the gauge is up. Empty outside the zone.
   String debugSiegeFace(int i) {
     if (!debugSiegePrepVisible(i)) return '';
-    return _siegeOnGate(fieldPos[i]) ? 'gate' : 'wall';
+    return siegeFaceAt(fieldPos[i]).name;
   }
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
@@ -428,9 +432,16 @@ class TaisenGame extends FlameGame {
 
   /// Qualitative castle-race nicks when one prep completes.
   /// Exact gate/wall mul is Unverified (AC1「2倍近い」is not a locked number).
-  /// Only the ordering gate > wall ships.
+  /// Only the ordering gate > wall ships (SGE-06). Not an Official 2×.
   static const double kSiegeWallNick = 0.03;
   static const double kSiegeGateNick = 0.05;
+
+  /// Castle-race nick for one completed prep on [face]. The only gate/wall
+  /// lookup — the apply path and the tests both read it.
+  static double siegeNickFor(SiegeFace face) => switch (face) {
+        SiegeFace.gate => kSiegeGateNick,
+        SiegeFace.wall => kSiegeWallNick,
+      };
 
   /// Sub-pixel jitter that still counts as standing still for SGE-02.
   /// A render tolerance, not a gameplay number.
@@ -694,11 +705,12 @@ class TaisenGame extends FlameGame {
   }
 
   /// Center opening vs the flanks. Span is [kSiegeGateSpanFrac], not a measured px.
-  bool _siegeOnGate(Offset p) {
+  /// Same split for both castles — the gate sits mid-field on either face.
+  SiegeFace siegeFaceAt(Offset p) {
     final w = size.x > 0 ? size.x : 390.0;
     final span = w * kSiegeGateSpanFrac;
     final left = (w - span) / 2;
-    return p.dx >= left && p.dx < left + span;
+    return p.dx >= left && p.dx < left + span ? SiegeFace.gate : SiegeFace.wall;
   }
 
   /// 0 at band top (field side) → 1 at bottom edge.
@@ -6286,7 +6298,8 @@ class TaisenGame extends FlameGame {
 
   /// One qualitative nick. Gate is strictly larger than wall. Not an Official mul.
   void _nickCastleFromSiege(int i) {
-    final nick = _siegeOnGate(fieldPos[i]) ? kSiegeGateNick : kSiegeWallNick;
+    assert(kSiegeGateNick > kSiegeWallNick, 'SGE-06: gate must out-nick wall');
+    final nick = siegeNickFor(siegeFaceAt(fieldPos[i]));
     if (isEnemyAt(i)) {
       ownCastle = (ownCastle - nick).clamp(0.0, 1.0);
     } else {
