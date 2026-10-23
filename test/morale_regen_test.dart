@@ -24,7 +24,10 @@ void main() {
   test('seed path is unchanged and sets the regen ceiling', () {
     final g = readyGame();
     g.setupSession2Field();
-    final printed = g.field[0].strategyMorale + g.field[1].strategyMorale;
+    // Own 槍, 弓, and the 「另一弓兵從後支援」 back-rank bow.
+    final printed = g.field[0].strategyMorale +
+        g.field[1].strategyMorale +
+        g.field[4].strategyMorale;
     expect(g.matchMorale, printed);
     expect(g.matchMoraleCap, printed);
   });

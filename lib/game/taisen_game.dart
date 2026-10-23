@@ -254,6 +254,8 @@ class TaisenGame extends FlameGame {
     return siegeFaceAt(fieldPos[i]).name;
   }
   bool get debugBowWinding => _bowWindupIndex != null && !_bowDidShoot;
+  /// Bow whose arrow is on screen right now, if any.
+  int? get debugBowAttackIndex => _bowAttackLeft > 0 ? _bowAttackIndex : null;
   /// March px/s for body [i]. 亂戰 applies [kRansenMul] to ally and enemy alike.
   double debugWorldSpeedPx(int i) => _worldSpeedPx(i);
   /// Live prove overlay. Null in normal play. Not a shot freeze.
@@ -1476,10 +1478,14 @@ class TaisenGame extends FlameGame {
     final enemyCav = Cost6Roster.all.firstWhere((c) => c.id == 'caocao');
     // Second enemy stays after 迎擊 so 弓教學 has a living target (no combat invent).
     final enemyFoot = Cost6Roster.all.firstWhere((c) => c.troop == TroopType.infantry);
+    // 遠攻削敵「另一弓兵從後支援」: a second own bow in the back rank. Appended
+    // last so the spear / bow / enemy slots keep their indices.
+    final supportBow = Cost6Roster.all
+        .firstWhere((c) => c.troop == TroopType.bow && c.id != bow.id);
     // Soft Lock Field1: 槍 → 弓 → 回城. Spear + bow; cav charges tip; foot for bow.
-    field.addAll([spear, bow, enemyCav, enemyFoot]);
-    fieldIsEnemy.addAll([false, false, true, true]);
-    fieldInCastle.addAll([false, false, false, false]);
+    field.addAll([spear, bow, enemyCav, enemyFoot, supportBow]);
+    fieldIsEnemy.addAll([false, false, true, true, false]);
+    fieldInCastle.addAll([false, false, false, false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
@@ -1488,6 +1494,7 @@ class TaisenGame extends FlameGame {
       Offset(w * 0.55, wh + fh * 0.66), // own bow (弓教學)
       Offset(w * 0.70, wh + fh * 0.28), // enemy cavalry (槍)
       Offset(w * 0.48, wh + fh * 0.30), // enemy foot (弓 target)
+      Offset(w * 0.68, wh + fh * 0.76), // own support bow, behind the first
     ]);
     tutorialOwnIndex = 0;
     tutorialEnemyIndex = 2;
@@ -6409,7 +6416,12 @@ class TaisenGame extends FlameGame {
     if (_bowAttackLeft > 0) _bowAttackLeft = math.max(0, _bowAttackLeft - dt);
     if (_bowAimCooldown > 0) _bowAimCooldown = math.max(0, _bowAimCooldown - dt);
 
-    for (var i = 0; i < field.length; i++) {
+    // One 蓄勢 at a time. Start the scan after the last bow so two standing
+    // bows take turns instead of resetting each other's windup every tick.
+    final n = field.length;
+    final start = _bowWindupIndex == null ? 0 : _bowWindupIndex! + 1;
+    for (var k = 0; k < n; k++) {
+      final i = (start + k) % n;
       if (isEnemyAt(i) || field[i].troop != TroopType.bow) continue;
       if (_lifeAt(i) != UnitLife.alive) continue;
 
@@ -6431,6 +6443,7 @@ class TaisenGame extends FlameGame {
 
       if (_bowWindupIndex != i) {
         if (_bowAimCooldown > 0) continue;
+        if (_bowWindupHeldByOther(i)) continue;
         _startBowWindup(i);
       }
       if (_bowDidShoot) {
@@ -6454,6 +6467,14 @@ class TaisenGame extends FlameGame {
     }
   }
 
+  /// Another live own bow is mid-蓄勢 and has not loosed yet.
+  bool _bowWindupHeldByOther(int i) {
+    final w = _bowWindupIndex;
+    if (w == null || w == i || _bowDidShoot) return false;
+    if (w >= field.length || isEnemyAt(w)) return false;
+    return field[w].troop == TroopType.bow && _lifeAt(w) == UnitLife.alive;
+  }
+
   /// Still time only. A committed march or 亂戰 drops the windup, so a moving bow has no arrow.
   void _tickBowWindup(double dt) {
     // Soft Lock path: [_tickBowStanding] owns windup + auto shot.
@@ -6474,9 +6495,24 @@ class TaisenGame extends FlameGame {
     _applyHpLoss(target, _bowDamageTo(target), cause: '射');
     final coach = tutorial;
     if (coach != null && coach.bowLessonLive) {
-      coach.onBowShot();
+      if (_bowSupportsSiege(i)) {
+        coach.onBowSupportShot();
+      } else {
+        coach.onBowShot();
+      }
       onTutorialChanged?.call();
     }
+  }
+
+  /// 「另一弓兵從後支援」: this bow shot from outside the enemy castle while
+  /// another own bow is in it. Zone check only; no new range or number.
+  bool _bowSupportsSiege(int i) {
+    if (inEnemyCastleZone(i)) return false;
+    for (var o = 0; o < field.length; o++) {
+      if (o == i || isEnemyAt(o) || field[o].troop != TroopType.bow) continue;
+      if (_lifeAt(o) == UnitLife.alive && inEnemyCastleZone(o)) return true;
+    }
+    return false;
   }
 
   double _bowDamageTo(int target) {
