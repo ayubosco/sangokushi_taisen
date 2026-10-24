@@ -34,6 +34,10 @@ enum S2Phase {
   enemyApproach,
   waitTurn,
   interceptHit,
+  /// 槍擊退敵 beat two (「更多的騎兵」 / 「回頭，讓他撞上槍擊自滅吧」): after the
+  /// first 迎擊 a reserve enemy 騎兵 charges on the same lane. The spear turns
+  /// back to re-arm 槍擊 gold, and the 騎兵 crashes into it.
+  turnBack,
   failRetry,
   /// Soft Lock Field1: stand bow → 蓄勢 → 射 (after a geometry 槍 Pass).
   bowTeach,
@@ -96,6 +100,9 @@ class TutorialController extends ChangeNotifier {
   bool facingCorrect = false;
   bool interceptDone = false;
   bool strategyOrReturnDone = false;
+
+  /// 槍擊退敵 beat one: the first aimed 迎擊 landed. Beat two is [S2Phase.turnBack].
+  bool spearFirstHit = false;
 
   /// 遠攻削敵 beat one: a standing bow loosed on an enemy.
   bool bowShotLanded = false;
@@ -336,6 +343,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = false;
     facingCorrect = false;
     interceptDone = false;
+    spearFirstHit = false;
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
@@ -362,6 +370,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = false;
     facingCorrect = false;
     interceptDone = false;
+    spearFirstHit = false;
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
@@ -385,6 +394,7 @@ class TutorialController extends ChangeNotifier {
     turnWindowOpen = false;
     facingCorrect = false;
     interceptDone = false;
+    spearFirstHit = false;
     strategyOrReturnDone = false;
     bowShotLanded = false;
     bowSiegeLanded = false;
@@ -429,6 +439,7 @@ class TutorialController extends ChangeNotifier {
             s2 == S2Phase.enemyApproach ||
             s2 == S2Phase.waitTurn ||
             s2 == S2Phase.interceptHit ||
+            s2 == S2Phase.turnBack ||
             s2 == S2Phase.failRetry ||
             s2 == S2Phase.bowTeach ||
             s2 == S2Phase.returnCity ||
@@ -734,8 +745,18 @@ class TutorialController extends ChangeNotifier {
   }
 
   /// Soft Lock: player marched spear so tip faces the charging enemy.
+  /// On [S2Phase.turnBack] the game calls this only once the turn re-armed
+  /// 槍擊 gold, so the aim is the 回頭 itself.
   void onSpearAimedByMove() {
     if (session != TutorialSession.session2) return;
+    if (s2 == S2Phase.turnBack) {
+      if (facingCorrect) return;
+      facingCorrect = true;
+      tipText = '回頭咗，槍頭金光 — 等騎兵撞上槍擊自滅';
+      tipSkippable = false;
+      notifyListeners();
+      return;
+    }
     if (s2 != S2Phase.waitTurn && s2 != S2Phase.interceptHit) return;
     if (!turnWindowOpen) return;
     if (facingCorrect) return;
@@ -760,15 +781,38 @@ class TutorialController extends ChangeNotifier {
       return;
     }
     if (facingWasCorrect && facingCorrect) {
-      interceptDone = true;
-      s2 = S2Phase.bowTeach;
-      tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城，另一弓兵從後支援，輪流走位牽制';
+      spearFirstHit = true;
+      facingCorrect = false;
+      s2 = S2Phase.turnBack;
+      tipText = '迎擊！更多的騎兵 — 回頭轉槍，舉起槍頭金光，讓佢撞上槍擊自滅';
       tipSkippable = false;
-      _openChapterSelect();
       notifyListeners();
     } else {
       _failS2('槍尖未對敵 — 拖槍對住敵先');
     }
+  }
+
+  /// The reserve 騎兵 crashed into the tip after the spear turned back.
+  /// Clears 槍擊退敵. A tip that never turned back does not land this.
+  void onTurnBackHit() {
+    if (session != TutorialSession.session2 || s2 != S2Phase.turnBack) return;
+    if (!spearFirstHit || !facingCorrect) return;
+    _passSpear();
+  }
+
+  /// The field has no reserve 騎兵 to charge, so the first 迎擊 clears.
+  void onTurnBackUnavailable() {
+    if (session != TutorialSession.session2 || s2 != S2Phase.turnBack) return;
+    _passSpear();
+  }
+
+  void _passSpear() {
+    interceptDone = true;
+    s2 = S2Phase.bowTeach;
+    tipText = '槍過關！遠攻削敵：點己方弓兵停穩自動射，再速派單一弓兵攻城，另一弓兵從後支援，輪流走位牽制';
+    tipSkippable = false;
+    _openChapterSelect();
+    notifyListeners();
   }
 
   @Deprecated('Use onAutoIntercept — intercept button removed')

@@ -552,6 +552,12 @@ class TaisenGame extends FlameGame {
 
   /// Free-match enemy charge aura (for spear intercept practice) — visual only.
   int? _matchEnemyChargeIndex;
+
+  /// 槍擊退敵 beat two: the reserve 騎兵 that charges after the first 迎擊.
+  int? _turnBackCavIndex;
+
+  /// Test hook: the reserve 騎兵 slot on the 場2 field.
+  int? get debugTurnBackCavIndex => _turnBackCavIndex;
   double _matchEnemyChargeC = 0;
 
   /// Free-match intercept: turn window after enemy aura ≥1C.
@@ -1486,10 +1492,13 @@ class TaisenGame extends FlameGame {
     // last so the spear / bow / enemy slots keep their indices.
     final supportBow = Cost6Roster.all
         .firstWhere((c) => c.troop == TroopType.bow && c.id != bow.id);
+    // 槍擊退敵「更多的騎兵」: a reserve enemy 騎兵 stands off the first lane and
+    // charges only after the first 迎擊. Appended last, like the support bow.
+    final reserveCav = Cost6Roster.all.firstWhere((c) => c.id == 'caoren');
     // Soft Lock Field1: 槍 → 弓 → 回城. Spear + bow; cav charges tip; foot for bow.
-    field.addAll([spear, bow, enemyCav, enemyFoot, supportBow]);
-    fieldIsEnemy.addAll([false, false, true, true, false]);
-    fieldInCastle.addAll([false, false, false, false, false]);
+    field.addAll([spear, bow, enemyCav, enemyFoot, supportBow, reserveCav]);
+    fieldIsEnemy.addAll([false, false, true, true, false, true]);
+    fieldInCastle.addAll([false, false, false, false, false, false]);
     final wh = size.y > 0 ? watchH : 200.0;
     final w = size.x > 0 ? size.x : 390.0;
     final fh = size.y > 0 ? (size.y - wh) : 280.0;
@@ -1499,9 +1508,11 @@ class TaisenGame extends FlameGame {
       Offset(w * 0.70, wh + fh * 0.28), // enemy cavalry (槍)
       Offset(w * 0.48, wh + fh * 0.30), // enemy foot (弓 target)
       Offset(w * 0.68, wh + fh * 0.76), // own support bow, behind the first
+      Offset(w * 0.10, wh + fh * 0.50), // reserve enemy cavalry, ~90° off the first lane
     ]);
     tutorialOwnIndex = 0;
     tutorialEnemyIndex = 2;
+    _turnBackCavIndex = 5;
     _matchSpearIndex = 0;
     _matchEnemyChargeIndex = 2;
     _matchEnemyChargeC = 0;
@@ -2037,9 +2048,15 @@ class TaisenGame extends FlameGame {
           t.s2 == S2Phase.enemyApproach ||
           t.s2 == S2Phase.waitTurn ||
           t.s2 == S2Phase.interceptHit ||
+          t.s2 == S2Phase.turnBack ||
           t.s2 == S2Phase.failRetry;
       final marching = selectedIndex == tutorialOwnIndex && dragTo != null;
-      if (spearPhases && !marching && !t.facingCorrect && !t.shotPassMode) {
+      // 回頭 keeps the facing of the first 迎擊. Only the player's turn moves it.
+      if (spearPhases &&
+          !marching &&
+          !t.facingCorrect &&
+          !t.shotPassMode &&
+          t.s2 != S2Phase.turnBack) {
         _holdTutorialSpearIdleMiss();
       }
       if (spearPhases &&
@@ -2074,6 +2091,10 @@ class TaisenGame extends FlameGame {
     final enemy = tokenCenter(e);
     final toEnemy = enemy - tip;
     if (!_playerAimedSpear) return;
+    // 回頭 is a real turn: the tip must be gold again before the aim counts.
+    // An approach scrape may spend that gold before the crash (existing tip
+    // rule); the aim still stands, as on the first 迎擊.
+    if (coach.s2 == S2Phase.turnBack && !spearQiangjiGoldAt(s)) return;
     // The cavalry sitting on the tip has no direction vector. That contact
     // is the aim — bailing here used to spend the hit without unlocking 弓.
     if (toEnemy.distance <= kSpearTipHitR && toEnemy.distance < 1) {
@@ -4982,6 +5003,7 @@ class TaisenGame extends FlameGame {
       if (i == tutorialOwnIndex &&
           (t.s2 == S2Phase.waitTurn ||
               t.s2 == S2Phase.interceptHit ||
+              t.s2 == S2Phase.turnBack ||
               t.s2 == S2Phase.enemyApproach ||
               t.s2 == S2Phase.spearGlow ||
               t.s2 == S2Phase.failRetry)) {
@@ -5071,6 +5093,7 @@ class TaisenGame extends FlameGame {
         // Soft Lock Field1: 槍 MOVE / 弓 select-stand / 回城 drag must work.
         final spearOk = (t.s2 == S2Phase.waitTurn ||
                 t.s2 == S2Phase.interceptHit ||
+                t.s2 == S2Phase.turnBack ||
                 t.s2 == S2Phase.enemyApproach ||
                 t.s2 == S2Phase.spearGlow) &&
             i == tutorialOwnIndex;
@@ -5229,6 +5252,7 @@ class TaisenGame extends FlameGame {
               (t.session == TutorialSession.session2 &&
                   (t.s2 == S2Phase.waitTurn ||
                       t.s2 == S2Phase.interceptHit ||
+                      t.s2 == S2Phase.turnBack ||
                       t.bowLessonLive))) &&
           !isEnemyAt(i)) {
         final wasInCastle = i < fieldInCastle.length && fieldInCastle[i];
@@ -6027,10 +6051,15 @@ class TaisenGame extends FlameGame {
               !tipCoach.interceptDone &&
               !tipCoach.shotPassMode &&
               tipCoach.facingCorrect &&
-              tipCoach.turnWindowOpen &&
-              (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn)) {
-            tipCoach.onAutoIntercept(facingWasCorrect: true);
-            onTutorialChanged?.call();
+              tipCoach.turnWindowOpen) {
+            if (tipCoach.s2 == S2Phase.interceptHit || tipCoach.s2 == S2Phase.waitTurn) {
+              tipCoach.onAutoIntercept(facingWasCorrect: true);
+              if (tipCoach.s2 == S2Phase.turnBack) _openTurnBackLane();
+              onTutorialChanged?.call();
+            } else if (tipCoach.s2 == S2Phase.turnBack && o == tutorialEnemyIndex) {
+              tipCoach.onTurnBackHit();
+              onTutorialChanged?.call();
+            }
           }
           continue;
         }
@@ -6047,11 +6076,16 @@ class TaisenGame extends FlameGame {
   }
 
   /// Spear lesson has not earned the pass yet. Do not spend the cavalry on it.
+  /// The reserve 騎兵 is held until it is the lane cavalry on 回頭, and then
+  /// until the spear has turned back onto it.
   bool _holdTeachIntercept(int spear, int target) {
     final coach = tutorial;
     if (coach == null || coach.shotPassMode) return false;
     if (coach.session != TutorialSession.session2 || coach.interceptDone) return false;
-    if (spear != tutorialOwnIndex || target != tutorialEnemyIndex) return false;
+    if (spear != tutorialOwnIndex) return false;
+    if (target == _turnBackCavIndex && target != tutorialEnemyIndex) return true;
+    if (target != tutorialEnemyIndex) return false;
+    if (coach.s2 == S2Phase.turnBack) return !coach.facingCorrect;
     if (coach.s2 == S2Phase.bowTeach ||
         coach.s2 == S2Phase.returnCity ||
         coach.s2 == S2Phase.strategyTeach ||
@@ -6061,6 +6095,22 @@ class TaisenGame extends FlameGame {
       return false;
     }
     return !coach.turnWindowOpen || !coach.facingCorrect;
+  }
+
+  /// 「更多的騎兵」: the reserve 騎兵 takes the existing 迎擊 lane with its aura
+  /// lit. The spear must march again, so the first aim does not carry over.
+  void _openTurnBackLane() {
+    final r = _turnBackCavIndex;
+    if (r == null || r >= field.length || _lifeAt(r) != UnitLife.alive) {
+      // No reserve left to charge (a bare field, or it already fell). The
+      // first 迎擊 stands as the clear.
+      tutorial?.onTurnBackUnavailable();
+      return;
+    }
+    tutorialEnemyIndex = r;
+    _matchEnemyChargeIndex = r;
+    _matchEnemyChargeC = 1.0;
+    _playerAimedSpear = false;
   }
 
   /// Wire the lesson aura and MOVE-aim before [_tickSpearTips].
@@ -6102,6 +6152,7 @@ class TaisenGame extends FlameGame {
     _sortiePrepLeft.clear();
     _tipTickResolved.clear();
     _qiangjiArmed.clear();
+    _turnBackCavIndex = null;
     _stackCount.clear();
     _strategyPreviewIndex = null;
   }

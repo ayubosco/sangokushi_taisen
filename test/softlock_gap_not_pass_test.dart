@@ -155,7 +155,7 @@ void main() {
     expect(g.auraActive, isFalse);
   });
 
-  test('GAP-TUT-HANDOFF: one aimed 迎撃 unlocks 弓 without 回城; idle does not', () {
+  test('GAP-TUT-HANDOFF: 迎撃 then 回頭 unlocks 弓 without 回城; idle does not', () {
     final idle = TutorialController()..resetToSession2();
     final idleGame = readyGame(tutorial: idle);
     idleGame.setupSession2Field();
@@ -188,6 +188,20 @@ void main() {
     g.fieldPos[foe] = g.spearTipAt(0);
     g.enemyFacing = math.pi;
     g.debugStepPursuit(1 / 60);
+    // 槍擊退敵 beat two: 更多的騎兵. The first 迎擊 alone does not unlock 弓.
+    expect(coach.s2, S2Phase.turnBack);
+    expect(coach.bowLessonUnlocked, isFalse);
+
+    // 回頭: turn the spear onto the reserve 騎兵 so it crashes into gold 槍擊.
+    final reserve = g.debugTurnBackCavIndex!;
+    final spear = g.tokenCenter(0);
+    final dir = g.tokenCenter(reserve) - spear;
+    g.panStart(spear);
+    g.panEnd(spear + dir / dir.distance * 36);
+    // Gold holds until the hit, so the reserve may still be closing in.
+    for (var i = 0; i < 900 && !coach.interceptDone; i++) {
+      g.debugStepPursuit(1 / 60);
+    }
 
     expect(coach.interceptDone, isTrue);
     expect(coach.s2, S2Phase.bowTeach);
