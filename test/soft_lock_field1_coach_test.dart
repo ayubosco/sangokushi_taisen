@@ -32,6 +32,9 @@ void main() {
     expect(c.s2, S2Phase.interceptHit);
 
     c.onAutoIntercept(facingWasCorrect: true);
+    // 槍擊退敵 beat two: 更多的騎兵 → 回頭 into a gold 槍擊.
+    c.onSpearAimedByMove();
+    c.onTurnBackHit();
     expect(c.interceptDone, isTrue);
     expect(c.s2, S2Phase.bowTeach);
 

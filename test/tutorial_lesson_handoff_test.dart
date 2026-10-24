@@ -58,6 +58,9 @@ void main() {
     expect(c.bowLessonUnlocked, isFalse, reason: 'aim alone is not the Pass');
 
     c.onAutoIntercept(facingWasCorrect: true);
+    // 槍擊退敵 beat two: 更多的騎兵 → 回頭 into a gold 槍擊.
+    c.onSpearAimedByMove();
+    c.onTurnBackHit();
     expect(c.interceptDone, isTrue);
     expect(c.s2, S2Phase.bowTeach);
     expect(c.bowLessonLive, isTrue);
@@ -121,6 +124,9 @@ void main() {
     c.tick(1.0 * 3.03);
     c.onSpearAimedByMove();
     c.onAutoIntercept(facingWasCorrect: true);
+    // 槍擊退敵 beat two: 更多的騎兵 → 回頭 into a gold 槍擊.
+    c.onSpearAimedByMove();
+    c.onTurnBackHit();
     await tester.pump();
 
     expect(
@@ -203,6 +209,9 @@ void main() {
     s2.s2 = S2Phase.waitTurn;
     s2.onSpearAimedByMove();
     s2.onAutoIntercept(facingWasCorrect: true);
+    // 槍擊退敵 beat two: 更多的騎兵 → 回頭 into a gold 槍擊.
+    s2.onSpearAimedByMove();
+    s2.onTurnBackHit();
     await tester.pump();
     expect(s2.bowLessonUnlocked, isTrue);
     expect(find.byKey(const Key('tutorial-lesson-lock-bow')), findsNothing);

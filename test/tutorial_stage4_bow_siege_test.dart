@@ -139,6 +139,9 @@ void main() {
       c.turnWindowOpen = true;
       c.facingCorrect = true;
       c.onAutoIntercept(facingWasCorrect: true);
+      expect(c.s2, S2Phase.turnBack, reason: '更多的騎兵 before 遠攻削敵');
+      c.onSpearAimedByMove();
+      c.onTurnBackHit();
       expect(c.s2, S2Phase.bowTeach);
       expect(c.tipText, contains('停穩自動射'));
       expect(c.tipText, contains('速派單一弓兵攻城'));
@@ -214,8 +217,11 @@ void main() {
       expect(g.field[1].troop, TroopType.bow);
       expect(g.fieldIsEnemy.sublist(0, 4), [false, false, true, true]);
       expect(g.tutorialEnemyIndex, 2);
-      final support = g.field.length - 1;
-      expect(support, 4);
+      const support = 4;
+      // 槍擊退敵's reserve 騎兵 sits after the support bow.
+      expect(g.debugTurnBackCavIndex, 5);
+      expect(g.fieldIsEnemy[5], isTrue);
+      expect(g.field[5].troop, TroopType.cavalry);
       expect(g.fieldIsEnemy[support], isFalse);
       expect(g.field[support].troop, TroopType.bow);
       expect(g.field[support].id, isNot(g.field[1].id));
@@ -227,7 +233,7 @@ void main() {
 
     test('two standing bows take turns instead of resetting each other', () {
       final g = readyGame();
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
       final shooters = <int>{};
       _stepUntil(g, () {
@@ -241,7 +247,7 @@ void main() {
     test('one bow on the gate, the back-rank bow shoots: siege and support land', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
       const gateBow = 1;
       final supportBow = g.field.length - 1;
@@ -262,7 +268,7 @@ void main() {
     test('a shot while the other bow is on the move is a 走位 turn for the mover', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2); // the charging cavalry; the foot stays as the target
       const front = 1;
       final back = g.field.length - 1;
@@ -278,7 +284,7 @@ void main() {
     test('輪流走位牽制: each bow moves while the other shoots, then 遠攻削敵 clears', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2);
       const front = 1;
       final back = g.field.length - 1;
@@ -307,7 +313,7 @@ void main() {
     test('a moving bow does not shoot, and a moving spear is no 走位 turn', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2);
       final spear = g.tutorialOwnIndex!;
       expect(g.field[spear].troop, TroopType.spear);
@@ -320,7 +326,7 @@ void main() {
       // A bow held on the move never looses while it moves.
       final coach2 = bowCoach();
       final g2 = readyGame(tutorial: coach2);
-      g2.setupSession2Field();
+      _bowField(g2);
       _dropEnemy(g2, 2);
       final back = g2.field.length - 1;
       _moveBow(g2, 1);
@@ -336,7 +342,7 @@ void main() {
     test('a shot with no own bow in the enemy castle is not the support beat', () {
       final coach = bowCoach();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       _dropEnemy(g, 2);
       _stepUntil(g, () => coach.bowShotLanded, max: 600);
       expect(coach.bowShotLanded, isTrue);
@@ -347,7 +353,7 @@ void main() {
     test('a spear in the enemy zone is not the siege beat', () {
       final coach = bowCoach()..onBowShot();
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       final spear = g.tutorialOwnIndex!;
       expect(g.field[spear].troop, TroopType.spear);
       _clearEnemies(g);
@@ -362,7 +368,7 @@ void main() {
         ..onBowShot()
         ..chapterSelectOpen = true;
       final g = readyGame(tutorial: coach);
-      g.setupSession2Field();
+      _bowField(g);
       final bow = _ownBow(g);
       _clearEnemies(g);
       _parkAt(g, bow, _enemyGate(g));
@@ -373,7 +379,7 @@ void main() {
 
     test('outside the tutorial a bow siege still nicks and touches no coach', () {
       final g = readyGame();
-      g.setupSession2Field();
+      _bowField(g);
       final bow = _ownBow(g);
       _clearEnemies(g);
       final castle = g.enemyCastle;
@@ -389,6 +395,13 @@ int _ownBow(TaisenGame g) {
     if (!g.fieldIsEnemy[i] && g.field[i].troop == TroopType.bow) return i;
   }
   throw StateError('no own bow on the 場2 field');
+}
+
+/// 場2 as 遠攻削敵 finds it: the reserve 騎兵 was spent on 槍擊退敵's 回頭,
+/// so the support bow is the last slot again.
+void _bowField(TaisenGame g) {
+  g.setupSession2Field();
+  _dropEnemy(g, g.debugTurnBackCavIndex!);
 }
 
 void _dropEnemy(TaisenGame g, int i) {
