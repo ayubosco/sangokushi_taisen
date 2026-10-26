@@ -333,6 +333,9 @@ class TaisenGame extends FlameGame {
 
   /// Bodies currently in 亂戰 (ally↔enemy hitbox overlap). Exits when overlap ends.
   final Set<int> _ransenUnits = {};
+  /// Enemy body → the own body it last met in 亂戰. The enemy walks after that
+  /// body once contact breaks ([_advancePursuingEnemies]).
+  final Map<int, int> _pursuitTarget = {};
   /// Spear-tip contacts already resolved. Cleared when the tip leaves that body.
   final Set<String> _tipResolved = {};
   /// Light tip-tick contacts. Separate from [_tipResolved] so a scrape can
@@ -1219,6 +1222,7 @@ class TaisenGame extends FlameGame {
     _syncTutorialInterceptTeach();
     _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
+    _advancePursuingEnemies(dt);
     _tickRansen(dt);
     _tickSpearTips();
     _tickSiegePrep(dt);
@@ -1406,6 +1410,7 @@ class TaisenGame extends FlameGame {
     _reviveLeft.clear();
     _reviveInCastle.clear();
     _ransenUnits.clear();
+    _pursuitTarget.clear();
     _meleeEnemyIndex = null;
     _chargeResolvedThisContact = false;
     dragging = false;
@@ -1935,6 +1940,7 @@ class TaisenGame extends FlameGame {
     _syncTutorialInterceptTeach();
     _advanceChargingEnemy(dt);
     _pursueWaypoint(dt);
+    _advancePursuingEnemies(dt);
     _tickRansen(dt);
     _tickSpearTips();
     _tickSiegePrep(dt);
@@ -5070,7 +5076,8 @@ class TaisenGame extends FlameGame {
     _bowLockedTarget = null;
   }
 
-  /// Own troops only, including a retreated skull. Enemy cards never move.
+  /// Own troops only, including a retreated skull. Enemy cards are never
+  /// dragged; they move only on the 迎擊 lane or in pursuit.
   bool _playerMayDrag(int i) {
     if (i < 0 || i >= field.length) return false;
     return !isEnemyAt(i);
@@ -5745,6 +5752,9 @@ class TaisenGame extends FlameGame {
     _ransenUnits
       ..clear()
       ..addAll(overlapping);
+    for (final pair in pairs) {
+      _pursuitTarget[pair.$2] = pair.$1;
+    }
     _suppressRansenActions();
 
     if (dt <= 0) return;
@@ -5923,6 +5933,74 @@ class TaisenGame extends FlameGame {
     fieldPos[e] = from + dir * step;
     _noteTravelFacing(e, _facingFromDelta(dir));
   }
+
+  /// Enemy pursuit: an enemy body that has met an own body in 亂戰 walks after
+  /// it once contact breaks. While the target marches it trails just outside
+  /// contact; when the target stops it closes in and 亂戰 resumes. It reuses the [_advanceChargingEnemy] step: wiki speed via
+  /// [_worldSpeedPx] (亂戰 scales both sides alike), the same dt cap and
+  /// travel facing. No new speed, reach or damage. A faster body can outrun
+  /// it; an equal or slower one is caught as soon as it stops.
+  /// The chase drops when the target routs, parks in or enters the own castle
+  /// band (歸城), or sits in 出城準備. The 迎擊 lane cavalry and the held
+  /// 回頭 reserve keep their scripted lane and never pursue.
+  void _advancePursuingEnemies(double dt) {
+    if (tutorial?.shotPassMode == true) return;
+    if (_pursuitTarget.isEmpty || dt <= 0) return;
+    final dropped = <int>[];
+    for (final entry in _pursuitTarget.entries) {
+      final e = entry.key;
+      final a = entry.value;
+      if (!_pursuitLive(e, a)) {
+        dropped.add(e);
+        continue;
+      }
+      if (e == _matchEnemyChargeIndex || e == _turnBackCavIndex) continue;
+      final from = fieldPos[e];
+      final them = fieldPos[a];
+      final away = from - them;
+      final awayDist = away.distance;
+      // A target still on its march is trailed just outside body contact, so
+      // a drag can always peel out of 亂戰. Once it stops, close to just
+      // inside contact so the next 亂戰 check pairs them again.
+      final marching = selectedIndex == a && dragTo != null;
+      final contact = marching
+          ? meleeContactDist + kArrivalEpsilon
+          : math.max(0.0, meleeContactDist - kArrivalEpsilon);
+      if (awayDist <= contact) {
+        _clearTravel(e);
+        continue;
+      }
+      final hold = them + away / awayDist * contact;
+      final toHold = hold - from;
+      final holdDist = toHold.distance;
+      final speed = _worldSpeedPx(e);
+      final dtCap = speed / kPursuitMinFps;
+      final step = math.min(holdDist, math.min(speed * dt, dtCap));
+      if (step <= 0) continue;
+      final dir = toHold / holdDist;
+      fieldPos[e] = _clampFieldPos(from + dir * step);
+      _noteTravelFacing(e, _facingFromDelta(dir));
+    }
+    for (final e in dropped) {
+      _pursuitTarget.remove(e);
+      _clearTravel(e);
+    }
+  }
+
+  /// Both bodies are still on the field and alive, and the target is out on
+  /// the open field (not 歸城, not in 出城準備).
+  bool _pursuitLive(int e, int a) {
+    if (e < 0 || a < 0 || e >= field.length || a >= field.length) return false;
+    if (e >= fieldPos.length || a >= fieldPos.length) return false;
+    if (!isEnemyAt(e) || isEnemyAt(a)) return false;
+    if (_lifeAt(e) != UnitLife.alive || _lifeAt(a) != UnitLife.alive) return false;
+    if (_inSortiePrep(a) || _inSortiePrep(e)) return false;
+    if (_bodyInOwnCastle(a) || inCastleBand(fieldPos[a])) return false;
+    return true;
+  }
+
+  /// Test hook: the own body enemy [e] is pursuing, if any.
+  int? debugPursuitTargetOf(int e) => _pursuitTarget[e];
 
   /// Test hook: the enemy cavalry that is walking onto the spear, if any.
   int? get debugChargingEnemyIndex => _matchEnemyChargeIndex;
@@ -6155,6 +6233,7 @@ class TaisenGame extends FlameGame {
     _turnBackCavIndex = null;
     _stackCount.clear();
     _strategyPreviewIndex = null;
+    _pursuitTarget.clear();
   }
 
   void _clearTravel(int i) {
