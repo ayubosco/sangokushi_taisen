@@ -285,7 +285,9 @@ void main() {
     g.debugRestageOwnEnemy(
       ownId: 'sunquan',
       ownAt: at,
-      enemyAt: at + const Offset(100, -30),
+      // Off the march line: a bow that brushes the enemy is now chased into
+      // 亂戰 once it stops (enemy_pursuit_test.dart), and 亂戰 holds the shot.
+      enemyAt: at + const Offset(100, -90),
     );
     g.panStart(at);
     g.panUpdate(at + const Offset(180, 0));
