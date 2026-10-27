@@ -240,7 +240,8 @@ class TaisenGame extends FlameGame {
   String debugSiegePrepPause(int i) =>
       (i >= 0 && i < _siegePrepPause.length) ? _siegePrepPause[i] : '';
 
-  /// True when an opposing bow inside the existing range slowed the last fill.
+  /// True when an opposing standing bow inside the existing range slowed the
+  /// last fill (SGE-05 / BOW-10). A marching, 亂戰, or 歸城 bow does not.
   bool debugSiegePrepSlowed(int i) =>
       i >= 0 && i < _siegePrepSlowed.length && _siegePrepSlowed[i];
 
@@ -434,8 +435,9 @@ class TaisenGame extends FlameGame {
   /// Not an Official second. SGE-01..05 lock the rules, not this rate.
   static const double kSiegePrepFillPerSec = 0.25;
 
-  /// Playtest fill scale while an opposing bow is inside the existing half-field
-  /// range. Not a BOW-05 Official range and not an Official siege multiplier.
+  /// Playtest fill scale while an opposing bow that could loose (SGE-05 / BOW-10)
+  /// is inside the existing half-field range. Not a BOW-05 Official range and
+  /// not an Official siege multiplier.
   static const double kSiegePrepBowSlowMul = 0.55;
 
   /// Qualitative castle-race nicks when one prep completes.
@@ -6380,8 +6382,9 @@ class TaisenGame extends FlameGame {
   /// SGE-01..05. Enter the enemy castle zone → yellow prep gauge. 攻城 and 弓
   /// ([sieges]) share it — 弓攻城 is AUTH-GAP §3.
   /// Fills only while stationary and not 亂戰. Ally bump pauses. Leave clears.
-  /// An opposing bow inside the existing half-field range slows the fill.
-  /// A completed prep nicks the castle race once (gate > wall). No assault button.
+  /// An opposing bow that could loose inside the existing half-field range slows
+  /// the fill (SGE-05 / BOW-10). A completed prep nicks the castle race once
+  /// (gate > wall). No assault button.
   void _tickSiegePrep(double dt) {
     _ensureSiegeSlots();
     if (dt < 0) return;
@@ -6468,7 +6471,10 @@ class TaisenGame extends FlameGame {
     return false;
   }
 
-  /// Opposing living bow inside [_bowRangePx]. No new range is introduced.
+  /// SGE-05 / BOW-10. An opposing bow slows the fill only while it could loose
+  /// on this sieger: alive, standing ([_bowStandingFireBlocked] is false), the
+  /// sieger inside [_bowRangePx] and out of that bow's melee contact. Same gate
+  /// as standing fire and [_resolveBowTarget]. No new range is introduced.
   bool _bowOnSieger(int i) {
     final origin = tokenCenter(i);
     final range = _bowRangePx;
@@ -6476,10 +6482,24 @@ class TaisenGame extends FlameGame {
       if (b == i || field[b].troop != TroopType.bow) continue;
       if (_lifeAt(b) != UnitLife.alive) continue;
       if (isEnemyAt(b) == isEnemyAt(i)) continue;
-      final d = (tokenCenter(b) - origin).distance;
+      if (_bowStandingFireBlocked(b)) continue;
+      final at = tokenCenter(b);
+      if (inMeleeContact(at, origin)) continue;
+      final d = (at - origin).distance;
       if (d >= 1 && d <= range) return true;
     }
     return false;
+  }
+
+  /// A bow that cannot loose: 亂戰, 歸城 / parked in its own castle, or on the
+  /// move (finger march, or an enemy walking a pursuit). Shared by standing
+  /// fire and the SGE-05 siege slow so a silent bow never slows a gauge.
+  bool _bowStandingFireBlocked(int b) {
+    if (_ransenUnits.contains(b)) return true;
+    if (_bodyInOwnCastle(b)) return true;
+    if (b < fieldInCastle.length && fieldInCastle[b]) return true;
+    if (_bowIsMoving(b)) return true;
+    return isEnemyAt(b) && _pursuitTarget.containsKey(b);
   }
 
   /// One qualitative nick. Gate is strictly larger than wall. Not an Official mul.
@@ -6584,11 +6604,7 @@ class TaisenGame extends FlameGame {
       if (isEnemyAt(i) || field[i].troop != TroopType.bow) continue;
       if (_lifeAt(i) != UnitLife.alive) continue;
 
-      final blocked = _ransenUnits.contains(i) ||
-          _bodyInOwnCastle(i) ||
-          (i < fieldInCastle.length && fieldInCastle[i]) ||
-          _bowIsMoving(i);
-      if (blocked) {
+      if (_bowStandingFireBlocked(i)) {
         if (_bowWindupIndex == i) _cancelBowWindup();
         continue;
       }
