@@ -14,6 +14,7 @@ import 'soft_lock_cues.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 import 'unit_life.dart';
+import 'watch_field_roster.dart';
 import 'watch_siege_mirror.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
@@ -1406,6 +1407,29 @@ class TaisenGame extends FlameGame {
 
   /// Battlefield point Watch paints. The troop body, never the 落點釘.
   Offset watchBodyAt(int i) => shadowAt(i);
+
+  /// Every body on the field as the Watch reads it this frame. Both sides.
+  List<WatchUnitMirror> _watchRoster(Rect band) {
+    final out = <WatchUnitMirror>[];
+    for (var i = 0; i < field.length && i < fieldPos.length; i++) {
+      final enemy = isEnemyAt(i);
+      final at = enemy ? fieldPos[i] : watchBodyAt(i);
+      out.add(
+        WatchUnitMirror(
+          index: i,
+          enemy: enemy,
+          troop: field[i].troop,
+          down: _lifeAt(i) != UnitLife.alive,
+          hp01: (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0),
+          anchor: mapFieldToWatch(at, band),
+          depth01: watchDepth01(at),
+        ),
+      );
+    }
+    return out;
+  }
+
+  List<WatchUnitMirror> debugWatchRoster() => _watchRoster(_watchBand);
 
   /// 影子行軍 strength. Full while the gap is open; fades to 0 as 部隊追上.
   double marchShadowOpacityAt(int i) {
@@ -2991,6 +3015,26 @@ class TaisenGame extends FlameGame {
     }
     canvas.restore();
 
+    // 全戰場 Monitor: every other body of both sides, far to near, under the
+    // featured pair. Same field position, life and HP this frame.
+    final roster = _watchRoster(band);
+    final cast = roster.where((u) => u.index != ownSafe && u.index != enemySafe).toList()
+      ..sort((a, b) => b.depth01.compareTo(a.depth01));
+    for (final u in cast) {
+      _drawMiniToken(
+        canvas,
+        u.anchor,
+        _tokenFill(field[u.index]),
+        enemy: u.enemy,
+        scale: u.scale,
+        troop: u.troop,
+      );
+      if (u.down) {
+        canvas.drawCircle(u.anchor, 7 * u.scale, Paint()..color = const Color(0xFFB0A8A0));
+        _drawText(canvas, '撤', u.anchor + const Offset(-5, -6), const Color(0xFF3E2723), 9);
+      }
+    }
+
     Color ownFill = FactionColors.shu;
     Color enemyFill = FactionColors.wei;
     var ownTroop = TroopType.cavalry;
@@ -3056,7 +3100,57 @@ class TaisenGame extends FlameGame {
       };
       _drawText(canvas, label, Offset(16, band.top + 42), const Color(0xFF80DEEA), 12);
     }
+    _drawWatchFieldStatus(canvas, band, roster, ownScale: ownScale, enemyScale: enemyScale,
+        ownSafe: ownSafe, enemySafe: enemySafe);
     canvas.restore();
+  }
+
+  /// 戰場情況: an HP bar under every standing body and the headcount per side.
+  void _drawWatchFieldStatus(
+    Canvas canvas,
+    Rect band,
+    List<WatchUnitMirror> roster, {
+    required double ownScale,
+    required double enemyScale,
+    required int? ownSafe,
+    required int? enemySafe,
+  }) {
+    for (final u in roster) {
+      _noteWatchPaint(u.unitTag);
+      _noteWatchPaint(u.anchorTag);
+      if (u.down) {
+        _noteWatchPaint(u.downTag);
+        continue;
+      }
+      final scale = u.index == ownSafe
+          ? ownScale
+          : u.index == enemySafe
+              ? enemyScale
+              : u.scale;
+      final bar = Rect.fromCenter(
+        center: u.anchor.translate(0, 25 * scale),
+        width: 30 * scale,
+        height: 3,
+      );
+      canvas.drawRect(bar.inflate(1), Paint()..color = const Color(0xCC000000));
+      canvas.drawRect(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * u.hp01, bar.height),
+        Paint()
+          ..color = u.hp01 > 0.66
+              ? const Color(0xFF66BB6A)
+              : u.hp01 > 0.33
+                  ? const Color(0xFFFFCA28)
+                  : const Color(0xFFEF5350),
+      );
+    }
+    final tally = WatchFieldTally.of(roster);
+    _noteWatchPaint(tally.tag);
+    final at = Offset(band.right - 118, band.top + 4);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(at.dx - 6, at.dy - 2, 120, 18), const Radius.circular(4)),
+      Paint()..color = const Color(0xB3000000),
+    );
+    _drawText(canvas, tally.label, at, FactionColors.gold, 11);
   }
 
   void _noteWatchPaint(String tag) {
