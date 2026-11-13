@@ -10,10 +10,27 @@ import '../game/faction_colors.dart';
 /// missing points show as outlined hexes after the fill, so the player can see
 /// how far regen still has to go. The bar is not a 6/2 table and has no
 /// regen rate. The cost always comes from the card face.
+///
+/// With [cap] set, the bar is a fixed track as on the reference gauge: every
+/// point up to the ceiling has a socket, the empty ones stay dark, and the next
+/// one fills by [charge] while 士氣 recovers.
 class MoraleBar extends StatelessWidget {
-  const MoraleBar({super.key, required this.morale, this.need});
+  const MoraleBar({super.key, required this.morale, this.need, this.cap, this.charge = 0});
 
   final int morale;
+
+  /// Regen ceiling. Null keeps the bar to the filled pips only.
+  final int? cap;
+
+  /// How far the next point has filled, 0–1.
+  final double charge;
+
+  /// Dark sockets after the fill and after any short pips.
+  static int socketPips(int morale, int? need, int? cap) {
+    if (cap == null) return 0;
+    final used = (morale < 0 ? 0 : morale) + shortPips(morale, need);
+    return cap > used ? cap - used : 0;
+  }
 
   /// Printed 士氣 of the previewed 計略. Null when no range is up.
   final int? need;
@@ -35,6 +52,7 @@ class MoraleBar extends StatelessWidget {
     final lit = litPips(morale, need);
     final short = shortPips(morale, need);
     final ready = need != null && short == 0;
+    final sockets = socketPips(morale, need, cap);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -52,6 +70,15 @@ class MoraleBar extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.only(right: 2),
             child: _MoraleHex(key: Key('match-morale-short'), empty: true),
+          ),
+        for (var i = 0; i < sockets; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: CustomPaint(
+              key: const Key('match-morale-socket'),
+              size: const Size(9, 10),
+              painter: _MoraleSocketPainter(charge: i == 0 && short == 0 ? charge : 0),
+            ),
           ),
       ],
     );
@@ -125,4 +152,46 @@ class _MoraleHexPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _MoraleHexPainter oldDelegate) =>
       oldDelegate.lit != lit || oldDelegate.ready != ready || oldDelegate.empty != empty;
+}
+
+/// A point the pool does not hold yet. Dark, with a gold fill rising by [charge].
+class _MoraleSocketPainter extends CustomPainter {
+  _MoraleSocketPainter({required this.charge});
+
+  final double charge;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(w * 0.5, 0)
+      ..lineTo(w, h * 0.25)
+      ..lineTo(w, h * 0.75)
+      ..lineTo(w * 0.5, h)
+      ..lineTo(0, h * 0.75)
+      ..lineTo(0, h * 0.25)
+      ..close();
+    canvas.drawPath(path, Paint()..color = const Color(0xFF2A241C));
+    final fill = charge.clamp(0.0, 1.0);
+    if (fill > 0) {
+      canvas.save();
+      canvas.clipPath(path);
+      canvas.drawRect(
+        Rect.fromLTRB(0, h * (1 - fill), w, h),
+        Paint()..color = FactionColors.gold.withValues(alpha: 0.7),
+      );
+      canvas.restore();
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = FactionColors.gold.withValues(alpha: 0.55),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _MoraleSocketPainter oldDelegate) => oldDelegate.charge != charge;
 }

@@ -1515,6 +1515,8 @@ class _Hud extends StatelessWidget {
                     child: MoraleBar(
                       morale: game.matchMorale,
                       need: game.strategyMoraleNeed,
+                      cap: game.matchMoraleCap,
+                      charge: game.moraleRegenProgress,
                     ),
                   ),
                 ),

@@ -14,6 +14,7 @@ import 'soft_lock_cues.dart';
 import 'troop_sprite_anims.dart';
 import 'tutorial_controller.dart';
 import 'unit_life.dart';
+import 'watch_field_roster.dart';
 import 'watch_siege_mirror.dart';
 
 enum AWindowKind { charge, intercept, bow, stratagem }
@@ -394,6 +395,12 @@ class TaisenGame extends FlameGame {
 
   /// Retreat splash ceiling from the Research delta (≤~1s). Not a DPS number.
   static const double kRetreatSplashSec = 1.0;
+  /// 「撤退」 splash centre sits this far above the token centre.
+  static const double kRetreatSplashLiftPx = 56;
+  /// Soft polish P1: clear space between the 「撤退」 splash and the 返城 tip.
+  static const double kRetreatTipGapPx = 8;
+  /// Soft polish P3: the 突撃 attacker paints above the defender this long.
+  static const double kContactTopSec = 0.4;
   /// Slice base [adapted]. 天 has no official second. Do not substitute wiki ~35s.
   static const double kReviveBaseSec = 15.0;
   /// 特技「復活／活」only. 15 × 2/3 = 10.
@@ -520,6 +527,12 @@ class TaisenGame extends FlameGame {
   int? _hitFlashIndex;
   double _hitFlashLeft = 0;
   String _hitFlashLabel = '';
+  /// 突撃 attacker painted last for [kContactTopSec], so its face is not under the defender.
+  int? _contactTopIndex;
+  double _contactTopLeft = 0;
+  /// Last painted 返城 tip / 落點 label rects, for layout tests.
+  final Map<int, Rect> _retreatTipRects = {};
+  Rect? _landingLabelRect;
   /// Armed only by a resolved 迎撃. Drawn even if a later splash takes the fly slot.
   double _tipScrapeLeft = 0;
   Offset? _tipScrapeAt;
@@ -1245,6 +1258,10 @@ class TaisenGame extends FlameGame {
   }
 
   void _decayHitFlash(double dt) {
+    if (_contactTopLeft > 0) {
+      _contactTopLeft = math.max(0, _contactTopLeft - dt);
+      if (_contactTopLeft == 0) _contactTopIndex = null;
+    }
     if (_hitFlashLeft <= 0) return;
     _hitFlashLeft -= dt;
     if (_hitFlashLeft <= 0) {
@@ -1390,6 +1407,29 @@ class TaisenGame extends FlameGame {
 
   /// Battlefield point Watch paints. The troop body, never the 落點釘.
   Offset watchBodyAt(int i) => shadowAt(i);
+
+  /// Every body on the field as the Watch reads it this frame. Both sides.
+  List<WatchUnitMirror> _watchRoster(Rect band) {
+    final out = <WatchUnitMirror>[];
+    for (var i = 0; i < field.length && i < fieldPos.length; i++) {
+      final enemy = isEnemyAt(i);
+      final at = enemy ? fieldPos[i] : watchBodyAt(i);
+      out.add(
+        WatchUnitMirror(
+          index: i,
+          enemy: enemy,
+          troop: field[i].troop,
+          down: _lifeAt(i) != UnitLife.alive,
+          hp01: (debugUnitHp(i) / kRansenMaxHp).clamp(0.0, 1.0),
+          anchor: mapFieldToWatch(at, band),
+          depth01: watchDepth01(at),
+        ),
+      );
+    }
+    return out;
+  }
+
+  List<WatchUnitMirror> debugWatchRoster() => _watchRoster(_watchBand);
 
   /// 影子行軍 strength. Full while the gap is open; fades to 0 as 部隊追上.
   double marchShadowOpacityAt(int i) {
@@ -2193,13 +2233,19 @@ class TaisenGame extends FlameGame {
 
     // Low-opacity trail from 影子行軍 to the 落點釘. Not a second card.
     // Ash 5:8 weapon ghosts sit on that same tip→pin, not only the gold dash.
+    // R2: a body reviving in 己城 wears the 落點 label inside its grey card,
+    // under the centred timer. Below the pin it fell off the bottom edge.
+    _landingLabelRect = null;
+    final landingInReviveCard = pinMarch &&
+        _lifeAt(selectedIndex!) == UnitLife.inCastleReviving &&
+        _bodyInOwnCastle(selectedIndex!);
     if (pinMarch && selectedIndex! < field.length) {
       _drawGoldWaypointGuide(
         canvas,
         shadowAt(selectedIndex!),
         dragTo!,
         ghostTrail: true,
-        labelLanding: true,
+        labelLanding: !landingInReviveCard,
       );
       _drawAshWeaponGhostTrail(
         canvas,
@@ -2212,7 +2258,8 @@ class TaisenGame extends FlameGame {
     // Real-card 5:8; width ≈10% field (UIUX gate 0.10–0.11, max 0.12).
     // Own + enemy share ONE tokenSize — faction via outline/facing/color only, never scale.
     final tokenSize = tokenCardSize;
-    for (var i = 0; i < field.length; i++) {
+    _retreatTipRects.clear();
+    for (final i in debugTokenPaintOrder) {
       final card = field[i];
       final center = tokenCenter(i);
       final selected = selectedIndex == i;
@@ -2246,6 +2293,9 @@ class TaisenGame extends FlameGame {
         final face = _onScreenCardCenter(center);
         _drawTroopContactShadow(canvas, face, tokenSize.width, tokenSize.height);
         _drawRevivingCard(canvas, face, i, tokenSize);
+        if (landingInReviveCard && i == selectedIndex) {
+          _drawLandingLabelInCard(canvas, face, tokenSize);
+        }
         final cause = debugRetreatCause(i);
         if (cause.isNotEmpty) {
           _drawText(
@@ -2271,11 +2321,6 @@ class TaisenGame extends FlameGame {
       } else if (_lifeAt(i) != UnitLife.alive) {
         _drawTroopContactShadow(canvas, center, tokenSize.width, tokenSize.height);
         _drawRetreatToken(canvas, center, tokenSize);
-        _drawLifeFlyTip(
-          canvas,
-          i,
-          Offset(center.dx - 36, center.dy - tokenSize.height / 2 - 16),
-        );
         final cause = debugRetreatCause(i);
         if (cause.isNotEmpty) {
           _drawText(
@@ -2286,6 +2331,7 @@ class TaisenGame extends FlameGame {
             12,
           );
         }
+        _drawRetreatTip(canvas, i, center, tokenSize, causeShown: cause.isNotEmpty);
       } else {
         _drawTroopContactShadow(canvas, center, tokenSize.width, tokenSize.height);
         _drawCardLikeToken(
@@ -2460,7 +2506,10 @@ class TaisenGame extends FlameGame {
         final isKisei = _hitFlashLabel == '氣勢';
         final isRetreatSplash = _hitFlashLabel == '撤退';
         final isGeigeki = _hitFlashLabel == '迎擊';
-        final flyAt = Offset(c.dx, c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? 56 : 78));
+        final flyAt = Offset(
+          c.dx,
+          c.dy - (isChargePunch ? 92 : isKisei ? 86 : isRetreatSplash ? kRetreatSplashLiftPx : 78),
+        );
         // Single fat 「迎撃」 — sprite OR canvas text, never stamp+fly stack.
         // tip-scrape is drawn once from the resolve timer, not again here.
         var drewGeigekiFly = false;
@@ -2494,12 +2543,11 @@ class TaisenGame extends FlameGame {
             _chargeCyanOnUnit(_hitFlashIndex!);
         if (punchCyan) {
           // 氣勢 uses snapped charge rings. 撤退 / 歸城 / revive draw no cyan.
-          final cap = _chargeRingMaxR;
           canvas.save();
           canvas.clipRect(_fieldFxClip());
           canvas.drawCircle(
             c,
-            math.min(isChargePunch ? 58.0 : 42.0, cap),
+            debugPunchCyanRadius(charge: isChargePunch),
             Paint()
               ..color = const Color(0xFF80DEEA).withValues(
                 alpha: (isChargePunch
@@ -2632,7 +2680,16 @@ class TaisenGame extends FlameGame {
       );
       canvas.drawCircle(to, 5, Paint()..color = gold.withValues(alpha: 0.85));
       if (labelLanding) {
-        _drawText(canvas, '落點', Offset(to.dx - 14, to.dy + 22), gold.withValues(alpha: 0.75), 12);
+        final sz = _textSize('落點', 12);
+        final aliveSel = selectedIndex != null && _lifeAt(selectedIndex!) == UnitLife.alive;
+        // A living pin card covers this label as before. With no pin card
+        // (retreat / revive), it sits above the card top so the 歸城區 edge never clips it.
+        var top = aliveSel ? to.dy + 22 : to.dy - tokenCardSize.height / 2 - 2 - sz.height;
+        final field = _fieldFxClip();
+        top = top.clamp(field.top + 2, math.max(field.top + 2, field.bottom - 2 - sz.height));
+        final rect = Rect.fromLTWH(to.dx - sz.width / 2, top, sz.width, sz.height);
+        _landingLabelRect = rect;
+        _drawText(canvas, '落點', rect.topLeft, gold.withValues(alpha: 0.75), 12);
       }
     }
   }
@@ -2783,25 +2840,77 @@ class TaisenGame extends FlameGame {
     const barH = 14.0;
     final left = Rect.fromLTWH(10, fieldTop - 18, w * 0.34, barH);
     final right = Rect.fromLTWH(w - 10 - w * 0.34, fieldTop - 18, w * 0.34, barH);
-    final track = Paint()..color = const Color(0xFF2A241C);
-    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(2)), track);
-    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(2)), track);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH),
-        const Radius.circular(2),
+    _drawCastleBar(canvas, left, ownCastle.clamp(0.0, 1.0), FactionColors.shu);
+    _drawCastleBar(canvas, right, enemyCastle.clamp(0.0, 1.0), FactionColors.wei);
+    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFF14100A), 11);
+    // Big slanted clock between the two bars, as on the reference seam.
+    final low = clock.running && clock.remainingC <= 10;
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '${clock.remainingC}',
+        style: TextStyle(
+          color: low ? const Color(0xFFFF6B5A) : const Color(0xFFF7F1E3),
+          fontSize: 18,
+          height: 1,
+          fontWeight: FontWeight.w800,
+          fontStyle: FontStyle.italic,
+          fontFamily: kInkFontFamily,
+        ),
       ),
-      Paint()..color = FactionColors.shu,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH),
-        const Radius.circular(2),
-      ),
-      Paint()..color = FactionColors.wei,
-    );
-    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFFF3E6D0), 11);
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(w / 2 - tp.width / 2, band.center.dy - tp.height / 2));
     _drawText(canvas, '敵', Offset(right.right - 16, right.top - 1), const Color(0xFFF3E6D0), 11);
+  }
+
+  /// Segments on a castle bar. The reference bar is cut in four.
+  static const int kCastleBarSegments = 4;
+
+  /// Castle HP colour at [hp01]: green when whole, through yellow, to red.
+  /// The side colour is the frame, not the fill, as on the reference bars.
+  static Color castleHpColor(double hp01) {
+    const green = Color(0xFF3FD23C);
+    const yellow = Color(0xFFE8D21E);
+    const red = Color(0xFFD9432B);
+    final v = hp01.clamp(0.0, 1.0);
+    return v >= 0.5
+        ? Color.lerp(yellow, green, (v - 0.5) * 2)!
+        : Color.lerp(red, yellow, v * 2)!;
+  }
+
+  /// One castle bar: dark track, HP-coloured fill, four cuts, side-coloured frame.
+  /// The fill is anchored at the bar's left edge, as before.
+  void _drawCastleBar(Canvas canvas, Rect bar, double hp01, Color side) {
+    const radius = Radius.circular(2);
+    canvas.drawRRect(RRect.fromRectAndRadius(bar, radius), Paint()..color = const Color(0xFF2A241C));
+    if (hp01 > 0) {
+      final fill = Rect.fromLTWH(bar.left, bar.top, bar.width * hp01, bar.height);
+      final tone = castleHpColor(hp01);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(fill, radius),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            fill.topCenter,
+            fill.bottomCenter,
+            [Color.lerp(tone, const Color(0xFFFFFFFF), 0.28)!, tone, Color.lerp(tone, const Color(0xFF000000), 0.3)!],
+            const [0, 0.45, 1],
+          ),
+      );
+    }
+    final cut = Paint()
+      ..color = const Color(0xCC0A0A0A)
+      ..strokeWidth = 1.4;
+    for (var i = 1; i < kCastleBarSegments; i++) {
+      final x = bar.left + bar.width * i / kCastleBarSegments;
+      canvas.drawLine(Offset(x, bar.top), Offset(x, bar.bottom), cut);
+    }
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar.inflate(0.8), radius),
+      Paint()
+        ..color = Color.lerp(side, const Color(0xFFFFFFFF), 0.25)!
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
   }
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
@@ -2958,6 +3067,26 @@ class TaisenGame extends FlameGame {
     }
     canvas.restore();
 
+    // 全戰場 Monitor: every other body of both sides, far to near, under the
+    // featured pair. Same field position, life and HP this frame.
+    final roster = _watchRoster(band);
+    final cast = roster.where((u) => u.index != ownSafe && u.index != enemySafe).toList()
+      ..sort((a, b) => b.depth01.compareTo(a.depth01));
+    for (final u in cast) {
+      _drawMiniToken(
+        canvas,
+        u.anchor,
+        _tokenFill(field[u.index]),
+        enemy: u.enemy,
+        scale: u.scale,
+        troop: u.troop,
+      );
+      if (u.down) {
+        canvas.drawCircle(u.anchor, 7 * u.scale, Paint()..color = const Color(0xFFB0A8A0));
+        _drawText(canvas, '撤', u.anchor + const Offset(-5, -6), const Color(0xFF3E2723), 9);
+      }
+    }
+
     Color ownFill = FactionColors.shu;
     Color enemyFill = FactionColors.wei;
     var ownTroop = TroopType.cavalry;
@@ -3023,7 +3152,57 @@ class TaisenGame extends FlameGame {
       };
       _drawText(canvas, label, Offset(16, band.top + 42), const Color(0xFF80DEEA), 12);
     }
+    _drawWatchFieldStatus(canvas, band, roster, ownScale: ownScale, enemyScale: enemyScale,
+        ownSafe: ownSafe, enemySafe: enemySafe);
     canvas.restore();
+  }
+
+  /// 戰場情況: an HP bar under every standing body and the headcount per side.
+  void _drawWatchFieldStatus(
+    Canvas canvas,
+    Rect band,
+    List<WatchUnitMirror> roster, {
+    required double ownScale,
+    required double enemyScale,
+    required int? ownSafe,
+    required int? enemySafe,
+  }) {
+    for (final u in roster) {
+      _noteWatchPaint(u.unitTag);
+      _noteWatchPaint(u.anchorTag);
+      if (u.down) {
+        _noteWatchPaint(u.downTag);
+        continue;
+      }
+      final scale = u.index == ownSafe
+          ? ownScale
+          : u.index == enemySafe
+              ? enemyScale
+              : u.scale;
+      final bar = Rect.fromCenter(
+        center: u.anchor.translate(0, 25 * scale),
+        width: 30 * scale,
+        height: 3,
+      );
+      canvas.drawRect(bar.inflate(1), Paint()..color = const Color(0xCC000000));
+      canvas.drawRect(
+        Rect.fromLTWH(bar.left, bar.top, bar.width * u.hp01, bar.height),
+        Paint()
+          ..color = u.hp01 > 0.66
+              ? const Color(0xFF66BB6A)
+              : u.hp01 > 0.33
+                  ? const Color(0xFFFFCA28)
+                  : const Color(0xFFEF5350),
+      );
+    }
+    final tally = WatchFieldTally.of(roster);
+    _noteWatchPaint(tally.tag);
+    final at = Offset(band.right - 118, band.top + 4);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(Rect.fromLTWH(at.dx - 6, at.dy - 2, 120, 18), const Radius.circular(4)),
+      Paint()..color = const Color(0xB3000000),
+    );
+    _drawText(canvas, tally.label, at, FactionColors.gold, 11);
   }
 
   void _noteWatchPaint(String tag) {
@@ -5323,6 +5502,10 @@ class TaisenGame extends FlameGame {
       _ => math.min(1.0, FxWindows.toSeconds(FxWindows.interceptHitFlashC)),
     };
     _hitFlashLeft = flashSec;
+    if (label == '突撃') {
+      _contactTopIndex = index;
+      _contactTopLeft = kContactTopSec;
+    }
     _shakeLeft = label == '突撃'
         ? math.min(0.45, flashSec)
         : (label == '氣勢' ? 0.10 : flashSec);
@@ -5405,6 +5588,97 @@ class TaisenGame extends FlameGame {
     }
     _drawText(canvas, tip, at, const Color(0xFFFFF59D), tip == '返城回血' ? 12 : 11);
   }
+
+  /// Box the 「撤退」 splash paints over a token at [c].
+  Rect retreatSplashRect(Offset c) {
+    final sz = _fatTextSize('撤退', 32);
+    return Rect.fromCenter(
+      center: Offset(c.dx, c.dy - kRetreatSplashLiftPx),
+      width: sz.width,
+      height: sz.height,
+    );
+  }
+
+  /// R1: the 返城 tip sits below the 「撤退」 splash with at least
+  /// [kRetreatTipGapPx] clear, and below the skull card and its cause line so
+  /// neither the splash nor the HP chrome covers it. Kept whole on screen.
+  void _drawRetreatTip(Canvas canvas, int i, Offset c, Size tokenSize, {required bool causeShown}) {
+    final tip = _lifeTipAt(i);
+    if (tip.isEmpty) return;
+    final sprite = SoftLockCueBank.sizePt['fly-fancheng'];
+    final useSprite = softLockCues.has('fly-fancheng') && sprite != null;
+    final sz = useSprite ? sprite : _textSize(tip, 11);
+    var top = c.dy + tokenSize.height / 2 + 2;
+    if (causeShown) top += _textSize('撤退', 12).height + 2;
+    top = math.max(top, retreatSplashRect(c).bottom + kRetreatTipGapPx);
+    final field = _fieldFxClip();
+    top = math.min(top, field.bottom - 2 - sz.height);
+    final left = (c.dx - sz.width / 2)
+        .clamp(field.left + 4, math.max(field.left + 4, field.right - 4 - sz.width))
+        .toDouble();
+    final rect = Rect.fromLTWH(left, top, sz.width, sz.height);
+    _retreatTipRects[i] = rect;
+    if (useSprite && softLockCues.draw(canvas, 'fly-fancheng', rect.center)) return;
+    _drawText(canvas, tip, rect.topLeft, const Color(0xFFFFF59D), 11);
+  }
+
+  /// R2: 「落點」 inside the grey card, under the centred revive timer.
+  void _drawLandingLabelInCard(Canvas canvas, Offset face, Size tokenSize) {
+    final sz = _textSize('落點', 12);
+    final card = Rect.fromCenter(center: face, width: tokenSize.width, height: tokenSize.height);
+    final timerBottom = face.dy + _fatTextSize('15', 26).height / 2;
+    final top = math.min(timerBottom, card.bottom - 2 - sz.height);
+    final rect = Rect.fromLTWH(face.dx - sz.width / 2, top, sz.width, sz.height);
+    _landingLabelRect = rect;
+    _drawText(canvas, '落點', rect.topLeft, FactionColors.gold, 12);
+  }
+
+  Size _textSize(String text, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, fontFamily: kInkFontFamily),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.size;
+  }
+
+  Size _fatTextSize(String text, double fontSize) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.2,
+          fontFamily: kInkFontFamily,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return tp.size;
+  }
+
+  /// Last painted 返城 tip box for token [i] (null when none was painted).
+  Rect? debugRetreatTipRect(int i) => _retreatTipRects[i];
+
+  /// Last painted 「落點」 label box (null when none was painted).
+  Rect? get debugLandingLabelRect => _landingLabelRect;
+
+  /// Token paint order. The 突撃 attacker goes last while [kContactTopSec] runs.
+  List<int> get debugTokenPaintOrder {
+    final top = _contactTopLeft > 0 ? _contactTopIndex : null;
+    return [
+      for (var i = 0; i < field.length; i++)
+        if (i != top) i,
+      if (top != null && top < field.length) top,
+    ];
+  }
+
+  /// Outer radius of the 突撃 / 迎擊 punch ring on a contact token.
+  double debugPunchCyanRadius({required bool charge}) =>
+      math.min(charge ? 58.0 : 42.0, _chargeRingMaxR);
 
   String _lifeTipAt(int i) {
     switch (_lifeAt(i)) {
@@ -6907,6 +7181,10 @@ class TaisenGame extends FlameGame {
 
   /// Regen ceiling. Equals the printed-cost seed; regen never passes it.
   int get matchMoraleCap => _matchMoraleCap;
+
+  /// How far the next 士氣 point has filled, 0–1. 0 at the ceiling.
+  double get moraleRegenProgress =>
+      matchMorale >= _matchMoraleCap ? 0 : _moraleRegenCarry.clamp(0.0, 1.0).toDouble();
 
   /// 士氣 recovers while the C clock runs. Stops at [matchMoraleCap].
   /// Shot modes hold it so Simulator captures stay readable.
