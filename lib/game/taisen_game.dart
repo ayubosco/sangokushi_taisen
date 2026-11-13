@@ -2840,25 +2840,77 @@ class TaisenGame extends FlameGame {
     const barH = 14.0;
     final left = Rect.fromLTWH(10, fieldTop - 18, w * 0.34, barH);
     final right = Rect.fromLTWH(w - 10 - w * 0.34, fieldTop - 18, w * 0.34, barH);
-    final track = Paint()..color = const Color(0xFF2A241C);
-    canvas.drawRRect(RRect.fromRectAndRadius(left, const Radius.circular(2)), track);
-    canvas.drawRRect(RRect.fromRectAndRadius(right, const Radius.circular(2)), track);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left.left, left.top, left.width * ownCastle.clamp(0, 1), barH),
-        const Radius.circular(2),
+    _drawCastleBar(canvas, left, ownCastle.clamp(0.0, 1.0), FactionColors.shu);
+    _drawCastleBar(canvas, right, enemyCastle.clamp(0.0, 1.0), FactionColors.wei);
+    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFF14100A), 11);
+    // Big slanted clock between the two bars, as on the reference seam.
+    final low = clock.running && clock.remainingC <= 10;
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '${clock.remainingC}',
+        style: TextStyle(
+          color: low ? const Color(0xFFFF6B5A) : const Color(0xFFF7F1E3),
+          fontSize: 18,
+          height: 1,
+          fontWeight: FontWeight.w800,
+          fontStyle: FontStyle.italic,
+          fontFamily: kInkFontFamily,
+        ),
       ),
-      Paint()..color = FactionColors.shu,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(right.left, right.top, right.width * enemyCastle.clamp(0, 1), barH),
-        const Radius.circular(2),
-      ),
-      Paint()..color = FactionColors.wei,
-    );
-    _drawText(canvas, '己', Offset(left.left + 4, left.top - 1), const Color(0xFFF3E6D0), 11);
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(w / 2 - tp.width / 2, band.center.dy - tp.height / 2));
     _drawText(canvas, '敵', Offset(right.right - 16, right.top - 1), const Color(0xFFF3E6D0), 11);
+  }
+
+  /// Segments on a castle bar. The reference bar is cut in four.
+  static const int kCastleBarSegments = 4;
+
+  /// Castle HP colour at [hp01]: green when whole, through yellow, to red.
+  /// The side colour is the frame, not the fill, as on the reference bars.
+  static Color castleHpColor(double hp01) {
+    const green = Color(0xFF3FD23C);
+    const yellow = Color(0xFFE8D21E);
+    const red = Color(0xFFD9432B);
+    final v = hp01.clamp(0.0, 1.0);
+    return v >= 0.5
+        ? Color.lerp(yellow, green, (v - 0.5) * 2)!
+        : Color.lerp(red, yellow, v * 2)!;
+  }
+
+  /// One castle bar: dark track, HP-coloured fill, four cuts, side-coloured frame.
+  /// The fill is anchored at the bar's left edge, as before.
+  void _drawCastleBar(Canvas canvas, Rect bar, double hp01, Color side) {
+    const radius = Radius.circular(2);
+    canvas.drawRRect(RRect.fromRectAndRadius(bar, radius), Paint()..color = const Color(0xFF2A241C));
+    if (hp01 > 0) {
+      final fill = Rect.fromLTWH(bar.left, bar.top, bar.width * hp01, bar.height);
+      final tone = castleHpColor(hp01);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(fill, radius),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            fill.topCenter,
+            fill.bottomCenter,
+            [Color.lerp(tone, const Color(0xFFFFFFFF), 0.28)!, tone, Color.lerp(tone, const Color(0xFF000000), 0.3)!],
+            const [0, 0.45, 1],
+          ),
+      );
+    }
+    final cut = Paint()
+      ..color = const Color(0xCC0A0A0A)
+      ..strokeWidth = 1.4;
+    for (var i = 1; i < kCastleBarSegments; i++) {
+      final x = bar.left + bar.width * i / kCastleBarSegments;
+      canvas.drawLine(Offset(x, bar.top), Offset(x, bar.bottom), cut);
+    }
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bar.inflate(0.8), radius),
+      Paint()
+        ..color = Color.lerp(side, const Color(0xFFFFFFFF), 0.25)!
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6,
+    );
   }
 
   /// Top watch: both sides in frame — live field position / facing / aura every frame.
@@ -7129,6 +7181,10 @@ class TaisenGame extends FlameGame {
 
   /// Regen ceiling. Equals the printed-cost seed; regen never passes it.
   int get matchMoraleCap => _matchMoraleCap;
+
+  /// How far the next 士氣 point has filled, 0–1. 0 at the ceiling.
+  double get moraleRegenProgress =>
+      matchMorale >= _matchMoraleCap ? 0 : _moraleRegenCarry.clamp(0.0, 1.0).toDouble();
 
   /// 士氣 recovers while the C clock runs. Stops at [matchMoraleCap].
   /// Shot modes hold it so Simulator captures stay readable.
